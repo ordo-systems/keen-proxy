@@ -119,6 +119,8 @@ export function manualConnection(f: ManualFields): Connection {
   }
   if (f.protocol === 'wireguard')
     return { ...base, type: 'wireguard', wireguard: manualWG(f) }
+  if (f.protocol === 'amneziawg')
+    return { ...base, type: 'amneziawg', amneziawg: required(f, 'amneziawg') }
   const build = protocolBuilders[f.protocol!]
   if (!build) throw new Error('protocol')
   return { ...base, type: 'singbox', outbound: build(f) }
@@ -254,6 +256,11 @@ function linkProfile(raw: string): Connection {
     return { id: '', name: '', type: 'trusttunnel', trusttunnel: { link: raw } }
   return { id: '', name: '', type: 'link', link: raw }
 }
+
+// Detect AWG-only settings before any structured WireGuard parser can discard them.
+function isAmneziaWGConf(text: string): boolean {
+  return /^\s*(?:Jc|Jmin|Jmax|S[1-4]|H[1-4]|I[1-5]|HeaderProtectionKey|ContentPaddingAddition|RandomTrailers|DisableCookies|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts)\s*=/im.test(text)
+}
 // Decode bounded wg-quick, JSON, or link input into unassigned draft candidates.
 export function importConnections(
   text: string,
@@ -263,8 +270,11 @@ export function importConnections(
     throw new Error('File exceeds 2 MiB')
   const raw = text.replace(/^\uFEFF/, '').trim()
   if (!raw) throw new Error('Empty file')
-  if (filename.toLowerCase().endsWith('.conf') || raw.startsWith('[Interface]'))
+  if (filename.toLowerCase().endsWith('.conf') || /^\[Interface\]/im.test(raw)) {
+    if (isAmneziaWGConf(raw))
+      return [{ id: '', name: '', type: 'amneziawg', amneziawg: text }]
     return [{ id: '', name: '', type: 'wireguard', wireguard: parseWG(raw) }]
+  }
   return raw.startsWith('{') ? jsonProfiles(raw) : [linkProfile(raw)]
 }
 

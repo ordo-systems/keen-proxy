@@ -272,7 +272,7 @@ const en: Messages = {
   },
   conn: {
  allConnections: "All connections",
-    intro: 'Links to servers: WireGuard, any sing-box protocol and TrustTunnel. Speed, traffic by host and settings of each connection.',
+    intro: 'Links to servers: WireGuard, AmneziaWG (.conf), any sing-box protocol and TrustTunnel. Speed, traffic by host and settings of each connection.',
     in: 'Download',
     out: 'Upload',
     probeLatency: '{ms} ms',

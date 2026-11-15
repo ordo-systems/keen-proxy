@@ -28,6 +28,7 @@ func TestSupportConfigKeepsPolicyTopologyWithoutExposingUserValues(t *testing.T)
 			}, Fallback: model.TargetDirect},
 			{ID: "PRIVATE-link", Type: model.ConnLink, Link: "trojan://PRIVATE-password@PRIVATE-remote.example:443"},
 			{ID: "PRIVATE-trusttunnel", Type: model.ConnTrustTunnel, TrustTunnel: &model.TrustTunnel{Link: "tt://PRIVATE-credential", Binary: "/opt/PRIVATE-client"}},
+			{ID: "PRIVATE-awg", Type: model.ConnAmneziaWG, AmneziaWG: "[Interface]\nPrivateKey = PRIVATE-awg-key\nI1 = PRIVATE-cps\n[Peer]\nEndpoint = PRIVATE-awg-endpoint:1234\n"},
 			{ID: "PRIVATE-raw-endpoint", Type: model.ConnSingBox, Endpoint: map[string]any{"type": "wireguard", "address": "PRIVATE-raw-address"}},
 			{ID: "PRIVATE-unknown", Type: "PRIVATE-unknown-type", Endpoint: map[string]any{"type": "PRIVATE-raw-type"}},
 		},
@@ -89,6 +90,7 @@ func TestSupportConfigKeepsPolicyTopologyWithoutExposingUserValues(t *testing.T)
 		`"id":"connection-one"`, `"connection":"connection-one"`, `"target":"connection-one"`,
 		`"id":"connection-two"`, `"fallback":"connection-two"`, `"target":"connection-two"`,
 		`"fallback":"direct"`, `"target":"block"`, `"protocol":"vless"`, `"protocol":"trojan"`,
+		`"type":"amneziawg"`, `"protocol":"amneziawg"`,
 		`"id":"group-store"`, `"host":"host-store"`, `"ip":"ip-address"`, `"id":"network-one"`, `"id":"client-one"`,
 		`"auto_update":true`, `"except":true`, `"interval":20`,
 	} {

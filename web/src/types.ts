@@ -5,7 +5,7 @@ export type Mode = '' | 'split' | 'full' | 'off'
 // Kernel interception mechanism selected by the backend.
 export type InterceptMode = 'redirect' | 'tproxy'
 // Selects which protocol-specific connection payload is populated.
-export type ConnType = 'wireguard' | 'link' | 'singbox' | 'trusttunnel'
+export type ConnType = 'wireguard' | 'amneziawg' | 'link' | 'singbox' | 'trusttunnel'
 
 // Single WireGuard peer, including optional route and keepalive settings.
 export interface WGPeer {
@@ -37,6 +37,8 @@ export interface Connection {
   name: string
   type: ConnType
   wireguard?: WireGuard
+  // Complete single-peer AWG .conf; contains secrets and is parsed server-side.
+  amneziawg?: string
   link?: string
   outbound?: Record<string, unknown>
   endpoint?: Record<string, unknown>

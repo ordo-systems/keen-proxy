@@ -271,7 +271,7 @@ const ru = {
   },
   conn: {
  allConnections: "Все соединения",
-    intro: 'Каналы до серверов: WireGuard, любые протоколы sing-box и TrustTunnel. Скорость, трафик по хостам и параметры каждого соединения.',
+    intro: 'Каналы до серверов: WireGuard, AmneziaWG (.conf), любые протоколы sing-box и TrustTunnel. Скорость, трафик по хостам и параметры каждого соединения.',
     in: 'Входящий',
     out: 'Исходящий',
     probeLatency: '{ms} мс',

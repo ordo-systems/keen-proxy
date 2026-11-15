@@ -1,6 +1,6 @@
-# Default sing-box features: QUIC, browser TLS fingerprints, WireGuard and gVisor.
+# Default sing-box-lx features: QUIC, browser TLS fingerprints, WireGuard/AWG and gVisor.
 # Additional protocol tags increase the binary size.
-TAGS ?= with_quic,with_utls,with_wireguard,with_gvisor
+TAGS ?= with_quic,with_utls,with_wireguard,with_awg,with_gvisor
 LDFLAGS := -s -w -buildid=
 ifneq ($(RELEASE_VERSION),)
 LDFLAGS += -X github.com/ordo-systems/keen-proxy/internal/api.releaseVersion=$(RELEASE_VERSION)
@@ -46,7 +46,7 @@ build-router: web
 
 # Use the reduced protocol registry for memory-constrained routers.
 # See internal/engine/registry_lite.go for supported protocols.
-LITE_TAGS := keenproxy_lite,with_utls,with_wireguard,with_gvisor,ui
+LITE_TAGS := keenproxy_lite,with_utls,with_wireguard,with_awg,with_gvisor,ui
 build-router-lite: web
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=5,softfloat go build -tags $(LITE_TAGS) -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-lite-linux-armv5 ./cmd/keenproxy
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags $(LITE_TAGS) -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-lite-linux-arm64 ./cmd/keenproxy

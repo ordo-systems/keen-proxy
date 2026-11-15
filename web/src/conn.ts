@@ -5,6 +5,8 @@ export function protocolOf(c: Connection): string {
   switch (c.type) {
     case 'wireguard':
       return 'WireGuard'
+    case 'amneziawg':
+      return 'AmneziaWG'
     case 'trusttunnel':
       return 'TrustTunnel'
     case 'singbox':
@@ -16,10 +18,18 @@ export function protocolOf(c: Connection): string {
   }
 }
 
+// Read only display metadata; profile validation stays at the server boundary.
+function awgServer(profile = ''): string {
+  const match = profile.match(/^\s*Endpoint\s*=\s*([^#\r\n]*)/im)
+  return match ? match[1]!.trim() : ''
+}
+
 // Extract display-only endpoint details without exposing credentials.
 export function serverOf(c: Connection): { host: string; port: string } {
   let hp = ''
   if (c.wireguard) hp = c.wireguard.peer.endpoint
+  else if (c.type === 'amneziawg')
+    hp = awgServer(c.amneziawg)
   else if (c.link) hp = c.link.match(/@([^/?#]+)/)?.[1] ?? ''
   else {
     const o = c.outbound ?? c.endpoint

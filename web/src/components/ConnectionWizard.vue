@@ -68,6 +68,7 @@ const fields = reactive<ManualFields>({
   psk: '',
   mtu: '',
   keepalive: '',
+  amneziawg: '',
 })
 const link = ref(''),
   filename = ref(''),
@@ -81,6 +82,7 @@ let fileSequence = 0
 let alive = true
 const protocols = [
   { id: 'wireguard', name: 'WireGuard', hint: '.conf', icon: Network },
+  { id: 'amneziawg', name: 'AmneziaWG', hint: '.conf', icon: Network },
   { id: 'vless', name: 'VLESS', hint: 'TLS / REALITY', icon: Shield },
   { id: 'shadowsocks', name: 'Shadowsocks', hint: 'AEAD', icon: LockKeyhole },
   { id: 'trojan', name: 'Trojan', hint: 'TLS', icon: LockKeyhole },
@@ -93,8 +95,14 @@ const methods = computed(() =>
         { value: 'file', label: t('ui.byFile') },
         { value: 'json', label: 'JSON' },
       ]
+    : protocol.value === 'amneziawg'
+      ? [
+          { value: 'file', label: t('ui.byFile') },
+          { value: 'manual', label: t('ui.pasteConf') },
+        ]
     : protocol.value === 'wireguard'
       ? [
+          { value: 'conf', label: t('ui.pasteConf') },
           { value: 'file', label: t('ui.byFile') },
           { value: 'manual', label: t('ui.manual') },
         ]
@@ -136,7 +144,8 @@ const dirty = computed(
     !!link.value ||
     !!fileText.value ||
     !!fields.server ||
-    !!fields.privateKey,
+    !!fields.privateKey ||
+    !!fields.amneziawg,
 )
 function askLeave(): Promise<boolean> {
   if (saved.value || !dirty.value) return Promise.resolve(true)
@@ -186,7 +195,9 @@ async function readFile(file?: File) {
   }
   try {
     const text = await file.text(),
-      parsed = importConnections(text, file.name)
+      parsed: Connection[] = protocol.value === 'amneziawg'
+        ? [{ id: '', name: '', type: 'amneziawg', amneziawg: text }]
+        : importConnections(text, file.name)
     if (seq !== fileSequence) return
     fileText.value = text
     filename.value = file.name
@@ -215,6 +226,7 @@ const inputFields = computed<FormField[]>(() => {
     { key: 'id', label: t('dialog.id') },
   ]
   if (method.value !== 'manual') return common
+  if (protocol.value === 'amneziawg') return common
   if (protocol.value === 'wireguard')
     return [
       ...common,
@@ -288,6 +300,8 @@ async function build(): Promise<Connection> {
   else if (method.value === 'link') {
     await api.parseLink(link.value.trim())
     candidate = importConnections(link.value, 'profile.txt')[0]!
+  } else if (method.value === 'conf') {
+    candidate = importConnections(fileText.value, 'profile.conf')[0]!
   } else if (method.value === 'json') {
     const parsed = importConnections(fileText.value, 'profile.json')
     if (parsed.length !== 1) throw new Error('file')
@@ -482,6 +496,25 @@ async function save() {
             :autosize="{ minRows: 6, maxRows: 12 }"
             :input-props="{ autocomplete: 'off', spellcheck: false }"
         /></label>
+        <label v-if="method === 'conf' || (method === 'manual' && protocol === 'amneziawg')" class="field">
+          <span>{{ protocol === 'amneziawg' ? t('ui.awgProfile') : t('ui.pasteConf') }}</span>
+          <NInput
+            v-if="protocol === 'amneziawg'"
+            v-model:value="fields.amneziawg"
+            type="textarea"
+            :autosize="{ minRows: 10, maxRows: 18 }"
+            :input-props="{ autocomplete: 'off', spellcheck: false }"
+          />
+          <NInput
+            v-else
+            v-model:value="fileText"
+            type="textarea"
+            :autosize="{ minRows: 10, maxRows: 18 }"
+            :input-props="{ autocomplete: 'off', spellcheck: false }"
+          />
+        </label>
+        <p v-if="protocol === 'amneziawg'" class="muted">{{ t('ui.awgHint') }}</p>
+        <p v-if="protocol === 'wireguard' || protocol === 'amneziawg'" class="muted">{{ t('ui.confPolicy') }}</p>
         <div class="form-grid">
           <label v-for="f in inputFields" :key="f.key" class="field"
             ><span>{{ f.label }}</span
@@ -620,6 +653,7 @@ async function save() {
       <aside class="detail-pane">
         <p class="pill ok">{{ t('ui.formatOK') }}</p>
         <p class="muted">{{ t('ui.connectivityLater') }}</p>
+        <p v-if="validated.type === 'amneziawg'" class="muted">{{ t('ui.confPolicy') }}</p>
         <p v-if="method === 'file' || method === 'json'">
           {{ t('ui.importOnly') }}
         </p>

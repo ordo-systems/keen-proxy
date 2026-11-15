@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"strconv"
 
+	"github.com/ordo-systems/keen-proxy/internal/awg"
 	"github.com/ordo-systems/keen-proxy/internal/links"
 	"github.com/ordo-systems/keen-proxy/internal/model"
 	"github.com/ordo-systems/keen-proxy/internal/trusttunnel"
@@ -48,6 +49,16 @@ func connections(c *model.Config) (connOut, error) {
 			out.endpoints = append(out.endpoints, wireGuard(cn))
 			host, _, _ := net.SplitHostPort(cn.WireGuard.Peer.Endpoint)
 			addServer(host)
+		case model.ConnAmneziaWG:
+			e, err := awg.Parse(cn.AmneziaWG)
+			if err != nil {
+				return out, fmt.Errorf("connection %q: amneziawg: %w", cn.ID, err)
+			}
+			e["tag"] = cn.ID
+			out.endpoints = append(out.endpoints, e)
+			for _, peer := range e["peers"].([]map[string]any) {
+				addServer(peer["address"].(string))
+			}
 		case model.ConnLink:
 			o, err := links.Parse(cn.Link)
 			if err != nil {

@@ -4,8 +4,9 @@ import { NModal, NCard, NTabs, NTabPane, NInput, NButton, NForm, NFormItem, NAle
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import { store } from '../store'
-import type { Connection, LinkPreview, WireGuard } from '../types'
-import { parseWireGuardConf, slugify, wireGuardToConf } from '../wgconf'
+import type { Config, Connection, LinkPreview } from '../types'
+import { slugify, wireGuardToConf } from '../wgconf'
+import { importConnections, manualConnection } from '../connectionDraft'
 
 // Edit a local form copy so cancellation leaves the shared draft unchanged.
 const props = defineProps<{ show: boolean; edit?: Connection | null }>()
@@ -13,12 +14,14 @@ const emit = defineEmits<{ (e: 'update:show', v: boolean): void }>()
 const message = useMessage()
 const { t } = useI18n()
 
-const tab = ref<'link' | 'wireguard' | 'singbox'>('link')
+const tab = ref<'link' | 'wireguard' | 'amneziawg' | 'singbox'>('link')
 const name = ref('')
 const id = ref('')
 const idTouched = ref(false)
 const link = ref('')
 const wgText = ref('')
+const awgText = ref('')
+const busy = ref(false)
 const sbText = ref('')
 const preview = ref<LinkPreview | null>(null)
 const previewError = ref('')
@@ -40,10 +43,11 @@ watch(() => props.show, (open) => {
   fallback.value = c?.fallback ?? null
   link.value = c?.link ?? c?.trusttunnel?.link ?? ''
   wgText.value = c?.wireguard ? wireGuardToConf(c.wireguard) : ''
+  awgText.value = c?.amneziawg ?? ''
   sbText.value = c?.outbound || c?.endpoint
     ? JSON.stringify({ [c.outbound ? 'outbound' : 'endpoint']: c.outbound ?? c.endpoint }, null, 2)
     : ''
-  tab.value = c?.type === 'wireguard' ? 'wireguard' : c?.type === 'singbox' ? 'singbox' : 'link'
+  tab.value = c?.type === 'amneziawg' ? 'amneziawg' : c?.type === 'wireguard' ? 'wireguard' : c?.type === 'singbox' ? 'singbox' : 'link'
   if (link.value) checkLink()
 })
 
@@ -76,10 +80,10 @@ function build(): Connection {
     if (l.startsWith('tt://')) return { ...base, type: 'trusttunnel', trusttunnel: { ...props.edit?.trusttunnel, link: l } }
     return { ...base, type: 'link', link: l }
   }
-  if (tab.value === 'wireguard') {
-    const wg: WireGuard = parseWireGuardConf(wgText.value)
-    return { ...base, type: 'wireguard', wireguard: wg }
-  }
+  if (tab.value === 'amneziawg')
+    return { ...manualConnection({ protocol: 'amneziawg', id: base.id, name: base.name, amneziawg: awgText.value }), ...base }
+  if (tab.value === 'wireguard')
+    return { ...importConnections(wgText.value, 'profile.conf')[0]!, ...base }
   const obj = JSON.parse(sbText.value || '{}')
   if (obj.outbound) return { ...base, type: 'singbox', outbound: obj.outbound }
   if (obj.endpoint) return { ...base, type: 'singbox', endpoint: obj.endpoint }
@@ -89,7 +93,8 @@ function build(): Connection {
 }
 
 // Validate local identity constraints before replacing or appending the draft profile.
-function save() {
+async function save() {
+  if (busy.value) return
   error.value = ''
   let conn: Connection
   try {
@@ -106,11 +111,31 @@ function save() {
     error.value = t('dialog.errReserved')
     return
   }
-  const list = store.state.config!.connections!
+  const config = store.state.config!
+  const edit = props.edit
+  const list = config.connections!
   const clash = list.find((c) => c.id === conn.id && c !== props.edit)
   if (clash) {
     error.value = t('dialog.errDup', { id: conn.id })
     return
+  }
+  if (conn.type === 'amneziawg') {
+    busy.value = true
+    try {
+      const cfg = JSON.parse(JSON.stringify(store.state.config)) as Config
+      const index = props.edit ? list.indexOf(props.edit) : -1
+      if (index >= 0) cfg.connections!.splice(index, 1, conn)
+      else cfg.connections!.push(conn)
+      if (props.edit && props.edit.id !== conn.id)
+        renameTarget(props.edit.id, conn.id, cfg)
+      await api.validateConfig(cfg)
+      if (!props.show || props.edit !== edit || store.state.config !== config) return
+    } catch {
+      error.value = t('ui.invalid')
+      return
+    } finally {
+      busy.value = false
+    }
   }
   if (props.edit) {
     const i = list.indexOf(props.edit)
@@ -125,8 +150,7 @@ function save() {
 }
 
 // Rewrite routing, fallback, and DNS references within the shared draft.
-function renameTarget(from: string, to: string) {
-  const cfg = store.state.config!
+function renameTarget(from: string, to: string, cfg = store.state.config!) {
   for (const g of cfg.groups ?? []) if (g.target === from) g.target = to
   for (const n of cfg.networks ?? []) if (n.target === from) n.target = to
   for (const c of cfg.clients ?? []) if (c.target === from) c.target = to
@@ -182,6 +206,19 @@ function renameTarget(from: string, to: string) {
             placeholder="[Interface]&#10;PrivateKey = …&#10;Address = 10.13.13.2/32&#10;&#10;[Peer]&#10;PublicKey = …&#10;Endpoint = 203.0.113.10:51820&#10;AllowedIPs = 0.0.0.0/0"
           />
           <div class="hint">{{ t('dialog.wgHint') }}</div>
+          <div class="hint">{{ t('ui.confPolicy') }}</div>
+        </NTabPane>
+        <NTabPane name="amneziawg" tab="AmneziaWG (.conf)">
+          <NInput
+            v-model:value="awgText"
+            type="textarea"
+            :autosize="{ minRows: 10, maxRows: 16 }"
+            :input-props="{ autocomplete: 'off', spellcheck: false }"
+            class="mono"
+            :placeholder="t('ui.awgProfile')"
+          />
+          <div class="hint">{{ t('ui.awgHint') }}</div>
+          <div class="hint">{{ t('ui.confPolicy') }}</div>
         </NTabPane>
         <NTabPane name="singbox" tab="sing-box JSON">
           <NInput
@@ -198,8 +235,8 @@ function renameTarget(from: string, to: string) {
       <NAlert v-if="error" type="error" :show-icon="false" style="margin-top: 12px">{{ error }}</NAlert>
       <template #footer>
         <NSpace justify="end">
-          <NButton @click="emit('update:show', false)">{{ t('common.cancel') }}</NButton>
-          <NButton type="primary" :disabled="!id" @click="save">{{ isEdit ? t('common.save') : t('common.add') }}</NButton>
+          <NButton :disabled="busy" @click="emit('update:show', false)">{{ t('common.cancel') }}</NButton>
+          <NButton type="primary" :disabled="!id || busy" :loading="busy" @click="save">{{ isEdit ? t('common.save') : t('common.add') }}</NButton>
         </NSpace>
       </template>
     </NCard>

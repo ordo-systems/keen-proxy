@@ -20,6 +20,43 @@ Changes enter the shared draft. Real credentials belong only in your local manag
 
 ![Connection creation wizard](../assets/screenshots/en-wizard.png)
 
+### AmneziaWG profiles (experimental lx build)
+
+Import a single-peer AmneziaWG `.conf` file or paste its contents in the connection wizard. AWG fields select **AmneziaWG** automatically; you can also select the AmneziaWG protocol explicitly. The original profile stays in the shared draft and can be edited before **Apply**. Keep it private: it contains the tunnel's private key and may contain a preshared key.
+
+This build embeds [sing-box-lx 1.14.4-lx.35](https://github.com/Leadaxe/sing-box-lx/releases/tag/v1.14.4-lx.35). It supports AWG 2/3 client parameters and TCP/UDP through a userspace WireGuard endpoint; no kernel AWG module or additional daemon is required. Unsupported fields, executable hooks and multiple peers are rejected instead of being silently discarded.
+
+The profile's `DNS` setting does not replace KeenProxy DNS settings. Existing routing rules and failover still select the connection; `AllowedIPs` does not install system routes. Application UDP requires **TPROXY** interception. The existing participant **UDP/443 rejection remains enabled**, so importing AWG does not enable client QUIC traffic. Amnezia subscriptions and `vpn://` imports are not supported.
+
+For YAML configuration, store the profile as a block scalar:
+
+```yaml
+connections:
+  - id: awg
+    name: AmneziaWG
+    type: amneziawg
+    amneziawg: |
+      [Interface]
+      PrivateKey = <client-private-key-base64>
+      Address = 10.77.0.2/32
+      Jc = 3
+      Jmin = 40
+      Jmax = 80
+      S1 = 20
+      S2 = 30
+      H1 = 1001
+      H2 = 1002
+      H3 = 1003
+      H4 = 1004
+      [Peer]
+      PublicKey = <server-public-key-base64>
+      Endpoint = vpn.example.com:51820
+      AllowedIPs = 0.0.0.0/0
+```
+
+Replace the placeholders and obfuscation values with those exported by your server. Before rolling back to an official-sing-box build, remove or replace AmneziaWG connections in the draft and Apply: the older engine cannot use this profile type.
+
+
 ## 3. Add a routing group
 
 Open **Rules → Whitelist**. Create a group, name it, select its target connection (or **Direct**/**Block**), and add domains or addresses. For example, direct `work.example.com` to the Netherlands profile. Review imported entries before confirming; country selectors express broader policies.

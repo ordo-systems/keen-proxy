@@ -14,6 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/ordo-systems/keen-proxy/internal/awg"
 	"github.com/ordo-systems/keen-proxy/internal/links"
 	"github.com/ordo-systems/keen-proxy/internal/trusttunnel"
 )
@@ -154,6 +155,7 @@ type Intercept struct {
 // Connection types select exactly one protocol description.
 const (
 	ConnWireGuard   = "wireguard"   // WireGuard through sing-box
+	ConnAmneziaWG   = "amneziawg"   // AmneziaWG .conf through sing-box-lx
 	ConnLink        = "link"        // vless://, vmess://, trojan://, ss://, hysteria2://, tuic://, anytls://, socks5:// link
 	ConnSingBox     = "singbox"     // raw sing-box outbound or endpoint
 	ConnTrustTunnel = "trusttunnel" // TrustTunnel through external trusttunnel_client
@@ -165,6 +167,7 @@ type Connection struct {
 	Name      string     `yaml:"name" json:"name"`
 	Type      string     `yaml:"type" json:"type"`
 	WireGuard *WireGuard `yaml:"wireguard,omitempty" json:"wireguard,omitempty"`
+	AmneziaWG string     `yaml:"amneziawg,omitempty" json:"amneziawg,omitempty"`
 	Link      string     `yaml:"link,omitempty" json:"link,omitempty"`
 	// Outbound or Endpoint contains a sing-box object with its tag derived from ID.
 	// A singbox connection must set exactly one of these fields.
@@ -500,7 +503,7 @@ func validateMode(where string, m Mode, allowInherit bool, add func(string, ...a
 func validateConnection(cn Connection, add func(string, ...any)) {
 	where := fmt.Sprintf("connection %q", cn.ID)
 	set := 0
-	for _, has := range []bool{cn.WireGuard != nil, cn.Link != "", cn.Outbound != nil, cn.Endpoint != nil, cn.TrustTunnel != nil} {
+	for _, has := range []bool{cn.WireGuard != nil, cn.AmneziaWG != "", cn.Link != "", cn.Outbound != nil, cn.Endpoint != nil, cn.TrustTunnel != nil} {
 		if has {
 			set++
 		}
@@ -515,6 +518,12 @@ func validateConnection(cn Connection, add func(string, ...any)) {
 			return
 		}
 		validateWireGuard(cn.ID, cn.WireGuard, add)
+	case ConnAmneziaWG:
+		if cn.AmneziaWG == "" {
+			add("%s: missing amneziawg profile", where)
+		} else if _, err := awg.Parse(cn.AmneziaWG); err != nil {
+			add("%s: amneziawg: %v", where, err)
+		}
 	case ConnLink:
 		if cn.Link == "" {
 			add("%s: missing link", where)
@@ -543,7 +552,7 @@ func validateConnection(cn Connection, add func(string, ...any)) {
 			add("%s: %v", where, err)
 		}
 	default:
-		add("%s: unknown type %q (wireguard, link, singbox, trusttunnel)", where, cn.Type)
+		add("%s: unknown type %q (wireguard, amneziawg, link, singbox, trusttunnel)", where, cn.Type)
 	}
 }
 

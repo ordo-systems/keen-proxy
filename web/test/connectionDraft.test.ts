@@ -5,6 +5,7 @@ import {
   importConnections,
   canFallback,
   connectionChain,
+  copyConnection,
 } from '../src/connectionDraft.ts'
 import type { Connection } from '../src/types.ts'
 const base = {
@@ -90,6 +91,47 @@ test('WireGuard import rejects commands, unknown options and multiple peers', ()
   assert.throws(() =>
     importConnections(conf + '\n[Peer]\nPublicKey=c', 'x.conf'),
   )
+})
+
+const awgProfile = '\uFEFF# keep this profile intact\r\n[Interface]\r\nPrivateKey = private-secret\r\nAddress = 10.1.0.2/32\r\nDNS = 1.1.1.1\r\nJc = 4\r\nJmin = 40\r\nJmax = 70\r\nS1 = 0\r\nS2 = 0\r\nS3 = 12\r\nS4 = 16\r\nH1 = 100-200\r\nH2 = 201-300\r\nH3 = 301-400\r\nH4 = 401-500\r\nI1 = <b 0xc0ffee><r 32><t><c>\r\n[Peer]\r\nPublicKey = peer-key\r\nPresharedKey = psk-secret\r\nEndpoint = vpn.example.test:51820\r\nAllowedIPs = 0.0.0.0/0, ::/0\r\n'
+
+test('AWG imports preserve the complete profile including ranges and CPS data', () => {
+  for (const filename of ['profile.conf', 'profile.CONF', 'profile.txt']) {
+    const connection = importConnections(awgProfile, filename)[0]!
+    assert.equal(connection.type, 'amneziawg')
+    assert.equal(connection.amneziawg, awgProfile)
+    assert.equal(connection.wireguard, undefined)
+  }
+  for (const key of ['Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5', 'HeaderProtectionKey', 'ContentPaddingAddition', 'RandomTrailers', 'DisableCookies', 'RekeyAfterTime', 'RekeyTimeout', 'RejectAfterTime', 'KeepaliveTimeout', 'MaxHandshakeAttempts']) {
+    const profile = `[Interface]\nPrivateKey=a\nAddress=10.1.0.2/32\n${key.toLowerCase()}=1\n[Peer]\nPublicKey=b\nEndpoint=vpn.example.test:51820`
+    assert.equal(importConnections(profile, 'x.conf')[0]!.amneziawg, profile)
+  }
+})
+
+test('editing a serialized AWG draft retains the complete raw profile', () => {
+  const imported = importConnections(awgProfile, 'profile.conf')[0]!
+  const restored = JSON.parse(JSON.stringify({ ...imported, id: 'awg', name: 'AWG' })) as Connection
+  const local = copyConnection(restored)
+  const editedText = local.amneziawg!.replace('H1 = 100-200', 'H1 = 500-600')
+  const edited = manualConnection({
+    protocol: 'amneziawg',
+    id: local.id,
+    name: 'Edited AWG',
+    amneziawg: editedText,
+  })
+  assert.equal(edited.type, 'amneziawg')
+  assert.equal(JSON.parse(JSON.stringify(edited)).amneziawg, editedText)
+  assert.equal(restored.amneziawg, awgProfile)
+  assert.equal(edited.wireguard, undefined)
+})
+
+test('ordinary WireGuard imports remain structured WireGuard profiles', () => {
+  const profile = '[Interface]\nPrivateKey=a\nAddress=10.1.0.2/32\n[Peer]\nPublicKey=b\nEndpoint=vpn.example.test:51820'
+  const connection = importConnections(profile, 'profile.conf')[0]!
+  assert.equal(connection.type, 'wireguard')
+  assert.equal(connection.amneziawg, undefined)
+  assert.equal(connection.wireguard?.peer.endpoint, 'vpn.example.test:51820')
+  assert.throws(() => manualConnection({ protocol: 'amneziawg', id: 'awg', name: 'AWG', amneziawg: ' ' }))
 })
 test('fallback rejects cycles and returns inherited chain without mutations', () => {
   const list: Connection[] = [

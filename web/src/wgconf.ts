@@ -1,42 +1,5 @@
 import { translit } from './locales/transliteration.ru'
-import { t } from './i18n'
 import type { WireGuard } from './types'
-
-// Parse the supported wg-quick fields and require connection essentials.
-export function parseWireGuardConf(text: string): WireGuard {
-  const wg: WireGuard = { private_key: '', address: [], peer: { endpoint: '', public_key: '' } }
-  let section = ''
-  for (const raw of text.split('\n')) {
-    const line = raw.replace(/#.*/, '').trim()
-    if (!line) continue
-    const sec = line.match(/^\[(\w+)\]$/)
-    if (sec) {
-      section = sec[1].toLowerCase()
-      continue
-    }
-    const eq = line.indexOf('=')
-    if (eq < 0) continue
-    const key = line.slice(0, eq).trim().toLowerCase()
-    const value = line.slice(eq + 1).trim()
-    const list = () => value.split(',').map((s) => s.trim()).filter(Boolean)
-    if (section === 'interface') {
-      if (key === 'privatekey') wg.private_key = value
-      else if (key === 'address') wg.address = list()
-      else if (key === 'mtu') wg.mtu = Number(value)
-    } else if (section === 'peer') {
-      if (key === 'publickey') wg.peer.public_key = value
-      else if (key === 'presharedkey') wg.peer.preshared_key = value
-      else if (key === 'endpoint') wg.peer.endpoint = value
-      else if (key === 'allowedips') wg.peer.allowed_ips = list()
-      else if (key === 'persistentkeepalive') wg.peer.keepalive = Number(value)
-    }
-  }
-  if (!wg.private_key) throw new Error(t('wg.noPrivateKey'))
-  if (!wg.peer.public_key) throw new Error(t('wg.noPublicKey'))
-  if (!wg.peer.endpoint) throw new Error(t('wg.noEndpoint'))
-  if (!wg.address.length) throw new Error(t('wg.noAddress'))
-  return wg
-}
 
 // Export one peer, defaulting AllowedIPs to both address families.
 export function wireGuardToConf(wg: WireGuard): string {

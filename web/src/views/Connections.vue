@@ -219,6 +219,12 @@ const rows = computed<Row[]>(() => {
 const specific = computed<Row[]>(() => {
   const c = conn.value
   if (!c) return []
+  if (c.type === 'amneziawg')
+    return [{
+      icon: KeyRound,
+      label: t('ui.awgProfile'),
+      value: t('ui.protected'),
+    }]
   if (c.wireguard) {
     return [
       {

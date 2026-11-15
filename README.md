@@ -2,7 +2,7 @@
 
 # KeenProxy
 
-Selective traffic routing for Keenetic and Netcraze routers running Entware, with an embedded [sing-box](https://github.com/SagerNet/sing-box) engine and a Vue web interface.
+Selective traffic routing for Keenetic and Netcraze routers running Entware, with an embedded [sing-box-lx](https://github.com/Leadaxe/sing-box-lx) engine and a Vue web interface. This experimental branch pins lx.35 on the sing-box 1.14.4 base.
 
 KeenProxy lets you choose which devices, domains, IP ranges, and countries use a tunnel, connect directly, or are blocked. The web panel shows router load and lets you install, schedule, or roll back releases on a managed Entware installation. Router compatibility and protocol support depend on the firmware, kernel modules, and build tags. The project is experimental.
 
@@ -20,7 +20,7 @@ Experimental OpenWrt builds target ARM32, ARM64, little-endian MIPS, and big-end
 - Device and network policies: split routing, full tunneling, direct access, and per-device overrides identified by MAC address.
 - Domain, IP/CIDR, and country groups, including country exclusions. Within routed policies, explicit domain/address rules precede country rules; global block groups are applied first.
 - Domain detection from TLS SNI or HTTP Host, with a bounded IPv4 DNS-answer cache as a fallback when the connection has no readable hostname.
-- WireGuard, supported sing-box connection links, raw sing-box outbounds/endpoints, and an optional external TrustTunnel client.
+- WireGuard, AmneziaWG 2/3 single-peer `.conf` profiles, supported sing-box connection links, raw sing-box outbounds/endpoints, and an optional external TrustTunnel client.
 - Connection failover with recovery hysteresis and explicit direct fallback where configured.
 - A UDP/TCP DNS frontend, public resolver presets, DoH/DoT, selectable DNS routing, and DNS-only blocklists.
 - Community domain presets with preview and managed updates that preserve manual additions and exclusions.
@@ -70,7 +70,7 @@ make build-router        # Linux ARMv5, ARM64, MIPS little-endian, and MIPS big-
 make build-router-lite   # Smaller protocol set for constrained routers
 ```
 
-The full build enables QUIC, uTLS, WireGuard, and gVisor. The lite registry excludes several protocols; see `internal/engine/registry_lite.go`. Xray's XHTTP transport is not supported.
+The full build enables QUIC, uTLS, WireGuard/AmneziaWG, and gVisor. The lite registry also supports AWG but excludes several other protocols; see `internal/engine/registry_lite.go`. XHTTP is not enabled by our build tags. See the [AWG guide](docs/en/user-guide.md#amneziawg-profiles-experimental-lx-build) for import and rollback constraints.
 
 ## Configuration and router installation
 
@@ -147,6 +147,7 @@ Run `make integration` separately for real DNS/firewall/tunnel tests in disposab
 - Country data is approximate, and DNS-based routing may be ambiguous on shared/CDN addresses.
 - Rule-set file updates are reloaded asynchronously. A written file does not prove immediate packet-level application.
 - WireGuard file import accepts the supported single-peer subset. Unsupported options, commands, and multiple peers are rejected.
+- AWG import does not activate an Amnezia subscription or decode `vpn://`. Profile DNS does not change KeenProxy DNS; application UDP needs TPROXY, and participant UDP/443 remains rejected.
 - Firewall recovery uses a polling watchdog; complete firmware hook integration and hardware fast-path acceleration are not claimed.
 - Full-tunnel behavior, kernel features, memory use, and external client compatibility need validation on each router model.
 

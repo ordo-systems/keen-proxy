@@ -1,5 +1,11 @@
 # Contributor and agent instructions
 
+## Workspace and publication
+
+- Name Git branches by the type of work using `<type>/<short-description>`, with prefixes such as `feature/`, `fix/`, `docs/`, `refactor/`, or `chore/`. Do not use agent, model, or tool names as branch prefixes, including `codex/` and `claude/`.
+- Create all Git worktrees under the main checkout's `.agents-worktree/<task>/` directory, regardless of the agent host. Do not use `.claude/worktrees/`, `.codex/worktrees/`, temporary directories, or sibling directories. When already inside a linked worktree, use the main checkout's directory rather than nesting another worktree.
+- Keep `/.agents-worktree/` in the root `.gitignore`. Never force-add this directory or its contents.
+
 ## Language and documentation
 
 - Whenever a new feature or behavior change requires documentation, add or update the affected documentation and user guides in the same change. Keep the English and Russian versions in sync.
@@ -8,14 +14,14 @@
 - Explain the purpose, contract, ownership, or important constraint of significant types and functions. Avoid comments that merely repeat their names.
 - Preserve translated UI messages, test inputs, protocol examples, and original third-party data when their language is part of behavior or provenance.
 - Keep public project documentation in the repository: README.md, AGENTS.md, CONTRIBUTING.md, SECURITY.md, and LICENSE.
-- Store internal plans, investigations, work logs, deployment reports, and visual QA reports only in ignored docs-reports/. Use docs-reports/design-qa.md even when a skill suggests a root-level report.
+- Store internal plans, investigations, work logs, deployment reports, and visual QA reports only in ignored `.agents-work/`. Use `.agents-work/design-qa.md` even when a skill suggests a root-level report.
 - Treat everything in [`.serena/memories/`](.serena/memories/core.md) as public. Store only durable project knowledge there. Keep credentials, private network addresses, device identifiers, production configuration, private transcripts, and deployment records out of shared memories. Keep local Serena configuration and caches ignored.
 
 ## Required workflow for AI agents
 
 1. Load [Superpowers](https://github.com/obra/superpowers) through the agent host and follow `using-superpowers` plus the skills relevant to the task. Use brainstorming and planning for features, systematic debugging for failures, test-driven development for behavior changes, and verification before completion. Follow the repository's authorization and workspace rules throughout.
-2. Apply [ub-mode](https://github.com/unclebob/ub-mode) whenever you write, change, refactor, or review code. Read its `SKILL.md` before editing. Work in the order **First Make it Work → Then Make it Right → Follow Practice**. Make the smallest change that solves the problem, test behavior at its normal entry point, and keep a short verification log in `docs-reports/`.
-3. Before analyzing code, read [`core`](.serena/memories/core.md) and the relevant project memories. When [Serena](https://github.com/oraios/serena) is available, activate this checkout, check onboarding, and prefer Serena for memory reads, symbol lookup, and reference analysis. If Serena is unavailable, open `.serena/memories/core.md` directly and follow relevant `mem:<name>` references by reading `.serena/memories/<name>.md` with the available file tools. In either case, verify memory claims against the current source.
+2. Apply [ub-mode](https://github.com/unclebob/ub-mode) whenever you write, change, refactor, or review code. Read its `SKILL.md` before editing. Work in the order **First Make it Work → Then Make it Right → Follow Practice**. Make the smallest change that solves the problem, test behavior at its normal entry point, and keep a short verification log in `.agents-work/`.
+3. Before analyzing code, read [`core`](.serena/memories/core.md) and the relevant project memories. When [Serena](https://github.com/oraios/serena) is available, activate this checkout, check onboarding, and prefer Serena for memory reads, symbol lookup, and reference analysis. In a Git worktree, confirm that Serena points at the worktree and not at the main checkout before using its editing tools. If Serena is unavailable, open `.serena/memories/core.md` directly and follow relevant `mem:<name>` references by reading `.serena/memories/<name>.md` with the available file tools. In either case, verify memory claims against the current source.
 
 Install the skills and Serena using their upstream instructions for your agent host. Install the official [`crapper`](https://github.com/unclebob/crapper), [`dryer`](https://github.com/unclebob/dryer), and [`mutator`](https://github.com/unclebob/mutator) launchers outside the repository. Follow their upstream setup, including keeping `mutator` next to `crapper`, and make the commands available on `PATH`. Use isolated tool environments. Check `--help` before the first run.
 

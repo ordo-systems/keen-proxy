@@ -85,6 +85,6 @@ Version `1.0.0` marks a defined, stable user-facing contract and a commitment to
 
 Maintainers review the proposed version and changelog in a release PR before publishing. See [RELEASING.md](RELEASING.md) for the release process and automation status.
 
-AI-assisted contributions follow the required skills and quality checks in [AGENTS.md](AGENTS.md). The shared [Serena memories](.serena/memories/core.md) hold public project context in English. Keep local plans, investigations, generated QA reports, and deployment notes in ignored `docs-reports/`. Keep local Serena configuration, caches, and production artifacts out of Git.
+AI-assisted contributions follow the required skills and quality checks in [AGENTS.md](AGENTS.md). The shared [Serena memories](.serena/memories/core.md) hold public project context in English. Keep local plans, investigations, generated QA reports, and deployment notes in ignored `.agents-work/`. Create Git worktrees only under the main checkout's ignored `.agents-worktree/<task>/`, regardless of the agent host; do not nest them inside a linked worktree. Before using Serena editing tools, confirm that its active project points at the intended worktree. Keep local Serena configuration, caches, and production artifacts out of Git.
 
 By contributing, you agree that your original contributions are provided under the project's GPL-3.0-only license. Retain existing copyright/license notices and clearly identify any third-party code or data. Do not contribute material you are not authorized to redistribute.

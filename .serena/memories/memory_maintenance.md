@@ -24,7 +24,7 @@ Keep guidance durable and generalizable, not task-local.
 
 ## Publication boundary
 
-These memories are public. Omit credentials, real hostnames and addresses, device IDs, private paths, session IDs, production configurations, and operational evidence. Keep private notes in ignored `docs-reports/`. Review the changed memories and their references before adding them to Git.
+These memories are public. Omit credentials, real hostnames and addresses, device IDs, private paths, session IDs, production configurations, and operational evidence. Keep private notes in ignored `.agents-work/`. Review the changed memories and their references before adding them to Git.
 
 ## Add/update threshold
 

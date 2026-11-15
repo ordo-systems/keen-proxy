@@ -25,8 +25,9 @@ coverage.out
 /.serena/*
 !/.serena/memories/
 
-# Local investigation and verification reports
-/docs-reports/
+# Private agent worktrees, plans, investigations and verification logs
+/.agents-work/
+/.agents-worktree/
 
 # Local JavaScript coverage reports
 /web/coverage/

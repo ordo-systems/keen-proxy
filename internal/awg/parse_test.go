@@ -198,3 +198,40 @@ func TestParseRejectsTouchingHeaderRangesInEitherOrder(t *testing.T) {
 		t.Fatal("touching H1/H2 ranges would make packet classification ambiguous")
 	}
 }
+
+func TestParseJunkBurstBudget(t *testing.T) {
+	base := "Jc = 0\nJmin = 10\nJmax = 20"
+	accepted := map[string]struct {
+		fields string
+		jc     uint64
+		jmax   any
+	}{
+		"count boundary with default sizes": {"Jc = 256", 256, nil},
+		"exact payload boundary":            {"Jc = 256\nJmin = 0\nJmax = 4096", 256, uint64(4096)},
+		"largest uint16 packet under cap":   {"Jc = 16\nJmin = 65535\nJmax = 65535", 16, uint64(65535)},
+	}
+	for name, tc := range accepted {
+		t.Run(name, func(t *testing.T) {
+			ep, err := Parse(strings.Replace(profile, base, tc.fields, 1))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ep["jc"] != tc.jc || ep["jmax"] != tc.jmax {
+				t.Fatalf("burst rewritten: jc=%#v jmax=%#v", ep["jc"], ep["jmax"])
+			}
+		})
+	}
+	for _, fields := range []string{
+		"Jc = 257",
+		"Jc = 257\nJmin = 0\nJmax = 0",
+		"Jc = 256\nJmin = 0\nJmax = 4097",
+		"Jc = 17\nJmin = 1\nJmax = 65535",
+	} {
+		t.Run(fields, func(t *testing.T) {
+			_, err := Parse(strings.Replace(profile, base, fields, 1))
+			if err == nil || !strings.Contains(err.Error(), "junk packet burst") {
+				t.Fatalf("over-budget burst accepted or misclassified: %v", err)
+			}
+		})
+	}
+}

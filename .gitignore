@@ -28,6 +28,8 @@ coverage.out
 # Private agent worktrees, plans, investigations and verification logs
 /.agents-work/
 /.agents-worktree/
+# Keep old private reports excluded from publication during workspace migration.
+/docs-reports/
 
 # Local JavaScript coverage reports
 /web/coverage/

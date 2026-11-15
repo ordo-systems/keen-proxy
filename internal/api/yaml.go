@@ -32,8 +32,8 @@ func (s *Server) yamlExport(w http.ResponseWriter, r *http.Request) {
 	}
 	name := "keenproxy-backup.yaml"
 	if r.URL.Query().Get("redacted") == "1" {
-		// An intentionally non-restorable support file. Mask entire connection profiles,
-		// including unknown raw outbound fields, instead of guessing secret field names.
+		// An intentionally non-restorable support file. Clear entire connection
+		// profiles, including AmneziaWG text, instead of guessing secret field names.
 		cp := c.Clone()
 		cp.DNS.Upstreams = []string{"REDACTED"}
 		for i := range cp.GeoIP.Databases {
@@ -52,6 +52,7 @@ func (s *Server) yamlExport(w http.ResponseWriter, r *http.Request) {
 			cn.Outbound = nil
 			cn.Endpoint = nil
 			cn.TrustTunnel = nil
+			cn.AmneziaWG = ""
 		}
 		raw, err = cp.Marshal()
 		if err != nil {

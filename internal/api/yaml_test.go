@@ -57,3 +57,41 @@ func TestSupportExportRemovesURLSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestRedactedYAMLOmitsAmneziaWGSecrets(t *testing.T) {
+	s, d := newServer()
+	const (
+		privateKey = "AWG-PRIVATE-7f3a9c1e-not-a-wireguard-key"
+		psk        = "AWG-PSK-91ab44d0-not-a-wireguard-key"
+		hpk        = "AWG-HPK-c0ffee12-not-a-wireguard-key"
+		endpoint   = "awg-endpoint-203-0-113-44.example:51820"
+	)
+	profile := "[Interface]\nPrivateKey = " + privateKey + "\nHeaderProtectionKey = " + hpk + "\n[Peer]\nPresharedKey = " + psk + "\nEndpoint = " + endpoint + "\n"
+	d.cfg.Connections = []model.Connection{{ID: "awg", Type: model.ConnAmneziaWG, AmneziaWG: profile}}
+	h := s.Handler()
+	plain := do(t, h, "GET", "/api/config/yaml", "", "secret", lan)
+	if plain.Code != 200 {
+		t.Fatal(plain.Code, plain.Body.String())
+	}
+	for _, secret := range []string{privateKey, psk, hpk, endpoint} {
+		if !strings.Contains(plain.Body.String(), secret) {
+			t.Fatalf("fixture did not retain %s", secret)
+		}
+	}
+	w := do(t, h, "GET", "/api/config/yaml?redacted=1", "", "secret", lan)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	for _, secret := range []string{privateKey, psk, hpk, endpoint} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("redacted YAML leaked %s", secret)
+		}
+	}
+	if !strings.Contains(body, "redacted: true") || !strings.Contains(body, "type: amneziawg") {
+		t.Fatalf("redacted export lost connection identity: %s", body)
+	}
+	if d.cfg.Connections[0].AmneziaWG != profile {
+		t.Fatal("export mutated the live profile")
+	}
+}

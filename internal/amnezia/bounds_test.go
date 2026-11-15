@@ -129,3 +129,72 @@ func TestStructuredExportRequiresBothClientKeys(t *testing.T) {
 		})
 	}
 }
+
+func TestImportAcceptsURIAtRawCapWithOuterPadding(t *testing.T) {
+	uri := uriFor(t, exportObject(map[string]any{"config": nativeConfig}, "amnezia-awg2"), false, false)
+	pad := MaxURISize - len(uri)
+	if pad < 2 {
+		t.Fatalf("fixture leaves no room for outer padding: %d", len(uri))
+	}
+	padded := strings.Repeat("\n", pad/2) + uri + strings.Repeat(" ", pad-pad/2)
+	if len(padded) != MaxURISize {
+		t.Fatalf("raw length %d, want %d", len(padded), MaxURISize)
+	}
+	profiles, err := Import(padded)
+	if err != nil || len(profiles) != 1 || profiles[0].AmneziaWG != nativeConfig {
+		t.Fatalf("URI at the raw cap must import after trim: %v", err)
+	}
+}
+
+func TestStructuredRejectsUnknownServerSecurityOption(t *testing.T) {
+	obj := exportObject(map[string]any{"client_ip": "10.8.0.2", "client_priv_key": testKey, "server_pub_key": testKey, "hostName": "vpn.example", "port": 51820}, "amnezia-awg2")
+	awg := obj["containers"].([]any)[0].(map[string]any)["awg"].(map[string]any)
+	awg["subnet_address"] = "10.8.1.0"
+	awg["FutureSecurity"] = "secret-server-option"
+	profiles, err := Import(uriFor(t, obj, true, false))
+	if !errors.Is(err, ErrUnsupportedProfile) || len(profiles) != 0 {
+		t.Fatalf("unknown server option accepted: %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-server-option") {
+		t.Fatal("server secret leaked")
+	}
+}
+
+func TestStructuredAcceptsPinnedServerMetadata(t *testing.T) {
+	obj := exportObject(map[string]any{"client_ip": "10.8.0.2", "client_priv_key": testKey, "server_pub_key": testKey, "hostName": "vpn.example", "port": 51820}, "amnezia-awg2")
+	awg := obj["containers"].([]any)[0].(map[string]any)["awg"].(map[string]any)
+	awg["subnet_address"] = "10.8.1.0"
+	awg["subnet_cidr"] = "24"
+	awg["protocol_version"] = "2"
+	awg["transport_proto"] = "udp"
+	awg["isThirdPartyConfig"] = true
+	awg["cascade_endpoint"] = "cascade.example"
+	awg["cascade_port"] = "1"
+	awg["S1"] = "0"
+	profiles, err := Import(uriFor(t, obj, true, false))
+	if err != nil || len(profiles) != 1 || !strings.Contains(profiles[0].AmneziaWG, "S1 = 0") {
+		t.Fatalf("pinned server metadata rejected: %v", err)
+	}
+	if strings.Contains(profiles[0].AmneziaWG, "10.8.1.0") || strings.Contains(profiles[0].AmneziaWG, "cascade.example") {
+		t.Fatal("admin metadata copied into the client profile")
+	}
+}
+
+func TestStructuredRejectsNonUDPTransport(t *testing.T) {
+	for _, transport := range []any{"tcp", nil, []string{"udp"}} {
+		obj := exportObject(map[string]any{"client_ip": "10.8.0.2", "client_priv_key": testKey, "server_pub_key": testKey, "port": 51820}, "amnezia-awg2")
+		obj["containers"].([]any)[0].(map[string]any)["awg"].(map[string]any)["transport_proto"] = transport
+		if profiles, err := Import(uriFor(t, obj, true, false)); !errors.Is(err, ErrUnsupportedProfile) || len(profiles) != 0 {
+			t.Fatalf("unsupported outer transport accepted: %v", err)
+		}
+	}
+}
+
+func TestNativeConfigIgnoresUnknownServerBookkeeping(t *testing.T) {
+	obj := exportObject(map[string]any{"config": nativeConfig}, "amnezia-awg")
+	obj["containers"].([]any)[0].(map[string]any)["awg"].(map[string]any)["FutureSecurity"] = "secret-server-option"
+	profiles, err := Import(uriFor(t, obj, true, false))
+	if err != nil || len(profiles) != 1 || profiles[0].AmneziaWG != nativeConfig {
+		t.Fatalf("native config must stay authoritative: %v", err)
+	}
+}

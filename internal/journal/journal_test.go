@@ -3,6 +3,8 @@ package journal
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -195,6 +197,48 @@ func TestClientFilterPreservesIPv6Identity(t *testing.T) {
 		e := Entry{Client: value}
 		if got := e.field("client"); got != "2001:db8::1" {
 			t.Fatalf("%s -> %s", value, got)
+		}
+	}
+}
+
+func TestMaskerRedactsAmneziaWGKeys(t *testing.T) {
+	const (
+		privateKey = "awg-private-key-11111111111111111111"
+		psk        = "awg-preshared-key-222222222222222222"
+		hpk        = "awg-header-key-333333333333333333333"
+	)
+	cfg := &model.Config{Connections: []model.Connection{{
+		Type: model.ConnAmneziaWG,
+		AmneziaWG: "[Interface]\nPrivateKey = " + privateKey + "\nHeaderProtectionKey = " + hpk +
+			"\n# PrivateKey = comment-must-not-be-required\n[Peer]\nPresharedKey = " + psk + "\n",
+	}}}
+	got := Masker(cfg)("handshake used " + privateKey + " and " + psk + " and " + hpk)
+	for _, secret := range []string{privateKey, psk, hpk} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("journal mask left %s in %s", secret, got)
+		}
+	}
+}
+
+func TestMaskerRedactsHeaderProtectionKeyHex(t *testing.T) {
+	const encoded = "pBNbQ3vIFMTZCbCkQtLObNUtsM9hAi+ZhlrgZbH0Xgc="
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || len(raw) != 32 {
+		t.Fatal(err)
+	}
+	lower := hex.EncodeToString(raw)
+	upper := strings.ToUpper(lower)
+	if lower == upper {
+		t.Fatal("fixture has no hex case distinction")
+	}
+	cfg := &model.Config{Connections: []model.Connection{
+		{Type: model.ConnSingBox, Endpoint: map[string]any{"type": "wireguard", "header_protection_key": encoded}},
+		{Type: model.ConnAmneziaWG, AmneziaWG: "[Interface]\nHeaderProtectionKey = " + encoded + "\n"},
+	}}
+	got := Masker(cfg)("uapi header_protection_key=" + lower + " HEADER=" + upper + " conf " + encoded)
+	for _, secret := range []string{encoded, lower, upper} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("journal mask left %s in %s", secret, got)
 		}
 	}
 }

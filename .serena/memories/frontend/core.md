@@ -2,6 +2,7 @@
 - web/src/store.ts owns the reactive draft and saved snapshot. Apply PUTs the complete /api/config. Discard resets the draft and failed Apply leaves it available for correction.
 - The panel uses Vue, Naive UI, and a shared API client. Keep same-origin auth, the shared 401 handler, and EventSource for journal updates. Unknown /api/ routes return 404 rather than the SPA.
 - Keep both demo paths in sync with the API. Go api.Demo serves synthetic data through the real HTTP layer. Vite demo mode aliases web/src/api.ts imports to web/src/demo/api.ts and uses relative assets for static hosting. Demo configuration is in memory.
+- Both demo paths read the planned preview version from web/src/demo/release.json; Release Please synchronizes it separately from the last published installer/package versions. The Go demo serves the real offline vpn:// decoder; the static demo explicitly requires a backend for that operation.
 - API access checks RemoteAddr. Do not trust forwarded headers. Credentials use bearer auth or the session cookie; configured no-token CIDRs come from applied configuration.
 - Keep EN messages typed against RU. Preserve browser locale, the stored user preference, and the Naive UI locale. Use translation keys for route titles.
 - ConnTabs uses ResizeObserver for overflow and exposes hidden connections through a dropdown. Keep toolbar actions outside the scrolling tab area.

@@ -1,6 +1,8 @@
 package journal
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"net/url"
 	"sort"
 	"strings"
@@ -11,7 +13,7 @@ import (
 const masked = "•••"
 
 // Masker redacts configured credentials and extra secrets from exported log
-// text, including WireGuard keys, connection links, passwords, and panel tokens.
+// text, including WireGuard and AmneziaWG keys, connection links, passwords, and panel tokens.
 func Masker(cfg *model.Config, extra ...string) func(string) string {
 	secrets := append([]string{}, extra...)
 	if cfg != nil {
@@ -30,6 +32,7 @@ func Masker(cfg *model.Config, extra ...string) func(string) string {
 			if wg := cn.WireGuard; wg != nil {
 				secrets = append(secrets, wg.PrivateKey, wg.Peer.PresharedKey)
 			}
+			secrets = append(secrets, awgProfileSecrets(cn.AmneziaWG)...)
 			secrets = append(secrets, linkSecrets(cn.Link)...)
 			if cn.TrustTunnel != nil {
 				secrets = append(secrets, cn.TrustTunnel.Link)
@@ -82,7 +85,7 @@ func collect(v any, out *[]string) {
 	case map[string]any:
 		for k, val := range x {
 			if s, ok := val.(string); ok && secretKey(k) {
-				*out = append(*out, s)
+				*out = append(*out, secretForms(k, s)...)
 				continue
 			}
 			collect(val, out)
@@ -96,10 +99,60 @@ func collect(v any, out *[]string) {
 
 func secretKey(k string) bool {
 	k = strings.ToLower(k)
+	if k == "header_protection_key" || k == "headerprotectionkey" {
+		return true
+	}
 	for _, s := range []string{"password", "uuid", "private_key", "pre_shared_key", "psk", "secret", "token", "public_key", "short_id"} {
 		if strings.Contains(k, s) {
 			return true
 		}
 	}
 	return false
+}
+
+func secretForms(key, value string) []string {
+	if !headerKeyName(key) {
+		return []string{value}
+	}
+	return append([]string{value}, headerKeyHex(value)...)
+}
+
+func headerKeyName(key string) bool {
+	key = strings.ToLower(strings.ReplaceAll(key, "_", ""))
+	return key == "headerprotectionkey"
+}
+
+// headerKeyHex returns both hex cases. The device normalizes a base64
+// header_protection_key to lowercase hex before UAPI; logs may print either case.
+func headerKeyHex(value string) []string {
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	if err != nil || len(decoded) != 32 {
+		decoded, err = hex.DecodeString(value)
+		if err != nil || len(decoded) != 32 {
+			return nil
+		}
+	}
+	lower := hex.EncodeToString(decoded)
+	return []string{lower, strings.ToUpper(lower)}
+}
+
+func awgProfileSecrets(profile string) []string {
+	if profile == "" {
+		return nil
+	}
+	var out []string
+	for line := range strings.SplitSeq(profile, "\n") {
+		line, _, _ = strings.Cut(line, "#")
+		name, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "privatekey", "presharedkey", "headerprotectionkey":
+			if value = strings.TrimSpace(value); value != "" {
+				out = append(out, secretForms(name, value)...)
+			}
+		}
+	}
+	return out
 }

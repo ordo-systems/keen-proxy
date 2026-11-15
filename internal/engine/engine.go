@@ -10,7 +10,6 @@ import (
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
-	sjson "github.com/sagernet/sing/common/json"
 )
 
 // Engine owns the embedded sing-box instance and serializes lifecycle operations.
@@ -36,7 +35,7 @@ func (e *Engine) Apply(config []byte) (bool, error) {
 		return false, nil
 	}
 	ctx, cancel := context.WithCancel(Context(context.Background()))
-	opts, err := sjson.UnmarshalExtendedContext[option.Options](ctx, config)
+	opts, err := decodeOptions(ctx, config)
 	if err != nil {
 		cancel()
 		return false, fmt.Errorf("sing-box configuration: %w", err)

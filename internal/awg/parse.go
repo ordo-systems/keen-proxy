@@ -434,6 +434,9 @@ func validateOptions(ep map[string]any) error {
 	if jmin > jmax {
 		return fmt.Errorf("Jmin exceeds Jmax")
 	}
+	if err := validateJunk(ep); err != nil {
+		return err
+	}
 	for i := 1; i <= 4; i++ {
 		lo, hi := bounds(ep[fmt.Sprintf("h%d", i)], uint64(i))
 		for j := 1; j < i; j++ {
@@ -450,4 +453,47 @@ func validateOptions(ep map[string]any) error {
 		}
 	}
 	return nil
+}
+
+// MaxJunkPackets and MaxJunkPayload bound one handshake burst. The embedded
+// device allocates every junk datagram before the handshake and copies that
+// burst again; a swapped Jmin/Jmax is used at the larger size. A uint16 pair
+// is otherwise about 4 GiB. Unset Jc sends no junk. Unset sizes are zero-size
+// packets and still count toward the packet cap. Over-budget values are
+// rejected, not clamped.
+const (
+	MaxJunkPackets = 256
+	MaxJunkPayload = 1 << 20
+)
+
+// JunkBudget is the handshake allocation cap. count is Jc. maxSize is the
+// larger of Jmin and Jmax after the device's swap.
+func JunkBudget(count, maxSize uint64) error {
+	if count > MaxJunkPackets || junkPayloadExceeds(count, maxSize) {
+		return fmt.Errorf("junk packet burst exceeds %d packets or %d bytes per handshake", MaxJunkPackets, MaxJunkPayload)
+	}
+	return nil
+}
+
+// DeviceJunkBudget applies JunkBudget the way device.JunkPackets allocates:
+// when Jmax is below Jmin, including a zero or omitted Jmax, the larger size is used.
+func DeviceJunkBudget(count, minSize, maxSize uint64) error {
+	if maxSize < minSize {
+		maxSize = minSize
+	}
+	return JunkBudget(count, maxSize)
+}
+
+func validateJunk(ep map[string]any) error {
+	count, _ := ep["jc"].(uint64)
+	minSize, _ := ep["jmin"].(uint64)
+	maxSize, _ := ep["jmax"].(uint64)
+	return DeviceJunkBudget(count, minSize, maxSize)
+}
+
+func junkPayloadExceeds(count, maxSize uint64) bool {
+	if count == 0 || maxSize == 0 {
+		return false
+	}
+	return count > MaxJunkPayload/maxSize
 }

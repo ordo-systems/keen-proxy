@@ -27,6 +27,33 @@ var clientFields = func() map[string]bool {
 	return known
 }()
 
+// serverFields is AwgServerConfig's JSON (awgProtocolConfig.h at 1efeab81)
+// plus last_config, which carries the client profile. Reconstruction must not
+// drop any other server key.
+var serverFields = func() map[string]bool {
+	known := map[string]bool{
+		"last_config": true, "port": true, "cascade_endpoint": true, "cascade_port": true,
+		"transport_proto": true, "protocol_version": true, "subnet_address": true,
+		"subnet_cidr": true, "isThirdPartyConfig": true,
+	}
+	for _, key := range obfuscationFields {
+		known[key] = true
+	}
+	return known
+}()
+
+func validateServerFields(server object) error {
+	if _, exists := server["transport_proto"]; exists && text(server, "transport_proto") != "udp" {
+		return ErrUnsupportedProfile
+	}
+	for key := range server {
+		if !serverFields[key] {
+			return ErrUnsupportedProfile
+		}
+	}
+	return nil
+}
+
 func validateClientFields(client object) error {
 	if raw, ok := client["config"]; ok {
 		var config string
@@ -50,28 +77,22 @@ func validateClientFields(client object) error {
 
 // Native text is authoritative and retained byte-for-byte, but an explicit
 // client-side security option must not disappear merely because config exists.
-func validateNativeOptions(config string, client object) error {
-	fields := make(map[string]string)
-	for line := range strings.SplitSeq(config, "\n") {
-		line, _, _ = strings.Cut(line, "#")
-		key, value, ok := strings.Cut(line, "=")
-		if ok {
-			fields[strings.ToLower(strings.TrimSpace(key))] = strings.TrimSpace(value)
-		}
-	}
+var nativeComparisons = func() []struct{ json, native string } {
+	out := make([]struct{ json, native string }, 0, len(obfuscationFields)+4)
 	for _, key := range obfuscationFields {
-		value, err := scalar(client, key)
-		if err != nil {
-			return err
-		}
-		if value != "" && fields[strings.ToLower(key)] != value {
-			return ErrUnsupportedProfile
-		}
+		out = append(out, struct{ json, native string }{key, strings.ToLower(key)})
 	}
-	for _, field := range []struct{ json, native string }{
-		{"client_priv_key", "privatekey"}, {"server_pub_key", "publickey"},
-		{"psk_key", "presharedkey"}, {"persistent_keep_alive", "persistentkeepalive"},
-	} {
+	return append(out,
+		struct{ json, native string }{"client_priv_key", "privatekey"},
+		struct{ json, native string }{"server_pub_key", "publickey"},
+		struct{ json, native string }{"psk_key", "presharedkey"},
+		struct{ json, native string }{"persistent_keep_alive", "persistentkeepalive"},
+	)
+}()
+
+func validateNativeOptions(config string, client object) error {
+	fields := nativeAssignments(config)
+	for _, field := range nativeComparisons {
 		value, err := scalar(client, field.json)
 		if err != nil {
 			return err
@@ -83,7 +104,22 @@ func validateNativeOptions(config string, client object) error {
 	return nil
 }
 
+func nativeAssignments(config string) map[string]string {
+	fields := make(map[string]string)
+	for line := range strings.SplitSeq(config, "\n") {
+		line, _, _ = strings.Cut(line, "#")
+		key, value, ok := strings.Cut(line, "=")
+		if ok {
+			fields[strings.ToLower(strings.TrimSpace(key))] = strings.TrimSpace(value)
+		}
+	}
+	return fields
+}
+
 func structuredConfig(root, server, client object) (string, error) {
+	if err := validateServerFields(server); err != nil {
+		return "", err
+	}
 	if err := validateStructuredTypes(client); err != nil {
 		return "", err
 	}
@@ -98,6 +134,10 @@ func structuredConfig(root, server, client object) (string, error) {
 	if text(client, "client_priv_key") == "" || text(client, "server_pub_key") == "" {
 		return "", ErrInvalidProfile
 	}
+	return assembleStructured(root, server, client, address, endpoint)
+}
+
+func assembleStructured(root, server, client object, address, endpoint string) (string, error) {
 	var b strings.Builder
 	b.WriteString("[Interface]\n")
 	appendField(&b, "PrivateKey", text(client, "client_priv_key"))

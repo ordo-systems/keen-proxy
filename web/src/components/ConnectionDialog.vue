@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { NModal, NCard, NTabs, NTabPane, NInput, NButton, NForm, NFormItem, NAlert, NSpace, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import { store } from '../store'
 import type { Config, Connection, LinkPreview } from '../types'
 import { slugify, wireGuardToConf } from '../wgconf'
-import { importConnections, manualConnection } from '../connectionDraft'
+import { connectionErrorKey, DRAFT_CHANGED, importConnections, manualConnection } from '../connectionDraft'
 
 // Edit a local form copy so cancellation leaves the shared draft unchanged.
 const props = defineProps<{ show: boolean; edit?: Connection | null }>()
@@ -30,8 +30,15 @@ const revealed = ref(false)
 const fallback = ref<string | null>(null)
 const isEdit = computed(() => !!props.edit)
 
+let saveGeneration = 0
+let committed = false
+onUnmounted(() => { saveGeneration++ })
 watch(() => props.show, (open) => {
-  if (!open) return
+  if (!open) {
+    saveGeneration++
+    return
+  }
+  committed = false
   error.value = ''
   revealed.value = false
   preview.value = null
@@ -92,61 +99,69 @@ function build(): Connection {
   return endpointTypes.includes(obj.type) ? { ...base, type: 'singbox', endpoint: obj } : { ...base, type: 'singbox', outbound: obj }
 }
 
-// Validate local identity constraints before replacing or appending the draft profile.
+// Validate a copied draft before replacing or appending the profile. Apply stays separate.
 async function save() {
-  if (busy.value) return
+  if (busy.value || committed) return
+  busy.value = true
   error.value = ''
-  let conn: Connection
-  try {
-    conn = build()
-  } catch (e) {
-    error.value = (e as Error).message
-    return
-  }
-  if (!/^[a-z0-9][a-z0-9_-]*$/.test(conn.id)) {
-    error.value = t('dialog.errId')
-    return
-  }
-  if (conn.id === 'direct' || conn.id === 'block') {
-    error.value = t('dialog.errReserved')
-    return
-  }
-  const config = store.state.config!
+  const generation = ++saveGeneration
   const edit = props.edit
-  const list = config.connections!
-  const clash = list.find((c) => c.id === conn.id && c !== props.edit)
-  if (clash) {
-    error.value = t('dialog.errDup', { id: conn.id })
-    return
-  }
-  if (conn.type === 'amneziawg') {
-    busy.value = true
-    try {
-      const cfg = JSON.parse(JSON.stringify(store.state.config)) as Config
-      const index = props.edit ? list.indexOf(props.edit) : -1
-      if (index >= 0) cfg.connections!.splice(index, 1, conn)
-      else cfg.connections!.push(conn)
-      if (props.edit && props.edit.id !== conn.id)
-        renameTarget(props.edit.id, conn.id, cfg)
-      await api.validateConfig(cfg)
-      if (!props.show || props.edit !== edit || store.state.config !== config) return
-    } catch {
-      error.value = t('ui.invalid')
+  const config = store.state.config
+  const text = awgText.value
+  const idSnap = id.value
+  const nameSnap = name.value
+  const tabSnap = tab.value
+  try {
+    const conn = build()
+    if (tab.value === 'amneziawg' && awgText.value.trim().startsWith('vpn://')) {
+      error.value = t('ui.awgWizardOnly')
       return
-    } finally {
-      busy.value = false
     }
+    if (!/^[a-z0-9][a-z0-9_-]*$/.test(conn.id)) {
+      error.value = t('dialog.errId')
+      return
+    }
+    if (conn.id === 'direct' || conn.id === 'block') {
+      error.value = t('dialog.errReserved')
+      return
+    }
+    if (!config) throw new Error(DRAFT_CHANGED)
+    const list = config.connections ?? []
+    if (list.some((c) => c.id === conn.id && c !== edit)) {
+      error.value = t('dialog.errDup', { id: conn.id })
+      return
+    }
+    if (conn.type === 'amneziawg') {
+      const cfg = JSON.parse(JSON.stringify(config)) as Config
+      const index = edit ? list.indexOf(edit) : -1
+      cfg.connections ??= []
+      if (edit && index < 0) throw new Error(DRAFT_CHANGED)
+      if (index >= 0) cfg.connections.splice(index, 1, conn)
+      else cfg.connections.push(conn)
+      if (edit && edit.id !== conn.id) renameTarget(edit.id, conn.id, cfg)
+      await api.validateConfig(cfg)
+      if (
+        generation !== saveGeneration || !props.show || props.edit !== edit ||
+        store.state.config !== config || awgText.value !== text ||
+        id.value !== idSnap || name.value !== nameSnap || tab.value !== tabSnap
+      ) throw new Error(DRAFT_CHANGED)
+    }
+    if (store.state.config !== config || !props.show || props.edit !== edit) throw new Error(DRAFT_CHANGED)
+    const live = config.connections ?? []
+    if (edit) {
+      const i = live.indexOf(edit)
+      if (i < 0) throw new Error(DRAFT_CHANGED)
+      if (edit.id !== conn.id) renameTarget(edit.id, conn.id)
+      live.splice(i, 1, conn)
+    } else live.push(conn)
+    committed = true
+    message.info(t('dialog.added'))
+    emit('update:show', false)
+  } catch (e) {
+    if (props.show) error.value = t(connectionErrorKey(e))
+  } finally {
+    busy.value = false
   }
-  if (props.edit) {
-    const i = list.indexOf(props.edit)
-    // Keep draft references consistent when the connection ID changes.
-    if (props.edit.id !== conn.id) renameTarget(props.edit.id, conn.id)
-    list.splice(i, 1, conn)
-  } else {
-    list.push(conn)
-  }
-  message.info(t('dialog.added'))
-  emit('update:show', false)
 }
 
 // Rewrite routing, fallback, and DNS references within the shared draft.

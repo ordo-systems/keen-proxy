@@ -12,7 +12,7 @@ Open **Overview** to see connection health, recent traffic, and the router's CPU
 
 Open **Connections**. Select a profile to inspect its settings and status. Choose **Add** to use the wizard: import a supported connection link/file or enter a supported protocol manually. Use a descriptive name and inspect the proposed protocol and endpoint before accepting.
 
-The file picker accepts `.conf`, `.txt`, and `.json` up to 2 MiB. For a sing-box file with multiple profiles, choose the outbound or endpoint to import. Router DNS and routes stay under KeenProxy control. In **Failover**, choose the immediate backup and review the inherited chain. Connection parameters stay hidden until you reveal them. See [how failover works](routing.md#fallback-chains).
+The file picker accepts `.conf`, `.txt`, `.json`, and `.vpn` up to 2 MiB. For a sing-box file with multiple profiles, choose the outbound or endpoint to import. Router DNS and routes stay under KeenProxy control. In **Failover**, choose the immediate backup and review the inherited chain. Connection parameters stay hidden until you reveal them. See [how failover works](routing.md#fallback-chains).
 
 Changes enter the shared draft. Real credentials belong only in your local management session. In the browser demo, use synthetic values.
 
@@ -24,11 +24,13 @@ Changes enter the shared draft. Real credentials belong only in your local manag
 
 Import a single-peer AmneziaWG `.conf` file or paste its contents in the connection wizard. AWG fields select **AmneziaWG** automatically; you can also select the AmneziaWG protocol explicitly. The original profile stays in the shared draft and can be edited before **Apply**. Keep it private: it contains the tunnel's private key and may contain a preshared key.
 
-This build embeds [sing-box-lx 1.14.4-lx.35](https://github.com/Leadaxe/sing-box-lx/releases/tag/v1.14.4-lx.35). It supports AWG 2/3 client parameters and TCP/UDP through a userspace WireGuard endpoint; no kernel AWG module or additional daemon is required. Unsupported fields, executable hooks and multiple peers are rejected instead of being silently discarded.
+This build embeds [sing-box-lx 1.14.4-lx.35](https://github.com/Leadaxe/sing-box-lx/releases/tag/v1.14.4-lx.35). It supports AWG 2/3 client parameters and application TCP/UDP through a userspace WireGuard endpoint; the outer tunnel uses UDP. No kernel AWG module or additional daemon is required. Unsupported fields, executable hooks and multiple peers are rejected instead of being silently discarded.
 
 For a standalone Amnezia `vpn://` client export, choose **AmneziaWG → Paste .conf / vpn://**, paste the complete link, enter a name and ID, and validate. You can also upload a text or `.vpn` file containing the link. Decoding happens locally in KeenProxy's backend, without contacting Amnezia or registering a device. If the export contains several AWG profiles, select one explicitly and validate again before saving it to the draft. Only the selected AWG client configuration is retained; SSH credentials, source-envelope metadata, DNS policy and other protocols are not imported. The static browser-only demo cannot decode these exports.
 
-Compressed and uncompressed standalone exports with supported format versions (missing, 0 or 1) are accepted. Damaged or oversized exports, unsupported client options, service/subscription keys and administrator-only exports without client keys are rejected. A `vpn://` link is not necessarily a ready-to-use tunnel: obtain a **client connection export**, not a subscription activation key.
+Compressed and uncompressed standalone exports with supported format versions (missing, 0 or 1) are accepted. The encoded URI is limited to 2 MiB; decoded JSON and each native profile are limited to 1 MiB. Damaged exports, unsupported protocol options, service/subscription keys and administrator-only exports without client keys are rejected. A `vpn://` link is not necessarily a ready-to-use tunnel: obtain a **client connection export**, not a subscription activation key.
+
+To bound router memory use, junk bursts are limited to 256 packets and 1 MiB of worst-case payload per handshake. The same budget applies to native AWG profiles and core-decoded raw WireGuard endpoints.
 
 The profile's `DNS` setting does not replace KeenProxy DNS settings. Existing routing rules and failover still select the connection; `AllowedIPs` does not install system routes. Application UDP requires **TPROXY** interception. The existing participant **UDP/443 rejection remains enabled**, so importing AWG does not enable client QUIC traffic. Amnezia subscription activation, server provisioning and service API integration are not supported.
 

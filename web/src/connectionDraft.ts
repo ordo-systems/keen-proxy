@@ -119,8 +119,11 @@ export function manualConnection(f: ManualFields): Connection {
   }
   if (f.protocol === 'wireguard')
     return { ...base, type: 'wireguard', wireguard: manualWG(f) }
-  if (f.protocol === 'amneziawg')
-    return { ...base, type: 'amneziawg', amneziawg: required(f, 'amneziawg') }
+  if (f.protocol === 'amneziawg') {
+    const profile = required(f, 'amneziawg')
+    boundedImport(profile)
+    return { ...base, type: 'amneziawg', amneziawg: profile }
+  }
   const build = protocolBuilders[f.protocol!]
   if (!build) throw new Error('protocol')
   return { ...base, type: 'singbox', outbound: build(f) }
@@ -321,4 +324,60 @@ export function selectAmneziaProfile(profiles: Connection[], chosen: number | nu
   if (index === null || !Number.isInteger(index) || index < 0 || index >= profiles.length)
     throw new Error('amnezia_choose_profile')
   return copyConnection(profiles[index]!)
+}
+
+export const STALE_IMPORT = 'import_stale'
+export const DRAFT_CHANGED = 'draft_changed'
+
+function boundedImport(text: string): void {
+  if (new TextEncoder().encode(text).byteLength > MAX_CONNECTION_FILE)
+    throw new Error('File exceeds 2 MiB')
+}
+
+export type ClassifiedImport =
+  | { kind: 'vpn'; uri: string }
+  | { kind: 'profiles'; profiles: Connection[] }
+
+// Classify wizard input without decoding vpn://. The backend owns that envelope.
+export function classifyConnectionImport(text: string, filename: string, protocol: string): ClassifiedImport {
+  boundedImport(text)
+  const raw = text.replace(/^\uFEFF/, '').trim()
+  if (!raw) throw new Error('Empty file')
+  if (raw.startsWith('vpn://')) return { kind: 'vpn', uri: raw }
+  if (protocol === 'amneziawg')
+    return { kind: 'profiles', profiles: [{ id: '', name: '', type: 'amneziawg', amneziawg: text }] }
+  return { kind: 'profiles', profiles: importConnections(text, filename) }
+}
+
+// Name a selected profile. An unselected multi-export must not inherit the first profile's name.
+export function suggestedConnectionName(profiles: Connection[], chosen: number | null, filename = ''): string {
+  const index = chosen === null && profiles.length === 1 ? 0 : chosen
+  const selected = index !== null && Number.isInteger(index) ? profiles[index] : undefined
+  if (selected?.name) return selected.name
+  return filename.replace(/\.[^.]+$/, '')
+}
+
+const connectionErrors: Record<string, string> = {
+  amnezia_invalid_profile: 'ui.amneziaInvalid',
+  amnezia_service_profile: 'ui.amneziaService',
+  amnezia_admin_profile: 'ui.amneziaAdmin',
+  amnezia_unsupported_profile: 'ui.amneziaUnsupported',
+  amnezia_format_version: 'ui.amneziaVersion',
+  amnezia_choose_profile: 'ui.pickProfile',
+  amnezia_demo_unavailable: 'ui.amneziaDemo',
+  'File exceeds 2 MiB': 'ui.largeFile',
+  'Empty file': 'ui.fileError',
+  file: 'ui.fileError',
+  'Unsupported WireGuard section': 'ui.unsupportedWG',
+  'Incomplete WireGuard profile': 'ui.invalid',
+  'Invalid WireGuard line': 'ui.invalid',
+  'Invalid connection link': 'ui.invalid',
+  [DRAFT_CHANGED]: 'ui.configChanged',
+}
+
+// Map stable import failures to translation keys. Never echo parser text; it can contain secrets.
+export function connectionErrorKey(cause: unknown, fallback = 'ui.invalid'): string {
+  const code = cause instanceof Error ? cause.message : ''
+  if (code.startsWith('Unsupported WireGuard setting')) return 'ui.unsupportedWG'
+  return connectionErrors[code] ?? fallback
 }

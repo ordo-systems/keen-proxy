@@ -58,22 +58,33 @@ func decodeURI(uri string) ([]byte, error) {
 	if !strings.HasPrefix(uri, "vpn://") {
 		return nil, ErrInvalidProfile
 	}
-	encoded := strings.TrimPrefix(uri, "vpn://")
+	raw, err := decodePayload(strings.TrimPrefix(uri, "vpn://"))
+	if err != nil || len(raw) == 0 {
+		return nil, ErrInvalidProfile
+	}
+	return decodeBody(raw)
+}
+
+func decodePayload(encoded string) ([]byte, error) {
 	enc := base64.RawURLEncoding.Strict()
 	if strings.HasSuffix(encoded, "=") {
 		enc = base64.URLEncoding.Strict()
 	}
-	raw, err := enc.DecodeString(encoded)
-	if err != nil || len(raw) == 0 {
-		return nil, ErrInvalidProfile
-	}
-	if bytes.HasPrefix(bytes.TrimSpace(raw), []byte("{")) || bytes.HasPrefix(bytes.TrimSpace(raw), []byte("[")) || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+	return enc.DecodeString(encoded)
+}
+
+func decodeBody(raw []byte) ([]byte, error) {
+	if isJSONBody(bytes.TrimSpace(raw)) {
 		if len(raw) > MaxDecodedSize {
 			return nil, ErrInvalidProfile
 		}
 		return raw, nil
 	}
 	return uncompress(raw)
+}
+
+func isJSONBody(trimmed []byte) bool {
+	return bytes.HasPrefix(trimmed, []byte("{")) || bytes.HasPrefix(trimmed, []byte("[")) || bytes.Equal(trimmed, []byte("null"))
 }
 
 func uncompress(raw []byte) ([]byte, error) {
@@ -169,16 +180,24 @@ func hasAdminCredentials(root object) bool {
 }
 
 func containerProfile(root, container object) (string, error) {
-	server, err := parseObject(container["awg"])
+	server, client, err := openClient(root, container)
 	if err != nil {
 		return "", err
+	}
+	return renderProfile(root, server, client)
+}
+
+func openClient(root, container object) (object, object, error) {
+	server, err := parseObject(container["awg"])
+	if err != nil {
+		return nil, nil, err
 	}
 	last := server["last_config"]
 	if len(last) == 0 || bytes.Equal(last, []byte("null")) {
 		if hasAdminCredentials(root) {
-			return "", ErrAdminProfile
+			return nil, nil, ErrAdminProfile
 		}
-		return "", ErrInvalidProfile
+		return nil, nil, ErrInvalidProfile
 	}
 	var encoded string
 	if json.Unmarshal(last, &encoded) == nil {
@@ -186,12 +205,17 @@ func containerProfile(root, container object) (string, error) {
 	}
 	client, err := parseObject(last)
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
 	if err := validateClientFields(client); err != nil {
-		return "", err
+		return nil, nil, err
 	}
+	return server, client, nil
+}
+
+func renderProfile(root, server, client object) (string, error) {
 	config := text(client, "config")
+	var err error
 	if config == "" {
 		config, err = structuredConfig(root, server, client)
 	} else {

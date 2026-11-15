@@ -7,14 +7,16 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-
+ACCESS_URL = 'http://192.0.2.10:8086'
 
 class BootstrapFixture(unittest.TestCase):
+    prefix_name = 'opt'
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
-        self.prefix = self.root / 'opt'
+        self.prefix = self.root / self.prefix_name
         self.commands = self.root / 'commands'
         self.commands.mkdir()
         self.mirror = self.root / 'mirror'
@@ -55,13 +57,34 @@ cp "$FIXTURES/$path" "$out"
     def command(self, name, script):
         self.executable(self.commands / name, script)
 
+    def url_boundary(self, trailer):
+        return (
+            'if [ "$#" -ne 3 ] || [ "$2" != -config ] || [ ! -f "$3" ]; then\n'
+            '    echo rejected-url-args >&2\n'
+            '    exit 2\n'
+            'fi\n'
+            'echo "queried -config $3" >> "$KEENPROXY_PREFIX/url-invocations"\n'
+            + trailer
+        )
+
     def release(self, tag, arch='arm64', lite=False, start=True, dry_run='exit 0',
-                stop='rm -f "$state"'):
+                stop='rm -f "$state"', url=None):
+        if url is None:
+            url = self.url_boundary(f"echo '{ACCESS_URL}'\nexit 0\n")
         folder = self.mirror / tag
         folder.mkdir()
         asset = f'keenproxy-{"lite-" if lite else ""}linux-{arch}'
-        (folder / asset).write_text(
-            f'#!/bin/sh\n# {tag}\nif [ "$1" = --fixture-start ]; then exit {0 if start else 1}; fi\n{dry_run}\n')
+        script = (
+            '#!/bin/sh\n'
+            f'# {tag}\n'
+            'if [ "$1" = --key ]; then echo leaked-panel-token; exit 0; fi\n'
+            f'if [ "$1" = --fixture-start ]; then exit {0 if start else 1}; fi\n'
+            'if [ "$1" = --url ]; then\n'
+            + url +
+            'fi\n'
+            + dry_run + '\n'
+        )
+        (folder / asset).write_text(script)
         (folder / 'install.sh').write_bytes((ROOT / 'tools/install.sh').read_bytes())
         self.executable(folder / 'S99keenproxy', f'''# KeenProxy Entware service
 state="$KEENPROXY_PREFIX/running"
@@ -101,6 +124,23 @@ esac''')
     def service(self):
         return self.prefix / 'etc/init.d/S99keenproxy'
 
+    def token_command(self):
+        return f"'{self.binary}' --key -config '{self.config}'"
+
+    def assert_panel_access(self, result, url=ACCESS_URL):
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            f'Access URL: {url}\n'
+            f'Retrieve existing panel token: {self.token_command()}\n',
+            result.stdout)
+        self.assertNotIn('0.0.0.0', result.stdout)
+        self.assertNotIn('leaked-panel-token', result.stdout + result.stderr)
+        self.assertNotIn('rejected-url-args', result.stdout + result.stderr)
+
+    def assert_url_queries(self, count):
+        recorded = (self.prefix / 'url-invocations').read_text().splitlines()
+        self.assertEqual(recorded, [f'queried -config {self.config}'] * count)
+
 
 class BootstrapTest(BootstrapFixture):
     @property
@@ -130,6 +170,8 @@ class BootstrapTest(BootstrapFixture):
             self.assertFalse(self.service.exists())
             self.assertFalse(self.release_record.exists())
             self.assertEqual(token.read_text(), 'test token\n')
+            self.assertNotIn('test token', result.stdout + result.stderr)
+            self.assertNotIn('Access URL:', result.stdout)
             self.assertIn('# local settings', self.config.read_text())
             self.assertTrue(client.exists())
         self.assertEqual(self.requests.read_bytes(), before)
@@ -245,11 +287,12 @@ done
     def test_bootstrap_installs_starts_and_preserves_configuration_on_update(self):
         first = self.release('v1.2.3')
         result = self.install()
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_panel_access(result)
         self.assertEqual(self.binary.read_bytes(), first.read_bytes())
         self.assertEqual(self.config.stat().st_mode & 0o777, 0o600)
         self.assert_release('v1.2.3')
         self.assertTrue((self.prefix / 'running').exists())
+        self.assert_url_queries(1)
         self.config.write_text('schema_version: 1\n# user setting\n')
         token = self.config.with_name('token')
         token.write_text('test fixture\n')
@@ -257,11 +300,38 @@ done
         (self.mirror / 'version.txt').write_text('1.2.4\n')
         for _ in range(2):
             result = self.install()
-            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assert_panel_access(result)
+            self.assertNotIn('test fixture', result.stdout + result.stderr)
             self.assert_release('v1.2.4', 'v1.2.3')
         self.assertEqual(self.binary.read_bytes(), next_release.read_bytes())
         self.assertIn('# user setting', self.config.read_text())
         self.assertEqual(token.read_text(), 'test fixture\n')
+        self.assert_url_queries(3)
+
+    def test_url_query_problems_keep_installation_and_hide_command_output(self):
+        self.release('v1.2.3', url=self.url_boundary('echo synthetic-secret >&2\nexit 1\n'))
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('could not determine the panel access URL', result.stderr)
+        self.assertNotIn('Access URL:', result.stdout)
+        self.assertNotIn('synthetic-secret', result.stdout + result.stderr)
+        self.assertNotIn('leaked-panel-token', result.stdout + result.stderr)
+        self.assertIn(f'Retrieve existing panel token: {self.token_command()}\n', result.stdout)
+        self.assertTrue((self.prefix / 'running').exists())
+        self.assert_release('v1.2.3')
+        self.assert_url_queries(1)
+        self.release('v1.2.4', url=self.url_boundary('exit 0\n'))
+        (self.mirror / 'version.txt').write_text('1.2.4\n')
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('could not determine the panel access URL', result.stderr)
+        self.assertNotIn('Access URL:', result.stdout)
+        self.assertNotIn('synthetic-secret', result.stdout + result.stderr)
+        self.assertIn(f'Retrieve existing panel token: {self.token_command()}\n', result.stdout)
+        self.assert_release('v1.2.4', 'v1.2.3')
+        self.assertTrue((self.prefix / 'running').exists())
+        self.assertEqual(self.binary.read_bytes(), (self.mirror / 'v1.2.4/keenproxy-linux-arm64').read_bytes())
+        self.assert_url_queries(2)
 
     def test_explicit_lite_version_skips_main(self):
         self.env['CPU'] = 'mipsel'
@@ -285,10 +355,15 @@ done
 
     def test_failed_start_restores_previous_release(self):
         first = self.release('v1.2.3')
-        self.assertEqual(self.install().returncode, 0)
+        installed = self.install()
+        self.assert_panel_access(installed)
+        before = (self.prefix / 'url-invocations').read_text()
         self.release('v1.2.4', start=False)
         result = self.install('--version', 'v1.2.4')
         self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('Access URL:', result.stdout)
+        self.assertNotIn('Retrieve existing panel token:', result.stdout)
+        self.assertEqual((self.prefix / 'url-invocations').read_text(), before)
         self.assertEqual(self.binary.read_bytes(), first.read_bytes())
         self.assert_release('v1.2.3')
         self.assertTrue((self.prefix / 'running').exists())
@@ -357,3 +432,16 @@ done
         self.assertEqual(self.binary.read_bytes(), first.read_bytes())
         self.assertTrue((self.prefix / 'running').exists())
         self.assertTrue(lock.is_dir())
+
+
+class SpacedPrefixBootstrapTest(BootstrapFixture):
+    prefix_name = 'opt dir'
+
+    def test_access_command_quotes_paths_with_spaces(self):
+        self.release('v1.2.3')
+        result = self.install()
+        self.assert_panel_access(result)
+        self.assertIn(' ', str(self.prefix))
+        self.assertIn(f"'{self.prefix}/bin/keenproxy'", result.stdout)
+        self.assertIn(f"'{self.config}'", result.stdout)
+        self.assert_url_queries(1)

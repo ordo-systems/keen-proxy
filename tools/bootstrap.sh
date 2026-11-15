@@ -150,6 +150,42 @@ restore_payload() {
     done
 }
 
+# Quote one shell word so a copy-pasted command keeps spaces and quotes.
+shell_quote() {
+    printf '%s\n' "$1" | awk 'BEGIN { q = sprintf("%c", 39) } {
+        gsub(q, q "\"" q "\"" q)
+        printf "%s%s%s", q, $0, q
+    }'
+}
+
+# The installed binary discovers the panel URL. A missing flag, empty result, or
+# undiscoverable interface must not undo the install or reveal command stderr.
+print_panel_access() {
+    url_status=0
+    url=$("$prefix/bin/keenproxy" --url -config "$config" 2>/dev/null) || url_status=$?
+    if [ "$url_status" -eq 0 ]; then
+        case "$url" in
+            http://?*) ;;
+            *) url_status=1 ;;
+        esac
+    fi
+    if [ "$url_status" -eq 0 ]; then
+        case "$url" in
+            *[[:space:]]*) url_status=1 ;;
+        esac
+    fi
+    if [ "$url_status" -eq 0 ]; then
+        printf 'Access URL: %s\n' "$url"
+    else
+        printf 'KeenProxy: could not determine the panel access URL; installation kept\n' >&2
+        url=
+    fi
+    printf 'Retrieve existing panel token: %s --key -config %s\n' \
+        "$(shell_quote "$prefix/bin/keenproxy")" \
+        "$(shell_quote "$config")"
+    return 0
+}
+
 finish() {
     result=$?
     trap - EXIT
@@ -322,4 +358,5 @@ elif [ "$was_running" = 0 ]; then
     service_action start || fail 'service failed to start'
 fi
 printf 'KeenProxy %s (%s) installed. Configuration: %s\n' "$tag" "$asset" "$config"
+print_panel_access
 )

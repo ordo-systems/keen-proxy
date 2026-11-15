@@ -31,7 +31,7 @@ import (
 	_ "golang.org/x/crypto/x509roots/fallback"
 )
 
-// main selects dry-run, synthetic demo, or the live router lifecycle.
+// main selects read-only disclosure, dry-run, synthetic demo, or the live router lifecycle.
 func main() {
 	configPath := flag.String("config", "/opt/etc/keenproxy/config.yaml", "configuration file path")
 	arpPath := flag.String("arp", "/proc/net/arp", "ARP table path")
@@ -41,7 +41,21 @@ func main() {
 	iptables := flag.String("iptables", "/opt/sbin/iptables", "Entware iptables executable")
 	restore := flag.String("iptables-restore", "/opt/sbin/iptables-restore", "Entware iptables-restore executable")
 	uiDemo := flag.Bool("ui-demo", false, "serve synthetic UI demo data without changing network state")
+	key := flag.Bool("key", false, "print the current panel token and exit")
+	showURL := flag.Bool("url", false, "print the configured panel URL and exit")
 	flag.Parse()
+
+	if err := rejectAccessConflict(*key, *showURL, *dryRun, *uiDemo); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if *key || *showURL {
+		if err := discloseAccess(os.Stdout, *configPath, *key); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *dryRun {
 		if err := printDryRun(*configPath, *arpPath, *ruleSetDir); err != nil {

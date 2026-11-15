@@ -228,17 +228,27 @@ func TestMaskerRedactsHeaderProtectionKeyHex(t *testing.T) {
 	}
 	lower := hex.EncodeToString(raw)
 	upper := strings.ToUpper(lower)
-	if lower == upper {
-		t.Fatal("fixture has no hex case distinction")
-	}
-	cfg := &model.Config{Connections: []model.Connection{
-		{Type: model.ConnSingBox, Endpoint: map[string]any{"type": "wireguard", "header_protection_key": encoded}},
-		{Type: model.ConnAmneziaWG, AmneziaWG: "[Interface]\nHeaderProtectionKey = " + encoded + "\n"},
-	}}
-	got := Masker(cfg)("uapi header_protection_key=" + lower + " HEADER=" + upper + " conf " + encoded)
-	for _, secret := range []string{encoded, lower, upper} {
-		if strings.Contains(got, secret) {
-			t.Fatalf("journal mask left %s in %s", secret, got)
-		}
+	for _, key := range []struct{ name, value string }{{"base64", encoded}, {"hex", lower}} {
+		t.Run(key.name, func(t *testing.T) {
+			cases := []struct {
+				name string
+				conn model.Connection
+			}{
+				{"raw endpoint", model.Connection{Type: model.ConnSingBox, Endpoint: map[string]any{"type": "wireguard", "header_protection_key": key.value}}},
+				{"native spaced", model.Connection{Type: model.ConnAmneziaWG, AmneziaWG: "[Interface]\nHeaderProtectionKey = " + key.value + "\n"}},
+				{"native compact", model.Connection{Type: model.ConnAmneziaWG, AmneziaWG: "[Interface]\nHeaderProtectionKey=" + key.value + "\n"}},
+				{"native mixed case and tabs", model.Connection{Type: model.ConnAmneziaWG, AmneziaWG: "[Interface]\n\tHeAdErPrOtEcTiOnKeY\t= " + key.value + " # metadata\n"}},
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					cfg := &model.Config{Connections: []model.Connection{tc.conn}}
+					got := Masker(cfg)("uapi header_protection_key=" + lower + " HEADER=" + upper + " conf " + key.value)
+					want := "uapi header_protection_key=" + masked + " HEADER=" + masked + " conf " + masked
+					if got != want {
+						t.Fatalf("journal redaction = %q, want %q", got, want)
+					}
+				})
+			}
+		})
 	}
 }

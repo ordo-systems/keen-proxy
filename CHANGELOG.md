@@ -6,6 +6,7 @@
 - Keep existing DNS ownership and participant UDP/443 rejection; no Amnezia subscription integration.
 - Import standalone Amnezia `vpn://` AWG exports locally, with bounded decompression, explicit multi-profile selection and translated errors for service/admin/unsupported exports. No service API calls or device registrations.
 - Keep AWG profiles out of redacted support exports and reject excessive junk-packet bursts before starting the engine.
+- Mask native AmneziaWG header-protection keys in both Base64 and normalized hexadecimal journal output, including profiles with whitespace around field names.
 - Align static and local Go demo build identities with the planned release preview without changing the last published installer version.
 - Print the panel URL after installation and updates; add read-only `--url` and `--key` commands for configured access details without starting the service or rotating the token.
 

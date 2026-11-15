@@ -147,7 +147,7 @@ func awgProfileSecrets(profile string) []string {
 		if !ok {
 			continue
 		}
-		switch strings.ToLower(strings.TrimSpace(name)) {
+		switch name := strings.ToLower(strings.TrimSpace(name)); name {
 		case "privatekey", "presharedkey", "headerprotectionkey":
 			if value = strings.TrimSpace(value); value != "" {
 				out = append(out, secretForms(name, value)...)

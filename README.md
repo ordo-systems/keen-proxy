@@ -147,7 +147,7 @@ Run `make integration` separately for real DNS/firewall/tunnel tests in disposab
 - Country data is approximate, and DNS-based routing may be ambiguous on shared/CDN addresses.
 - Rule-set file updates are reloaded asynchronously. A written file does not prove immediate packet-level application.
 - WireGuard file import accepts the supported single-peer subset. Unsupported options, commands, and multiple peers are rejected.
-- AWG import does not activate an Amnezia subscription or decode `vpn://`. Profile DNS does not change KeenProxy DNS; application UDP needs TPROXY, and participant UDP/443 remains rejected.
+- AWG import accepts standalone Amnezia `vpn://` client exports, not subscription/service activation keys or server provisioning profiles. Profile DNS does not change KeenProxy DNS; application UDP needs TPROXY, and participant UDP/443 remains rejected.
 - Firewall recovery uses a polling watchdog; complete firmware hook integration and hardware fast-path acceleration are not claimed.
 - Full-tunnel behavior, kernel features, memory use, and external client compatibility need validation on each router model.
 

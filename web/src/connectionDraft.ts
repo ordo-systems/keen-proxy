@@ -314,3 +314,11 @@ export function connectionChain(list: Connection[], id: string): string[] {
 export function copyConnection(connection: Connection): Connection {
   return JSON.parse(JSON.stringify(connection)) as Connection
 }
+
+// Multiple exported tunnels require an explicit choice; never import the first silently.
+export function selectAmneziaProfile(profiles: Connection[], chosen: number | null): Connection {
+  const index = chosen === null && profiles.length === 1 ? 0 : chosen
+  if (index === null || !Number.isInteger(index) || index < 0 || index >= profiles.length)
+    throw new Error('amnezia_choose_profile')
+  return copyConnection(profiles[index]!)
+}

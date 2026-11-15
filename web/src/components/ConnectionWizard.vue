@@ -27,6 +27,7 @@ import {
   copyConnection,
   importConnections,
   manualConnection,
+  selectAmneziaProfile,
   MAX_CONNECTION_FILE,
   type ManualFields,
 } from '../connectionDraft'
@@ -98,7 +99,7 @@ const methods = computed(() =>
     : protocol.value === 'amneziawg'
       ? [
           { value: 'file', label: t('ui.byFile') },
-          { value: 'manual', label: t('ui.pasteConf') },
+          { value: 'manual', label: t('ui.awgPaste') },
         ]
     : protocol.value === 'wireguard'
       ? [
@@ -138,6 +139,10 @@ watch(
   },
   { deep: true },
 )
+watch(() => fields.amneziawg, () => {
+  candidates.value = []
+  chosen.value = null
+})
 const dirty = computed(
   () =>
     !!fields.name ||
@@ -194,8 +199,10 @@ async function readFile(file?: File) {
     return
   }
   try {
-    const text = await file.text(),
-      parsed: Connection[] = protocol.value === 'amneziawg'
+    const text = await file.text()
+    const parsed: Connection[] = text.trim().startsWith('vpn://')
+      ? (await api.importAmnezia(text.trim())).profiles
+      : protocol.value === 'amneziawg'
         ? [{ id: '', name: '', type: 'amneziawg', amneziawg: text }]
         : importConnections(text, file.name)
     if (seq !== fileSequence) return
@@ -205,8 +212,8 @@ async function readFile(file?: File) {
     chosen.value = parsed.length === 1 ? 0 : null
     if (!fields.name)
       fields.name = parsed[0]?.name || file.name.replace(/\.[^.]+$/, '')
-  } catch {
-    if (seq === fileSequence) error.value = t('ui.fileError')
+  } catch (cause) {
+    if (seq === fileSequence) error.value = profileError(cause, 'ui.fileError')
   }
   if (fileInput.value) fileInput.value.value = ''
 }
@@ -293,10 +300,35 @@ function validateIdentity(c: Connection) {
   )
     throw new Error('duplicate')
 }
+// Decode previews only; credentials enter the shared draft after explicit review.
+async function pastedAmnezia(): Promise<Connection> {
+  const uri = fields.amneziawg!.trim()
+  const { profiles } = await api.importAmnezia(uri)
+  if (!alive || fields.amneziawg!.trim() !== uri) throw new Error('amnezia_invalid_profile')
+  candidates.value = profiles
+  return selectAmneziaProfile(profiles, chosen.value)
+}
+
+function profileError(cause: unknown, fallback = 'ui.invalid'): string {
+  const messages: Record<string, string> = {
+    amnezia_invalid_profile: 'ui.amneziaInvalid',
+    amnezia_service_profile: 'ui.amneziaService',
+    amnezia_admin_profile: 'ui.amneziaAdmin',
+    amnezia_unsupported_profile: 'ui.amneziaUnsupported',
+    amnezia_format_version: 'ui.amneziaVersion',
+    amnezia_choose_profile: 'ui.pickProfile',
+    amnezia_demo_unavailable: 'ui.amneziaDemo',
+  }
+  const code = cause instanceof Error ? cause.message : ''
+  return t(messages[code] ?? fallback)
+}
+
 // Validate the candidate in a copied full config without saving or starting the engine.
 async function build(): Promise<Connection> {
   let candidate: Connection
-  if (method.value === 'manual') candidate = manualConnection(fields)
+  if (method.value === 'manual' && protocol.value === 'amneziawg' && fields.amneziawg?.trim().startsWith('vpn://'))
+    candidate = await pastedAmnezia()
+  else if (method.value === 'manual') candidate = manualConnection(fields)
   else if (method.value === 'link') {
     await api.parseLink(link.value.trim())
     candidate = importConnections(link.value, 'profile.txt')[0]!
@@ -335,7 +367,7 @@ async function validate() {
   } catch (e) {
     const key = (e as Error).message
     fieldError.value = key
-    error.value = key === 'duplicate' ? t('ui.duplicate') : t('ui.invalid')
+    error.value = key === 'duplicate' ? t('ui.duplicate') : profileError(e)
   } finally {
     busy.value = false
   }
@@ -355,8 +387,8 @@ async function save() {
     saved.value = true
     message.info(t('ui.afterApply'))
     emit('saved', c.id)
-  } catch {
-    error.value = t('ui.invalid')
+  } catch (cause) {
+    error.value = profileError(cause)
   } finally {
     busy.value = false
   }
@@ -466,13 +498,13 @@ async function save() {
           ><input
             ref="fileInput"
             type="file"
-            accept=".conf,.txt,.json"
+            accept=".conf,.txt,.json,.vpn"
             hidden
             @change="readFile(($event.target as HTMLInputElement).files?.[0])"
           />
         </div>
         <NSelect
-          v-if="method === 'file' && candidates.length > 1"
+          v-if="candidates.length > 1 && (method === 'file' || (method === 'manual' && protocol === 'amneziawg'))"
           v-model:value="chosen"
           :options="profileOptions"
           :placeholder="t('ui.pickProfile')"
@@ -497,7 +529,7 @@ async function save() {
             :input-props="{ autocomplete: 'off', spellcheck: false }"
         /></label>
         <label v-if="method === 'conf' || (method === 'manual' && protocol === 'amneziawg')" class="field">
-          <span>{{ protocol === 'amneziawg' ? t('ui.awgProfile') : t('ui.pasteConf') }}</span>
+          <span>{{ protocol === 'amneziawg' ? t('ui.awgImport') : t('ui.pasteConf') }}</span>
           <NInput
             v-if="protocol === 'amneziawg'"
             v-model:value="fields.amneziawg"

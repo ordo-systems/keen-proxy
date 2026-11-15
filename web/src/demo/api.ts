@@ -1,7 +1,7 @@
 import { catalog, createDemo } from './model.ts'
 import { DEMO_JOURNAL_LIMIT, DEMO_TICK_MS } from './telemetry.ts'
 import { createDemoUpdates } from './updates.ts'
-import type { Config, JournalKind, LinkPreview, Status, UpdatePreferences, UpdateSelection } from '../types'
+import type { Config, Connection, JournalKind, LinkPreview, Status, UpdatePreferences, UpdateSelection } from '../types'
 
 const demo = createDemo()
 const updates = createDemoUpdates()
@@ -79,6 +79,7 @@ export const api = {
     { mac: '02:00:00:00:00:40', ip: '192.168.7.40', hostname: 'nas.local', hostname_source: 'dns' as const },
   ],
   parseLink: async (link: string) => parseLink(link),
+  importAmnezia: async (_uri: string): Promise<{ profiles: Connection[] }> => { throw new Error('amnezia_demo_unavailable') },
   stats: async (series = false) => demo.stats(series),
   hosts: async (tag: string, q = '', limit = 200) => {
     const hosts = (demo.stats(false).outbounds?.find(o => o.tag === tag)?.top ?? []).filter(h => h.host.toLowerCase().includes(q.toLowerCase()))

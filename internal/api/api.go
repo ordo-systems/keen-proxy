@@ -120,6 +120,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/config/validate", s.auth(s.validateConfig))
 	mux.Handle("GET /api/devices", s.auth(s.devices))
 	mux.Handle("POST /api/links/parse", s.auth(s.parseLink))
+	mux.Handle("POST /api/amnezia/import", s.auth(s.amneziaImport))
 	mux.Handle("GET /api/stats", s.auth(s.stats))
 	mux.Handle("GET /api/stats/hosts", s.auth(s.hosts))
 	mux.Handle("GET /api/journal/{kind}", s.auth(s.journalPage))

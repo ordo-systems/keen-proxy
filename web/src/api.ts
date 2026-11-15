@@ -1,4 +1,4 @@
-import type { DiagnosticReport, Catalog, FeatureStatus, DNSCheck, Config, GeoLookup, GeoStatus, Device, DomainStatus, Session, HostStat, JournalKind, JournalPage, LinkPreview, StatsSnapshot, Status } from './types'
+import type { Connection, DiagnosticReport, Catalog, FeatureStatus, DNSCheck, Config, GeoLookup, GeoStatus, Device, DomainStatus, Session, HostStat, JournalKind, JournalPage, LinkPreview, StatsSnapshot, Status } from './types'
 import type { UpdatePreferences, UpdateSelection, UpdateStatus } from './types'
 import { ApiError } from './apiError.ts'
 
@@ -81,6 +81,7 @@ export const api = {
   validateConfig: (cfg: Config) => request<{ ok: boolean }>('POST', '/api/config/validate', cfg),
   devices: () => request<Device[]>('GET', '/api/devices'),
   parseLink: (link: string) => request<LinkPreview>('POST', '/api/links/parse', { link }),
+  importAmnezia: (uri: string) => request<{ profiles: Connection[] }>('POST', '/api/amnezia/import', { uri }),
   stats: (series = false) => request<StatsSnapshot>('GET', `/api/stats${series ? '?series=1' : ''}`),
   hosts: (tag: string, q = '', limit = 200) =>
     request<{ hosts: HostStat[]; total: number }>(

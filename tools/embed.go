@@ -1,4 +1,4 @@
-// Package tools exposes the release installer to the managed Entware updater.
+// Package tools exposes the release installer to the managed updater.
 package tools
 
 import _ "embed"

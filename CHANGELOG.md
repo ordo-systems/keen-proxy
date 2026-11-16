@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Add full and lite Linux release binaries for x86-64 (AMD64 v1) and 32-bit x86 with SSE2; these use manual installation rather than the ARM64/MIPSLE Entware bootstrap.
+- Add full and lite Linux release binaries for x86-64 (AMD64 v1) and 32-bit x86 with SSE2, preserving the pinned compiler and embedded protocol features.
+- Support native OpenWrt installation and managed updates through procd on all six release architectures; retain Entware installation and expand its architecture selection. Preserve configuration, checksums, staged validation, and failed-start rollback. Native updates require the new checksummed `keenproxy.openwrt` release asset.
+- Raise the documented minimum to 256 MiB of total router RAM for OpenWrt and Keenetic/Netcraze, including lite builds; retain memory headroom warnings and distinguish this requirement from the soft Go memory recommendation.
 - Experimental AmneziaWG 2/3 single-peer `.conf` import and editing through the shared draft/Apply workflow, using pinned sing-box-lx 1.14.4-lx.35 and matching dependency forks.
 - Keep existing DNS ownership and participant UDP/443 rejection; no Amnezia subscription integration.
 - Enable XHTTP, preserve VLESS encryption and expose REALITY key-share/TLS fragmentation options when importing connection links.

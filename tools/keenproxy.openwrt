@@ -1,0 +1,106 @@
+#!/bin/sh /etc/rc.common
+# KeenProxy OpenWrt service
+START=99
+STOP=10
+USE_PROCD=1
+
+keenproxy_root=${KEENPROXY_PREFIX:-/}
+keenproxy_root=${keenproxy_root%/}
+keenproxy_binary="$keenproxy_root/usr/bin/keenproxy"
+keenproxy_state="$keenproxy_root/var/run/keenproxy"
+
+keenproxy_lock() {
+    mkdir -p "$keenproxy_state" || return 1
+    keenproxy_lock_owned=0
+    if [ -n "${KEENPROXY_SERVICE_LOCK_TOKEN:-}" ]; then
+        local owner=
+        [ ! -r "$keenproxy_state/action.lock/owner" ] ||
+            read -r owner < "$keenproxy_state/action.lock/owner"
+        [ "$owner" = "$KEENPROXY_SERVICE_LOCK_TOKEN" ] || {
+            echo 'KeenProxy: invalid installer lock' >&2
+            return 1
+        }
+    else
+        mkdir "$keenproxy_state/action.lock" 2>/dev/null || {
+            echo 'KeenProxy: service action already in progress' >&2
+            return 1
+        }
+        keenproxy_lock_owned=1
+    fi
+}
+
+keenproxy_unlock() {
+    [ "${keenproxy_lock_owned:-0}" != 1 ] || rmdir "$keenproxy_state/action.lock"
+    keenproxy_lock_owned=0
+}
+
+keenproxy_running() {
+    local pid target
+    for pid in $(pidof keenproxy 2>/dev/null); do
+        target=$(readlink "/proc/$pid/exe" 2>/dev/null) || continue
+        [ "$target" != "$keenproxy_binary" ] || return 0
+    done
+    return 1
+}
+
+start_service() {
+    procd_open_instance
+    procd_set_param command "$keenproxy_binary" \
+        -config "$keenproxy_root/etc/keenproxy/config.yaml" \
+        -rule-sets "$keenproxy_root/var/lib/keenproxy/rule-sets" \
+        -iptables "$keenproxy_root/usr/sbin/iptables" \
+        -iptables-restore "$keenproxy_root/usr/sbin/iptables-restore"
+    if [ -r "$keenproxy_root/etc/ssl/certs/ca-certificates.crt" ]; then
+        procd_set_param env "SSL_CERT_FILE=$keenproxy_root/etc/ssl/certs/ca-certificates.crt"
+    fi
+    procd_set_param term_timeout 30
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+}
+
+# rc.common invokes this after submitting the instance to procd. Never invoke
+# rc.common recursively here: its per-service procd flock is still held.
+service_started() {
+    local remaining=20
+    while [ "$remaining" -gt 0 ]; do
+        if procd_running keenproxy &&
+            "$keenproxy_root/usr/sbin/iptables" -t nat -C PREROUTING -j KEENPROXY_DNS >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+        remaining=$((remaining - 1))
+    done
+    echo 'KeenProxy: startup failed; inspect the system journal' >&2
+    procd_kill keenproxy
+    service_stopped
+    return 1
+}
+
+stop_service() {
+    return 0
+}
+
+# procd_kill is asynchronous. Wait for the foreground daemon to finish its
+# firewall cleanup before allowing an executable replacement or rollback.
+service_stopped() {
+    local remaining=35
+    while keenproxy_running && [ "$remaining" -gt 0 ]; do
+        sleep 1
+        remaining=$((remaining - 1))
+    done
+    if keenproxy_running; then
+        echo 'KeenProxy: process did not stop cleanly' >&2
+        return 1
+    fi
+    return 0
+}
+
+# Lock before rc.common loads procd.sh and takes its flock. Taking this lock
+# inside a procd callback would invert the installer's lock order and deadlock.
+case "${action:-}" in
+    start|stop|restart|reload|boot|shutdown)
+        keenproxy_lock || exit 1
+        trap keenproxy_unlock EXIT
+        trap 'exit 1' HUP INT TERM ;;
+esac

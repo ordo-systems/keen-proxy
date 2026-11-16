@@ -4,9 +4,9 @@
 
 Selective traffic routing for Keenetic and Netcraze routers running Entware, with an embedded [sing-box-lx](https://github.com/Leadaxe/sing-box-lx) engine and a Vue web interface. This experimental branch pins lx.35 on the sing-box 1.14.4 base.
 
-KeenProxy lets you choose which devices, domains, IP ranges, and countries use a tunnel, connect directly, or are blocked. The web panel shows router load and lets you install, schedule, or roll back releases on a managed Entware installation. Router compatibility and protocol support depend on the firmware, kernel modules, and build tags. The project is experimental.
+KeenProxy lets you choose which devices, domains, IP ranges, and countries use a tunnel, connect directly, or are blocked. The web panel shows router load and lets you install, schedule, or roll back releases on managed Entware and native OpenWrt installations. Router compatibility and protocol support depend on the firmware, kernel modules, and build tags. The project is experimental.
 
-Experimental OpenWrt builds target x86-64, 32-bit x86 with SSE2, ARM32, ARM64, little-endian MIPS, and big-endian MIPS routers with at least 128 MiB of RAM. [OpenWrt requirements](docs/en/getting-started.md#experimental-openwrt-support)
+KeenProxy requires **at least 256 MiB of total router RAM** on Keenetic/Netcraze and OpenWrt. Leave memory headroom for firmware and other services; this is not a guarantee that every workload fits. Experimental OpenWrt builds target x86-64, 32-bit x86 with SSE2, ARM32, ARM64, little-endian MIPS, and big-endian MIPS. [Router requirements](docs/en/getting-started.md#experimental-openwrt-support)
 
 [![KeenProxy web panel overview with tunnel traffic, router load, and connection status (synthetic demo data)](docs/assets/screenshots/readme-overview.png)](https://ordo-systems.github.io/keen-proxy/demo/)
 
@@ -20,7 +20,7 @@ Experimental OpenWrt builds target x86-64, 32-bit x86 with SSE2, ARM32, ARM64, l
 - Device and network policies: split routing, full tunneling, direct access, and per-device overrides identified by MAC address.
 - Domain, IP/CIDR, and country groups, including country exclusions. Within routed policies, explicit domain/address rules precede country rules; global block groups are applied first.
 - Domain detection from TLS SNI or HTTP Host, with a bounded IPv4 DNS-answer cache as a fallback when the connection has no readable hostname.
-- WireGuard, AmneziaWG 2/3 single-peer `.conf` profiles, supported sing-box connection links, raw sing-box outbounds/endpoints, and an optional external TrustTunnel client.
+- WireGuard, AmneziaWG 2/3 single-peer `.conf` profiles, supported sing-box connection links, raw sing-box outbounds/endpoints, and embedded TrustTunnel.
 - Connection failover with recovery hysteresis and explicit direct fallback where configured.
 - A UDP/TCP DNS frontend, public resolver presets, DoH/DoT, selectable DNS routing, and DNS-only blocklists.
 - Community domain presets with preview and managed updates that preserve manual additions and exclusions.
@@ -44,7 +44,7 @@ Requirements:
 - Go **1.27.3**, declared by the `go` directive in `go.mod`; Makefile commands select this compiler through `GOTOOLCHAIN`.
 - Node.js **22.12+** (or another Vite-compatible version) and npm.
 - Docker for the network-namespace integration suite.
-- For a router: Entware, supported Linux kernel facilities, and compatible iptables tools.
+- For a router: Entware or native OpenWrt/procd, supported Linux kernel facilities, and compatible iptables tools.
 
 From the repository root:
 
@@ -86,14 +86,18 @@ The bilingual documentation source is in [docs/en/](docs/en/index.md) and [docs/
 
 Start with [examples/config.yaml](examples/config.yaml) and [examples/connections.yaml](examples/connections.yaml). Example keys, addresses, and credentials are placeholders and must be replaced. Keep real configuration files and support exports out of Git.
 
-The default paths are:
+The managed installation paths are:
 
-| Item | Default |
-| --- | --- |
-| Configuration | `/opt/etc/keenproxy/config.yaml` |
-| API token | `/opt/etc/keenproxy/token` |
-| Rule sets and derived state | `/opt/var/lib/keenproxy/` |
-| API listener | Defined by `api.listen` |
+| Item | Entware | Native OpenWrt |
+| --- | --- | --- |
+| Binary | `/opt/bin/keenproxy` | `/usr/bin/keenproxy` |
+| Configuration | `/opt/etc/keenproxy/config.yaml` | `/etc/keenproxy/config.yaml` |
+| API token on a clean install | `/opt/etc/keenproxy/token` | `/etc/keenproxy/token` |
+| Rule sets and derived state | `/opt/var/lib/keenproxy/` | `/var/lib/keenproxy/` |
+| Service | `/opt/etc/init.d/S99keenproxy` | `/etc/init.d/keenproxy` (procd) |
+| Release record and updater settings | `/opt/share/keenproxy/` and `/opt/var/lib/keenproxy/updates/` | `/usr/share/keenproxy/` |
+
+OpenWrt `/var` is normally volatile; configuration and update preferences use persistent paths. The native starter configuration selects `br-lan`; change it if your LAN bridge has another name. Existing configuration is never rewritten to select a different bridge.
 
 On a prepared Entware router, install `curl` and a CA bundle if needed. Run these commands from the Entware root shell. [Router preparation guide](docs/en/getting-started.md#prepare-the-router)
 
@@ -102,7 +106,7 @@ opkg update && opkg install curl ca-bundle ca-certificates
 curl -fsSL https://raw.githubusercontent.com/ordo-systems/keen-proxy/main/tools/bootstrap.sh | /opt/bin/sh
 ```
 
-The bootstrap reads `version.txt` from `main`, selects the ARM64 or MIPSLE asset, and verifies the binary and installer files against the tagged release's `SHA256SUMS`. It installs missing Entware `iptables` tools and registers and starts `/opt/etc/init.d/S99keenproxy`. TrustTunnel runs inside the embedded engine; no separate client is downloaded or supervised. Entware runs the init script on boot. The first start enables LAN DNS interception even with an empty routing policy. Stop any competing interceptor first.
+The bootstrap reads `version.txt` from `main`, selects the matching full/lite asset for one of the six release architectures, and verifies release files against `SHA256SUMS`. On Entware it installs missing `iptables` tools and registers and starts `/opt/etc/init.d/S99keenproxy`. TrustTunnel runs inside the embedded engine; no separate client is downloaded or supervised. The first start enables LAN DNS interception even with an empty routing policy. Stop any competing interceptor first.
 
 After successful installation or command-line update, the bootstrap prints the panel URL when available. Run `keenproxy --url` to display it again and `keenproxy --key` to print the current login token from the configured token file. These commands do not start the service or generate a token; use `--config /path/to/config.yaml` for a non-default configuration. Keep token output private. See [panel access](docs/en/user-guide.md#access-the-panel).
 
@@ -113,6 +117,14 @@ curl -fsSL https://raw.githubusercontent.com/ordo-systems/keen-proxy/main/tools/
 ```
 
 Replace `vX.Y.Z` with a real release tag. The release must contain the binary, `install.sh`, `S99keenproxy`, and `SHA256SUMS`. If assets are still publishing, retry when they are available. Check or stop the service with `/opt/etc/init.d/S99keenproxy status` or `/opt/etc/init.d/S99keenproxy stop`.
+
+For **native OpenWrt without Entware**, prepare the system dependencies and run the bootstrap with `/bin/sh`; see the [native installation guide](docs/en/getting-started.md#native-openwrt-installation). It installs `/usr/bin/keenproxy`, enables `/etc/init.d/keenproxy` under procd, and supports panel updates on all six release architectures. Native releases must also contain the checksummed `keenproxy.openwrt` service asset. A release predating that asset cannot be installed or selected as a native rollback target.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ordo-systems/keen-proxy/main/tools/bootstrap.sh | KEENPROXY_PLATFORM=openwrt /bin/sh
+```
+
+Use `keenproxy --key -config /etc/keenproxy/config.yaml` and `keenproxy --url -config /etc/keenproxy/config.yaml` for native configuration; the standalone CLI's default configuration path remains the Entware path. Service commands are `/etc/init.d/keenproxy status`, `start`, `stop`, and `restart`. To uninstall, rerun the native command with `/bin/sh -s -- --uninstall`; settings, tokens, and updater preferences are retained. Existing managed Entware installations on OpenWrt are not automatically migrated.
 
 To remove an installation managed by the bootstrap:
 

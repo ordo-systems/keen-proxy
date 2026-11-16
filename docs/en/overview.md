@@ -2,7 +2,7 @@
 
 ![KeenProxy logo](../assets/logo.png){ width="128" style="vertical-align: middle" } &nbsp; ![Ordo Systems](../assets/ordo-systems-logo.png){ width="160" style="vertical-align: middle" }
 
-KeenProxy is an experimental routing application for Keenetic and Netcraze routers with Entware, with experimental manual installation on OpenWrt. It lets you send selected domains, addresses, countries, networks, or devices through a connection, connect directly, or block them. The web interface is the control panel; the router daemon applies the configuration and owns network effects.
+KeenProxy is an experimental routing application for Keenetic and Netcraze routers with Entware and native OpenWrt routers using procd. It lets you send selected domains, addresses, countries, networks, or devices through a connection, connect directly, or block them. The web interface is the control panel; the router daemon applies the configuration and owns network effects. Firmware and iptables compatibility still require verification on the target router.
 
 ## Start here
 

@@ -52,7 +52,7 @@ CGO_ENABLED=0 make vet
 cd web && npm test && npm run build
 ```
 
-The Entware service tests use a C compiler (`cc`) on Linux to build a small test daemon. They run as part of `make test-install` and use a temporary prefix without accessing a router.
+The Entware service tests use a C compiler (`cc`) on Linux to build a small test daemon. Release recovery tests execute the workflow's Bash payloads with GNU tar and coreutils against synthetic release files. These checks run as part of `make test-install` and use temporary paths without accessing a router or publishing assets.
 
 For routing, DNS, or firewall behavior, also run `make integration` with Docker. This uses a privileged disposable container; review the Makefile and test script before running it. Changes to separate tools should be tested from their own Go modules as appropriate.
 

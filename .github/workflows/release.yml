@@ -104,6 +104,11 @@ jobs:
             | gzip -n > dist/keenproxy-source.tar.gz
           cp tools/install.sh dist/install.sh
           cp tools/S99keenproxy dist/S99keenproxy
+          service_assets=(install.sh S99keenproxy)
+          if [ -f tools/keenproxy.openwrt ]; then
+            cp tools/keenproxy.openwrt dist/keenproxy.openwrt
+            service_assets+=(keenproxy.openwrt)
+          fi
           cp LICENSE THIRD_PARTY_NOTICES.md dist/
           cp -R LICENSES dist/
           {
@@ -120,12 +125,15 @@ jobs:
             | gzip -n > dist/keenproxy-notices.tar.gz
           cd dist
           sha256sum keenproxy-linux-* keenproxy-lite-linux-* keenproxy-source.tar.gz \
-            keenproxy-notices.tar.gz install.sh S99keenproxy BUILD_INFO.txt > SHA256SUMS
+            keenproxy-notices.tar.gz "${service_assets[@]}" BUILD_INFO.txt > SHA256SUMS
       - name: Attach missing assets without overwriting published files
         run: |
           assets=(dist/keenproxy-linux-* dist/keenproxy-lite-linux-* \
             dist/keenproxy-source.tar.gz dist/keenproxy-notices.tar.gz \
             dist/install.sh dist/S99keenproxy dist/BUILD_INFO.txt dist/SHA256SUMS)
+          if [ -f tools/keenproxy.openwrt ]; then
+            assets+=(dist/keenproxy.openwrt)
+          fi
           existing=$(mktemp -d)
           gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' > "$existing/names"
           for asset in "${assets[@]}"; do

@@ -2,20 +2,59 @@
 
 ## Experimental OpenWrt support
 
-You can try KeenProxy on OpenWrt routers with **at least 128 MiB of RAM** and enough storage for the binary and its data. Releases provide full and lite Linux binaries for x86-64 (`amd64`, baseline v1), 32-bit x86 (`386`, requires SSE2), ARM32 (ARMv5 or later, soft float, suffix `armv5`), ARM64 (`arm64`), little-endian MIPS (`mipsle`, soft float), and big-endian MIPS (`mipsbe`, soft float).
+KeenProxy requires **at least 256 MiB of total RAM** on OpenWrt and Keenetic/Netcraze routers, plus enough storage for the binary and its data. Releases provide full and lite Linux binaries for x86-64 (`amd64`, baseline v1), 32-bit x86 (`386`, requires SSE2), ARM32 (ARMv5 or later, soft float, suffix `armv5`), ARM64 (`arm64`), little-endian MIPS (`mipsle`, soft float), and big-endian MIPS (`mipsbe`, soft float).
 
-OpenWrt testing uses a manually installed binary and configuration. The automated installation and update instructions below apply to Keenetic and Netcraze with Entware. The current interception runtime requires compatible `iptables`, `iptables-restore`, and kernel support. Verify interception with a test client on your firmware, especially on systems using firewall4. [OpenWrt netfilter documentation](https://openwrt.org/docs/guide-user/firewall/netfilter_iptables/netfilter_management)
+Native OpenWrt installation and panel updates use the system shell and procd, without Entware. Both native OpenWrt and Entware support the six release architectures listed above. The interception runtime still requires compatible `iptables`, `iptables-restore`, and kernel support. Verify interception with a test client on your firmware, especially on systems using firewall4. This does not add a native nftables backend. [OpenWrt netfilter documentation](https://openwrt.org/docs/guide-user/firewall/netfilter_iptables/netfilter_management)
 
 The optional NDM netfilter hook is specific to compatible Keenetic/Netcraze firmware. On OpenWrt without NDM it stays disabled and creates no NDM hook or event files; the regular watchdog continues checking every 30 seconds by default. No OpenWrt hotplug or firewall4 integration is installed. See [firewall recovery](network-flow.md#how-firewall-rules-recover-after-a-firmware-change).
+
+### Native OpenWrt installation
+
+Keep SSH/LAN recovery access, back up the configuration, and stop competing DNS/traffic interceptors. The service starts LAN DNS interception on its first start. Ensure enough persistent overlay storage for the binary, a staged replacement, and a rollback copy; `/tmp` free space alone is not sufficient.
+
+Install `curl`, CA certificates, and compatible iptables tools using the package manager for your firmware (`opkg` or `apk`). Package names vary by release; common choices include `curl`, `ca-bundle`, and `iptables-nft`. REDIRECT needs NAT support; UDP TPROXY additionally needs matching TPROXY/mangle modules. Installing a package does not prove its compatibility with your firmware.
+
+Check the native environment before installation:
+
+```sh
+uname -m
+df -h /overlay /usr
+free
+test -x /sbin/procd && test -f /etc/openwrt_release
+test -x /usr/sbin/iptables-restore
+/usr/sbin/iptables -t nat -S
+```
+
+Then run as root:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ordo-systems/keen-proxy/main/tools/bootstrap.sh | KEENPROXY_PLATFORM=openwrt /bin/sh
+```
+
+The bootstrap installs `/usr/bin/keenproxy`, enables `/etc/init.d/keenproxy` for boot through procd, and starts the service. It verifies checksums and validates the configuration before replacing a running version. A failed startup triggers restoration of the previous files and service. Full and lite builds both embed TrustTunnel; no external helper is needed.
+
+The clean configuration is `/etc/keenproxy/config.yaml`, with `api.token_file: /etc/keenproxy/token` and `lan.interface: br-lan`. Change the bridge name if your firmware differs. Existing configurations and tokens are preserved. The CLI retains Entware defaults, so pass the native configuration explicitly:
+
+```sh
+keenproxy --url -config /etc/keenproxy/config.yaml
+keenproxy --key -config /etc/keenproxy/config.yaml
+/etc/init.d/keenproxy status
+```
+
+Use the same bootstrap command to update. Append `-s -- --version vX.Y.Z --lite` to `/bin/sh` to choose a release/variant; append `-s -- --uninstall` to stop and disable the native service and remove its binary/init script while retaining settings. Panel updates and scheduling work as described below.
+
+Native release transactions require the checksummed `keenproxy.openwrt` asset. Older releases without it are not valid native installation or rollback targets; rejection leaves the running version unchanged. Release records and update preferences live persistently under `/usr/share/keenproxy/`; rule sets, logs, and derived state under `/var/lib/keenproxy/` are normally volatile on OpenWrt.
+
+Automatic detection preserves an existing managed Entware installation rather than migrating it on an OpenWrt host. `KEENPROXY_PLATFORM=openwrt` explicitly selects native installation; do not run native and Entware instances simultaneously. The remaining router-preparation and Entware shell commands below describe the Entware path only.
 
 ## Prepare the router
 
 ### Hardware and firmware
 
-- **CPU.** The Entware installer supports ARM64 (`aarch64`) and little-endian MIPS (`mipsle` or `mipsel`, soft float). Look up the exact model number in the router manual. For MIPS, confirm the byte order with the Entware package architecture or the model guide.
+- **CPU.** The installer supports the six release architectures listed above. Use a matching Linux userspace; 32-bit x86 requires SSE2. For MIPS, confirm the byte order with the package architecture or the model guide.
 - **Firmware.** Use a Keenetic or Netcraze model with Open Package support (OPKG), an Entware shell, and compatible `iptables` tools. TCP interception uses REDIRECT. UDP interception in `tproxy` mode also requires kernel TPROXY support and policy routing.
 - **Storage.** Use an external USB drive for Entware and KeenProxy. Compare the release binary size with the free space on `/opt` and leave room for Entware, the configuration, rule sets and filter data, and a rollback copy. The lite binary is smaller and supports fewer protocols.
-- **RAM.** The project has no validated minimum across models. Check available memory with your usual router services running. Leave headroom for the engine, connections, and enabled lists, and monitor memory during the first test with your own configuration.
+- **RAM.** At least **256 MiB of total router RAM**, including for lite builds. This is the supported hardware floor, not a guarantee that every workload fits. Check available memory with your usual router services running; reserve headroom for firmware, the engine, connections, and enabled lists. Monitor memory during the first test with your own configuration. The default 768 MiB Go memory recommendation is not a physical-memory requirement or a hard RSS limit.
 
 **Recommended firmware component.** Enable **Kernel modules for Netfilter** alongside OPKG if your model offers it. It supplies kernel support for packet filtering used by `iptables`; the Entware commands are a separate prerequisite. Check the component list for your exact model. [KeeneticOS component reference](https://support.keenetic.com/hopper/kn-3810/en/16327-os-component-description.html)
 
@@ -78,7 +117,7 @@ The tag must have installer assets and checksums attached. If publication is sti
 
 ## Update from the panel
 
-On a managed Entware installation, **Settings → Updates** shows the installed version, the latest available stable release, and the previous installed version when recorded. Upgrade once with the command-line bootstrap if the current build predates panel updates. To make that older release a rollback target, first rerun the current bootstrap with the exact tag and build variant already installed, then upgrade. Update actions and schedule changes require the panel token, including on trusted networks.
+On a managed Entware or native OpenWrt installation, **Settings → Updates** shows the installed version, the latest available stable release, and the previous installed version when recorded. Upgrade once with the command-line bootstrap if the current build predates panel updates. To make that older release a rollback target, first rerun the current bootstrap with the exact tag and build variant already installed, then upgrade. Native OpenWrt additionally requires that target release's procd asset. Update actions and schedule changes require the panel token, including on trusted networks.
 
 Automatic installation is off by default. The panel still checks for releases. Enable automatic installation and save a time to install available releases during that minute in the router's local time, once per day while the service is running. Installation briefly restarts KeenProxy.
 

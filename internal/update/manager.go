@@ -22,7 +22,7 @@ const (
 )
 
 var (
-	ErrUnavailable = errors.New("updates require a managed Entware installation")
+	ErrUnavailable = errors.New("updates require a managed installation")
 	ErrPreferences = errors.New("expected a router-local time in HH:MM format")
 	ErrTarget      = errors.New("the requested release is no longer available")
 	ErrBusy        = errors.New("an update is already running")
@@ -64,11 +64,13 @@ type Status struct {
 type Manager struct {
 	mu                  sync.Mutex
 	metadata, dir, arch string
+	platform            string
 	prefix, shell       string
 	client              *http.Client
 	log                 *slog.Logger
 	start               func(installState, string) error
 	latest, variant     string
+	rollbackReady       string
 	checked             time.Time
 	checkFailed         bool
 }
@@ -142,6 +144,9 @@ func (m *Manager) Status() Status {
 	defer m.mu.Unlock()
 	s.Available = true
 	s.Current, s.Previous = current.Current, current.Previous
+	if m.platform == "openwrt" && m.rollbackReady != current.Previous {
+		s.Previous = ""
+	}
 	if prefs, err := m.settings(); err == nil {
 		s.Preferences = prefs.Preferences
 	}
@@ -170,10 +175,26 @@ func (m *Manager) Check(ctx context.Context, manual bool) {
 	if m.variant == current.Variant && time.Since(m.checked) < interval {
 		return
 	}
-	latest, err := fetchLatest(ctx, m.client, current.Variant, m.arch)
+	latest, err := fetchLatest(ctx, m.client, current.Variant, m.arch, m.platform)
 	m.latest, m.variant, m.checked, m.checkFailed = latest, current.Variant, time.Now(), err != nil
 	if err != nil {
 		m.log.Debug("release check failed", "err", err)
+	}
+	m.confirmRollback(ctx, current)
+}
+
+func (m *Manager) confirmRollback(ctx context.Context, current installState) {
+	m.rollbackReady = ""
+	if m.platform != "openwrt" || current.Previous == "" {
+		return
+	}
+	tag, err := fetchTagged(ctx, m.client, current.Previous, current.Variant, m.arch, m.platform)
+	if err != nil {
+		m.log.Debug("previous release is not a native rollback target", "err", err)
+		return
+	}
+	if tag == current.Previous {
+		m.rollbackReady = tag
 	}
 }
 

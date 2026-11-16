@@ -427,7 +427,7 @@ done
         first = self.release('v1.2.3')
         self.assertEqual(self.install().returncode, 0)
         self.assertNotEqual(self.install('--version', 'v1.2.4').returncode, 0)
-        self.env['CPU'] = 'armv7l'
+        self.env['CPU'] = 'riscv64'
         self.assertNotEqual(self.install().returncode, 0)
         self.assertEqual(self.binary.read_bytes(), first.read_bytes())
         self.assertTrue((self.prefix / 'running').exists())

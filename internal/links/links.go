@@ -239,6 +239,10 @@ func withTLSAndTransport(o Outbound, q url.Values, host string, forceTLS bool) e
 	if err != nil {
 		return err
 	}
+	// Vision needs the encryption layer because XHTTP exposes a stream, not its TLS connection.
+	if tr["type"] == "xhttp" && o["flow"] == "xtls-rprx-vision" && o["encryption"] == nil {
+		return fmt.Errorf("vless: XHTTP with xtls-rprx-vision requires VLESS encryption")
+	}
 	if tr != nil {
 		o["transport"] = tr
 	}

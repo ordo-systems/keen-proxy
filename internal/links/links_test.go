@@ -114,6 +114,41 @@ func TestVLESSEncryptionPreserved(t *testing.T) {
 	}
 }
 
+func TestVLESSVisionTransportCompatibility(t *testing.T) {
+	for _, transport := range []string{"xhttp", "splithttp", "XHTTP", "tcp"} {
+		for _, encryption := range []string{"", "none", "NONE", " none ", " \t", supportedVLESSEncryption} {
+			for _, flow := range []string{"", "xtls-rprx-vision"} {
+				t.Run(transport+"/"+url.QueryEscape(encryption)+"/"+flow, func(t *testing.T) {
+					q := url.Values{"type": {transport}, "security": {"tls"}, "flow": {flow}, "encryption": {encryption}}
+					o, err := Parse("vless://11111111-2222-3333-4444-555555555555@203.0.113.1:443?" + q.Encode())
+					encrypted := encryption == supportedVLESSEncryption
+					if transport != "tcp" && flow != "" && !encrypted {
+						if err == nil || !strings.Contains(err.Error(), "requires VLESS encryption") {
+							t.Fatalf("incompatible XHTTP/Vision profile: error = %v", err)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					if flow != "" && o["flow"] != flow {
+						t.Fatalf("Vision flow was lost: %#v", o["flow"])
+					}
+					if encrypted && o["encryption"] != supportedVLESSEncryption {
+						t.Fatalf("VLESS encryption was lost: %#v", o["encryption"])
+					}
+					if !encrypted && o["encryption"] != nil {
+						t.Fatalf("disabled encryption became a layer: %#v", o["encryption"])
+					}
+					if transport != "tcp" && get(o, "transport.type") != "xhttp" {
+						t.Fatalf("XHTTP transport was lost: %#v", o["transport"])
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestXHTTPPreservesModePathHostAndExtra(t *testing.T) {
 	q := url.Values{}
 	q.Set("type", "splithttp")

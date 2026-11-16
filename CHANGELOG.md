@@ -5,6 +5,7 @@
 - Experimental AmneziaWG 2/3 single-peer `.conf` import and editing through the shared draft/Apply workflow, using pinned sing-box-lx 1.14.4-lx.35 and matching dependency forks.
 - Keep existing DNS ownership and participant UDP/443 rejection; no Amnezia subscription integration.
 - Enable XHTTP, preserve VLESS encryption and expose REALITY key-share/TLS fragmentation options when importing connection links.
+- Reject XHTTP/Vision links without VLESS encryption while preserving compatible encrypted profiles.
 - Replace the external TrustTunnel client with the embedded lx outbound, migrate legacy connection settings on load, and remove external-client installation and process status.
 - Keep lite builds without QUIC/HTTP/3; both registries support XHTTP and native TrustTunnel over TCP/TLS.
 - Keep sing-box-lx v1.14.4-lx.35 and its four dependency forks pinned as versioned Go modules; use Go 1.27.3 consistently in local builds and CI.

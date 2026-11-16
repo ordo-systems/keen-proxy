@@ -66,6 +66,7 @@ connections:
   - id: tt
     type: trusttunnel
     trusttunnel: {link: "%[6]s"}
+  - {id: xhttp, type: link, link: "vless://%[1]s@203.0.113.12:443?type=xhttp&security=tls&sni=www.example.com&mode=packet-up&path=/xhttp"}
 groups:
   - {name: All, target: reality, entries: ["example.org"]}
 networks:
@@ -110,16 +111,30 @@ func TestAllConnectionTypesAccepted(t *testing.T) {
 	}
 	for tag, want := range map[string]string{
 		"reality": "vless", "vmess": "vmess", "trojan": "trojan", "ss": "shadowsocks", "hy2": "hysteria2",
-		"tuic": "tuic", "anytls": "anytls", "socks": "socks", "raw-http": "http", "raw-wg": "wireguard", "tt": "socks",
+		"tuic": "tuic", "anytls": "anytls", "socks": "socks", "raw-http": "http", "raw-wg": "wireguard", "tt": "trusttunnel", "xhttp": "vless",
 	} {
 		if types[tag] != want {
 			t.Errorf("%s: type %q, expected %q", tag, types[tag], want)
 		}
 	}
-
-	if len(out.TrustTunnel) != 1 || out.TrustTunnel[0].SocksPort != 17100 ||
-		!strings.Contains(out.TrustTunnel[0].Config, `address = "127.0.0.1:17100"`) {
-		t.Errorf("TrustTunnel: %+v", out.TrustTunnel)
+	for _, o := range parsed.Outbounds {
+		if o["tag"] != "tt" {
+			continue
+		}
+		tlsOpts, _ := o["tls"].(map[string]any)
+		if o["server"] != "203.0.113.50" || o["server_port"] != float64(443) ||
+			tlsOpts["server_name"] != "vpn.example.com" || tlsOpts["enabled"] != true || tlsOpts["insecure"] == true {
+			t.Errorf("TrustTunnel outbound weakened TLS or endpoint routing: %#v", o)
+		}
+	}
+	for _, o := range parsed.Outbounds {
+		if o["tag"] != "xhttp" {
+			continue
+		}
+		transport, _ := o["transport"].(map[string]any)
+		if transport["type"] != "xhttp" || transport["mode"] != "packet-up" {
+			t.Errorf("XHTTP transport was dropped: %#v", o["transport"])
+		}
 	}
 	bypass := map[string]bool{}
 	for _, b := range out.Plan.Bypass {
@@ -134,7 +149,7 @@ func TestAllConnectionTypesAccepted(t *testing.T) {
 
 func TestBadConnections(t *testing.T) {
 	for conn, want := range map[string]string{
-		`{id: x, type: link, link: "vless://u@h:443?type=xhttp"}`:           "Xray",
+		`{id: x, type: link, link: "vless://u@h:443?type=xhttp&mode=nope"}`: "mode",
 		`{id: x, type: singbox, outbound: {server: h}}`:                     "missing type",
 		`{id: x, type: singbox, outbound: {type: http, tag: y}}`:            "tag",
 		`{id: x, type: trusttunnel, trusttunnel: {link: "tt://?AQ"}}`:       "truncated",

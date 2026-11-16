@@ -41,12 +41,20 @@ Readable hostnames remain the primary routing signal. DNS-derived IP rules are u
 
 Requirements:
 
-- Go **1.27.3** or the compatible toolchain selected by `go.mod`.
+- Go **1.27.3**, declared by the `go` directive in `go.mod`; Makefile commands select this compiler through `GOTOOLCHAIN`.
 - Node.js **22.12+** (or another Vite-compatible version) and npm.
 - Docker for the network-namespace integration suite.
 - For a router: Entware, supported Linux kernel facilities, and compatible iptables tools.
 
 From the repository root:
+
+Download the pinned Go modules; no Git submodules are required:
+
+```sh
+go mod download
+```
+
+The root `go.mod` preserves upstream import paths and pins sing-box-lx `v1.14.4-lx.35` plus its matching WireGuard/AWG, sing-tun, gVisor and uTLS forks through five versioned `replace` directives. Update these pins as a reviewed release snapshot, not with `@latest`.
 
 ```sh
 make ui-demo
@@ -70,7 +78,7 @@ make build-router        # Linux ARMv5, ARM64, MIPS little-endian, and MIPS big-
 make build-router-lite   # Smaller protocol set for constrained routers
 ```
 
-The full build enables QUIC, uTLS, WireGuard/AmneziaWG, and gVisor. The lite registry also supports AWG but excludes several other protocols; see `internal/engine/registry_lite.go`. XHTTP is not enabled by our build tags. See the [AWG guide](docs/en/user-guide.md#amneziawg-profiles-experimental-lx-build) for import and rollback constraints.
+The full build enables QUIC, uTLS, WireGuard/AmneziaWG, gVisor, XHTTP and native TrustTunnel. The lite registry retains XHTTP and TrustTunnel over TCP/TLS but excludes QUIC/HTTP/3 and several other protocols; see `internal/engine/registry_lite.go`. See the [connection guide](docs/en/user-guide.md#sing-box-lx-compatibility) for supported link parameters and migration limits.
 
 ## Configuration and router installation
 
@@ -94,14 +102,14 @@ opkg update && opkg install curl ca-bundle ca-certificates
 curl -fsSL https://raw.githubusercontent.com/ordo-systems/keen-proxy/main/tools/bootstrap.sh | /opt/bin/sh
 ```
 
-The bootstrap reads `version.txt` from `main`, selects the ARM64 or MIPSLE asset, and verifies the binary and installer files against the tagged release's `SHA256SUMS`. It installs missing Entware `iptables` tools, installs the pinned TrustTunnel client by default, and registers and starts `/opt/etc/init.d/S99keenproxy`. Entware runs the init script on boot. The first start enables LAN DNS interception even with an empty routing policy. Stop any competing interceptor first.
+The bootstrap reads `version.txt` from `main`, selects the ARM64 or MIPSLE asset, and verifies the binary and installer files against the tagged release's `SHA256SUMS`. It installs missing Entware `iptables` tools and registers and starts `/opt/etc/init.d/S99keenproxy`. TrustTunnel runs inside the embedded engine; no separate client is downloaded or supervised. Entware runs the init script on boot. The first start enables LAN DNS interception even with an empty routing policy. Stop any competing interceptor first.
 
 After successful installation or command-line update, the bootstrap prints the panel URL when available. Run `keenproxy --url` to display it again and `keenproxy --key` to print the current login token from the configured token file. These commands do not start the service or generate a token; use `--config /path/to/config.yaml` for a non-default configuration. Keep token output private. See [panel access](docs/en/user-guide.md#access-the-panel).
 
-Run the same command again to update. Existing configuration and tokens are preserved. Select a specific published release with `--version`, choose the smaller build with `--lite`, or skip the optional client with `--without-trusttunnel`:
+Run the same command again to update. Existing configuration and tokens are preserved. Select a specific published release with `--version` or choose the smaller build with `--lite`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ordo-systems/keen-proxy/main/tools/bootstrap.sh | /opt/bin/sh -s -- --version vX.Y.Z --lite --without-trusttunnel
+curl -fsSL https://raw.githubusercontent.com/ordo-systems/keen-proxy/main/tools/bootstrap.sh | /opt/bin/sh -s -- --version vX.Y.Z --lite
 ```
 
 Replace `vX.Y.Z` with a real release tag. The release must contain the binary, `install.sh`, `S99keenproxy`, and `SHA256SUMS`. If assets are still publishing, retry when they are available. Check or stop the service with `/opt/etc/init.d/S99keenproxy status` or `/opt/etc/init.d/S99keenproxy stop`.
@@ -112,16 +120,16 @@ To remove an installation managed by the bootstrap:
 curl -fsSL https://raw.githubusercontent.com/ordo-systems/keen-proxy/main/tools/bootstrap.sh | /opt/bin/sh -s -- --uninstall
 ```
 
-This stops KeenProxy and removes its binary and Entware init script. It keeps the configuration, API token, logs, rule sets, and optional TrustTunnel client. Reinstall with the regular install command to reuse the saved settings.
+This stops KeenProxy and removes its binary and Entware init script. It keeps the configuration, API token, logs, rule sets, and any previously installed external clients. Reinstall with the regular install command to reuse the saved settings.
 
-For offline or manual setup, `tools/install.sh` copies a supplied executable and optionally verifies and installs the pinned TrustTunnel client. It preserves configuration and leaves service setup to the operator. After copying the binary and installer to the router, run:
+For offline or manual setup, `tools/install.sh` copies a supplied executable. It preserves configuration and leaves service setup to the operator. After copying the binary and installer to the router, run:
 
 ```sh
 /opt/bin/sh /opt/tmp/install.sh \
-  --binary /opt/tmp/keenproxy-linux-arm64 --without-trusttunnel
+  --binary /opt/tmp/keenproxy-linux-arm64
 ```
 
-Omit `--without-trusttunnel` to install the pinned external TrustTunnel client as well. Its executable and license remain separate from KeenProxy. Review the installer before using it and use the target router's CA bundle when required.
+Review the installer before using it. Existing external TrustTunnel executables are left untouched, but KeenProxy no longer uses them. `--without-trusttunnel` remains accepted at the installer boundary for existing updater binaries; new commands do not need it. The obsolete `--trusttunnel-only` mode has been removed.
 
 Enabling interception changes live LAN traffic. Back up the router configuration, retain SSH access and a tested recovery path, and avoid running competing DNS/interception tools simultaneously. Even with no selected clients, the DNS frontend intercepts LAN port 53 when enabled. Inspect a candidate configuration before starting:
 

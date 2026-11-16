@@ -6,8 +6,8 @@ umask 077
 
 fail() { printf 'KeenProxy: %s\n' "$*" >&2; exit 1; }
 usage() {
-    printf '%s\n' 'Usage: sh -s -- [--version vX.Y.Z] [--lite] [--without-trusttunnel]' \
-        '       sh -s -- --version vX.Y.Z --expect-current vX.Y.Z [--lite] [--without-trusttunnel]' \
+    printf '%s\n' 'Usage: sh -s -- [--version vX.Y.Z] [--lite]' \
+        '       sh -s -- --version vX.Y.Z --expect-current vX.Y.Z [--lite]' \
         '       sh -s -- --uninstall'
 }
 
@@ -20,21 +20,22 @@ releases=https://github.com/ordo-systems/keen-proxy/releases/download
 version=
 expected_current=
 variant=full
-trusttunnel=1
 uninstall=0
+legacy_optout=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --version) [ "$#" -ge 2 ] && [ -n "$2" ] || fail 'missing --version value'; version=$2; shift ;;
         --expect-current) [ "$#" -ge 2 ] && [ -n "$2" ] || fail 'missing --expect-current value'; expected_current=$2; shift ;;
         --lite) variant=lite ;;
-        --without-trusttunnel) trusttunnel=0 ;;
+        # Preserve the old updater/CLI input without installing a separate client.
+        --without-trusttunnel) legacy_optout=1 ;;
         --uninstall) uninstall=1 ;;
         -h|--help) usage; exit 0 ;;
         *) usage >&2; fail "unknown option: $1" ;;
     esac
     shift
 done
-if [ "$uninstall" = 1 ] && { [ -n "$version$expected_current" ] || [ "$variant" = lite ] || [ "$trusttunnel" = 0 ]; }; then
+if [ "$uninstall" = 1 ] && { [ -n "$version$expected_current" ] || [ "$variant" = lite ] || [ "$legacy_optout" = 1 ]; }; then
     fail '--uninstall cannot be combined with installation options'
 fi
 if [ -n "$expected_current" ] && [ -z "$version" ]; then
@@ -315,15 +316,12 @@ if [ -e "$service" ] || [ -L "$service" ]; then
 fi
 ensure_firewall_tools
 
-set -- --prefix "$work/payload" --binary "$work/$asset"
-if [ "$trusttunnel" = 0 ]; then set -- "$@" --without-trusttunnel; fi
+# Historical release installers default to fetching the external client; never stage it.
+set -- --prefix "$work/payload" --binary "$work/$asset" --without-trusttunnel
 sh "$work/install.sh" "$@" || fail 'could not stage release files'
 mkdir -p "$work/payload/etc/init.d"
 chmod 755 "$work/S99keenproxy"
 cp -p "$work/S99keenproxy" "$work/payload/etc/init.d/S99keenproxy"
-if [ "$trusttunnel" = 1 ]; then
-    payload="$payload bin/trusttunnel_client share/keenproxy/trusttunnel/LICENSE share/keenproxy/trusttunnel/version"
-fi
 
 lock_service
 if [ -f "$service" ] && service_action check; then was_running=1; fi

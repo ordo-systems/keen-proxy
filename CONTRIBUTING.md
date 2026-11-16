@@ -16,6 +16,8 @@ For a router-specific report, explain how you retained access and restored the p
 
 See the root [README](README.md) for toolchain requirements and build commands. Go build tags are significant: an untagged test run does not exercise the normal protocol registry. Frontend dependencies are locked with npm; use `npm ci`.
 
+Download dependencies with `go mod download` before Go commands; no Git submodules are required. The root `go.mod` pins sing-box-lx `v1.14.4-lx.35` and the four corresponding dependency forks through versioned `replace` directives. To upgrade, select an exact release, verify its four dependency revisions, update all five pins together, and review `go.sum`. Makefile and CI select Go 1.27.3 from the root `go` directive, which also declares the language floor.
+
 The main code boundaries are:
 
 | Area | Responsibility |

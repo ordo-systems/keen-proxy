@@ -62,13 +62,13 @@ Stop competing traffic or DNS interception services before installation. KeenPro
 curl -fsSL https://raw.githubusercontent.com/ordo-systems/keen-proxy/main/tools/bootstrap.sh | /opt/bin/sh
 ```
 
-The installer reads `version.txt` from `main`, detects the CPU, and verifies the release files against `SHA256SUMS`. It installs missing Entware `iptables` tools, creates a starter configuration if needed, and registers and starts `S99keenproxy` through the Entware init mechanism. TrustTunnel is installed by default as an optional client launched by KeenProxy when configured. After installation and command-line updates, it prints the panel URL when the installed binary can determine it. Display the current token with `keenproxy --key` in the router's Entware shell; the installer never prints it automatically. See [panel access](user-guide.md#access-the-panel).
+The installer reads `version.txt` from `main`, detects the CPU, and verifies the release files against `SHA256SUMS`. It installs missing Entware `iptables` tools, creates a starter configuration if needed, and registers and starts `S99keenproxy` through the Entware init mechanism. TrustTunnel runs inside sing-box-lx; no separate client is installed. After installation and command-line updates, it prints the panel URL when the installed binary can determine it. Display the current token with `keenproxy --key` in the router's Entware shell; the installer never prints it automatically. See [panel access](user-guide.md#access-the-panel).
 
 On a clean install, the bootstrap creates `/opt/etc/keenproxy/config.yaml` with `schema_version: 1` and KeenProxy fills in defaults when it loads the file. The daemon generates the login token on first startup if the token file is missing. `keenproxy --key` reads the existing configured `api.token_file` without generating a replacement. The default path is `/opt/etc/keenproxy/token`. On older releases without the flag, read that file (or your custom token path) directly. `keenproxy --url` displays the configured access URL again; if an older binary or unavailable LAN address prevents discovery, the installer reports that limitation without rolling back a successful installation.
 
 Run the same command to update. Your configuration and token are preserved. The installer stages and validates the candidate before stopping the managed service. If the new service fails its startup check, it attempts to restore the previous files and restart the previous service. A manually started instance must be stopped before the installer can take over.
 
-To choose a release, replace `vX.Y.Z` with a published tag. The optional `--lite` flag selects the smaller build. `--without-trusttunnel` skips installation of the external client.
+To choose a release, replace `vX.Y.Z` with a published tag. The optional `--lite` flag selects the smaller build without QUIC/HTTP/3. `--without-trusttunnel` remains accepted for existing updaters and scripts, but no longer changes the payload: TrustTunnel is embedded. `--trusttunnel-only` is no longer accepted.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ordo-systems/keen-proxy/main/tools/bootstrap.sh | /opt/bin/sh -s -- --version vX.Y.Z
@@ -100,4 +100,4 @@ Run from the Entware root shell:
 curl -fsSL https://raw.githubusercontent.com/ordo-systems/keen-proxy/main/tools/bootstrap.sh | /opt/bin/sh -s -- --uninstall
 ```
 
-The command stops the managed service and removes `/opt/bin/keenproxy` and `/opt/etc/init.d/S99keenproxy`. It preserves `/opt/etc/keenproxy/` (including configuration and token), `/opt/var/lib/keenproxy/` (logs and derived state), and the optional TrustTunnel client. Run the regular installer again to reuse your settings.
+The command stops the managed service and removes `/opt/bin/keenproxy` and `/opt/etc/init.d/S99keenproxy`. It preserves `/opt/etc/keenproxy/` (including configuration and token), `/opt/var/lib/keenproxy/` (logs and derived state), and any previously installed external TrustTunnel client. KeenProxy no longer uses that executable. Run the regular installer again to reuse your settings.

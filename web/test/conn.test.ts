@@ -35,3 +35,9 @@ test('incomplete AWG drafts do not expose profile text as a server address', () 
     assert.deepEqual(serverOf({ id: 'draft', name: 'Draft', type: 'amneziawg', amneziawg: profile }), { host: '', port: '' })
   }
 })
+
+test('native TrustTunnel links keep their protocol label without exposing TLV credentials', () => {
+  const connection: Connection = { id: 'tt', name: 'TT', type: 'link', link: 'tt://?PRIVATE_TLV' }
+  assert.equal(protocolOf(connection), 'TrustTunnel')
+  assert.deepEqual(serverOf(connection), { host: '', port: '' })
+})

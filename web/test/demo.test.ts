@@ -27,6 +27,45 @@ test('demo rejects invalid configurations without changing saved state', () => {
   assert.throws(() => demo.validate(duplicate), /unique/i)
 })
 
+test('demo memory limit survives Apply, omits a clear, and rejects invalid values', () => {
+  const demo = createDemo()
+  assert.equal(demo.config().system, undefined)
+
+  const positive = demo.config()
+  positive.system = { memory_limit_mib: 400 }
+  demo.save(positive)
+  assert.equal(demo.config().system?.memory_limit_mib, 400)
+
+  const before = demo.config()
+  for (const value of [0, -1, 1.5, 8_796_093_022_208]) {
+    const invalid = demo.config()
+    invalid.system = { memory_limit_mib: value }
+    assert.throws(() => demo.save(invalid))
+    assert.deepEqual(demo.config(), before)
+  }
+
+  const smallest = demo.config()
+  smallest.system = { memory_limit_mib: 1 }
+  demo.save(smallest)
+  assert.equal(demo.config().system?.memory_limit_mib, 1)
+
+  const maxed = demo.config()
+  maxed.system = { memory_limit_mib: 8_796_093_022_207 }
+  demo.save(maxed)
+  assert.equal(demo.config().system?.memory_limit_mib, 8_796_093_022_207)
+
+  const cleared = demo.config()
+  delete cleared.system
+  demo.save(cleared)
+  assert.equal(demo.config().system, undefined)
+  assert.equal(Object.hasOwn(demo.config(), 'system'), false)
+
+  const explicitNull = demo.config()
+  explicitNull.system = { memory_limit_mib: null }
+  demo.save(explicitNull)
+  assert.equal(demo.config().system, undefined)
+})
+
 test('preset preview changes only a returned draft and rejects unknown presets', () => {
   const demo = createDemo()
   const before = demo.config()

@@ -300,8 +300,6 @@ function linkProfile(raw: string): Connection {
     )
   )
     throw new Error('Invalid connection link')
-  if (raw.startsWith('tt://'))
-    return { id: '', name: '', type: 'trusttunnel', trusttunnel: { link: raw } }
   return { id: '', name: '', type: 'link', link: raw }
 }
 

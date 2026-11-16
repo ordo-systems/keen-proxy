@@ -48,7 +48,7 @@ watch(() => props.show, (open) => {
   id.value = c?.id ?? ''
   idTouched.value = !!c
   fallback.value = c?.fallback ?? null
-  link.value = c?.link ?? c?.trusttunnel?.link ?? ''
+  link.value = c?.link ?? ''
   wgText.value = c?.wireguard ? wireGuardToConf(c.wireguard) : ''
   awgText.value = c?.amneziawg ?? ''
   sbText.value = c?.outbound || c?.endpoint
@@ -84,7 +84,6 @@ function build(): Connection {
   if (fallback.value) base.fallback = fallback.value
   if (tab.value === 'link') {
     const l = link.value.trim()
-    if (l.startsWith('tt://')) return { ...base, type: 'trusttunnel', trusttunnel: { ...props.edit?.trusttunnel, link: l } }
     return { ...base, type: 'link', link: l }
   }
   if (tab.value === 'amneziawg')

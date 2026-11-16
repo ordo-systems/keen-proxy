@@ -41,6 +41,7 @@ Use the Git tag as the release identity and derive build versions from it; any t
 - Include the canonical `LICENSE` and applicable third-party notices with source distributions.
 - Review the exact pinned versions of Go modules, frontend packages, and optional external executables. Preserve required notices in binary distributions as well.
 - Meet GPLv3's corresponding-source requirements when conveying binaries; the corresponding source must match the distributed build and include the necessary build material.
+- Build from the versioned modules recorded in `go.mod` and `go.sum`, never local-path replacements or `@latest`. Source archives retain these manifests and the build scripts; rebuilding downloads the pinned modules. `BUILD_INFO.txt` records the resolved module versions and replacements.
 - Confirm permission/license and attribution for community presets and fetched data. A source URL or a community origin does not alone establish redistribution terms.
 - Retain DB-IP attribution where its data is displayed. Alternative country databases and blocklists need their own review.
 - Preserve upstream naming/association notices. Do not imply endorsement by Keenetic, Netcraze, SagerNet, or another upstream project.

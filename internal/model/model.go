@@ -16,7 +16,6 @@ import (
 
 	"github.com/ordo-systems/keen-proxy/internal/awg"
 	"github.com/ordo-systems/keen-proxy/internal/links"
-	"github.com/ordo-systems/keen-proxy/internal/trusttunnel"
 )
 
 // Built-in route targets may be used instead of a connection ID.
@@ -48,6 +47,7 @@ const (
 // Config is the persisted schema shared by the compiler, daemon, and API.
 type Config struct {
 	SchemaVersion int          `yaml:"schema_version" json:"schema_version"`
+	System        System       `yaml:"system,omitempty" json:"system,omitempty"`
 	Filters       Filters      `yaml:"filters,omitempty" json:"filters"`
 	API           API          `yaml:"api" json:"api"`
 	LAN           LAN          `yaml:"lan" json:"lan"`
@@ -59,6 +59,46 @@ type Config struct {
 	Groups        []Group      `yaml:"groups" json:"groups"`
 	Networks      []Network    `yaml:"networks" json:"networks"`
 	Clients       []Client     `yaml:"clients" json:"clients"`
+}
+
+// maxMemoryLimitMiB is the largest MiB count whose byte size fits in int64.
+const maxMemoryLimitMiB MemoryLimitMiB = 8796093022207
+
+// MemoryLimitMiB is an integer-only MiB scalar; YAML floats must not be truncated.
+type MemoryLimitMiB int64
+
+// UnmarshalYAML preserves the same integer contract as JSON without bypassing known-field checks.
+func (m *MemoryLimitMiB) UnmarshalYAML(node *yaml.Node) error {
+	if node.Tag != "!!int" {
+		return fmt.Errorf("system.memory_limit_mib: expected an integer number of MiB")
+	}
+	var value int64
+	if err := node.Decode(&value); err != nil {
+		return err
+	}
+	*m = MemoryLimitMiB(value)
+	return nil
+}
+
+// System holds process settings that are not compiled into sing-box.
+type System struct {
+	// MemoryLimitMiB is an optional soft memory recommendation in mebibytes.
+	// Nil uses the daemon default, which honors startup limits before its built-in budget.
+	// Zero and negative values are rejected and are never forwarded to the runtime.
+	MemoryLimitMiB *MemoryLimitMiB `yaml:"memory_limit_mib,omitempty" json:"memory_limit_mib,omitempty"`
+}
+
+// MemoryLimitBytes converts an optional MiB recommendation to a process byte limit.
+// A nil config or recommendation returns baseline. ok is false when the value must not be applied.
+func MemoryLimitBytes(cfg *Config, baseline int64) (int64, bool) {
+	if cfg == nil || cfg.System.MemoryLimitMiB == nil {
+		return baseline, true
+	}
+	mib := int64(*cfg.System.MemoryLimitMiB)
+	if mib < 1 || mib > int64(maxMemoryLimitMiB) {
+		return 0, false
+	}
+	return mib * 1024 * 1024, true
 }
 
 // API configures the web interface and HTTP API.
@@ -156,9 +196,9 @@ type Intercept struct {
 const (
 	ConnWireGuard   = "wireguard"   // WireGuard through sing-box
 	ConnAmneziaWG   = "amneziawg"   // AmneziaWG .conf through sing-box-lx
-	ConnLink        = "link"        // vless://, vmess://, trojan://, ss://, hysteria2://, tuic://, anytls://, socks5:// link
+	ConnLink        = "link"        // vless://, vmess://, trojan://, ss://, hysteria2://, tuic://, anytls://, socks5://, tt:// link
 	ConnSingBox     = "singbox"     // raw sing-box outbound or endpoint
-	ConnTrustTunnel = "trusttunnel" // TrustTunnel through external trusttunnel_client
+	ConnTrustTunnel = "trusttunnel" // legacy input type; normalized to link before validation
 )
 
 // Connection defines one outbound protocol and its optional fallback target.
@@ -202,11 +242,13 @@ func (c *Config) Chain(id string) []string {
 	}
 }
 
-// TrustTunnel configures an external client exposing a local SOCKS5 listener.
+// TrustTunnel is the legacy external-client section. It is accepted when a
+// file or API body is loaded and cleared by normalization, so a saved
+// configuration does not keep binary or socks_port.
 type TrustTunnel struct {
 	Link      string `yaml:"link" json:"link"`                                 // tt://?…
-	Binary    string `yaml:"binary,omitempty" json:"binary,omitempty"`         // path to trusttunnel_client
-	SocksPort uint16 `yaml:"socks_port,omitempty" json:"socks_port,omitempty"` // local client SOCKS5 port
+	Binary    string `yaml:"binary,omitempty" json:"binary,omitempty"`         // obsolete external client path
+	SocksPort uint16 `yaml:"socks_port,omitempty" json:"socks_port,omitempty"` // obsolete local SOCKS5 port
 }
 
 // WireGuard configures a userspace tunnel and its single peer.
@@ -324,19 +366,58 @@ func (c *Config) Defaults() {
 	if c.Intercept.RouteTable == 0 {
 		c.Intercept.RouteTable = 120
 	}
-	port := uint16(17100)
+	c.normalizeConnections()
+}
+
+// normalizeConnections rewrites legacy TrustTunnel connections to canonical
+// link connections. A malformed mix of the old section and a current payload
+// is reported and left unchanged.
+func (c *Config) normalizeConnections() []string {
+	var errs []string
 	for i := range c.Connections {
-		tt := c.Connections[i].TrustTunnel
-		if tt == nil {
-			continue
+		if err := normalizeConnection(&c.Connections[i]); err != nil {
+			errs = append(errs, err.Error())
 		}
-		if tt.Binary == "" {
-			tt.Binary = "/opt/bin/trusttunnel_client"
+	}
+	return errs
+}
+
+func normalizeConnection(cn *Connection) error {
+	where := fmt.Sprintf("connection %q", cn.ID)
+	legacy := cn.TrustTunnel
+	if cn.Type == ConnTrustTunnel {
+		if cn.WireGuard != nil || cn.AmneziaWG != "" || cn.Outbound != nil || cn.Endpoint != nil {
+			return fmt.Errorf("%s: legacy trusttunnel connection also has another protocol section; refusing to drop it", where)
 		}
-		if tt.SocksPort == 0 {
-			tt.SocksPort = port
+		if legacy == nil || strings.TrimSpace(legacy.Link) == "" {
+			return fmt.Errorf("%s: legacy trusttunnel connection requires trusttunnel.link", where)
 		}
-		port++
+		link := strings.TrimSpace(legacy.Link)
+		if cn.Link != "" && strings.TrimSpace(cn.Link) != link {
+			return fmt.Errorf("%s: link conflicts with trusttunnel.link; refusing to drop either", where)
+		}
+		cn.Type = ConnLink
+		cn.Link = link
+		cn.TrustTunnel = nil
+		return nil
+	}
+	if legacy == nil {
+		return nil
+	}
+	link := strings.TrimSpace(legacy.Link)
+	current := strings.TrimSpace(cn.Link)
+	switch {
+	case link != "" && current != "" && current != link:
+		return fmt.Errorf("%s: trusttunnel.link conflicts with link; refusing to drop either", where)
+	case link != "" && cn.Type != ConnLink:
+		return fmt.Errorf("%s: trusttunnel.link conflicts with type %q; refusing to drop it", where, cn.Type)
+	case link != "" && cn.Type == ConnLink && current == "":
+		return fmt.Errorf("%s: type link is missing link and also has trusttunnel.link; refusing to choose one", where)
+	case cn.Type == ConnLink && (link == "" || link == current):
+		cn.TrustTunnel = nil
+		return nil
+	default:
+		return fmt.Errorf("%s: trusttunnel section conflicts with type %q; refusing to drop it", where, cn.Type)
 	}
 }
 
@@ -344,8 +425,12 @@ func (c *Config) Defaults() {
 func (c *Config) Validate() error {
 	var errs []string
 	add := func(format string, a ...any) { errs = append(errs, fmt.Sprintf(format, a...)) }
+	errs = append(errs, c.normalizeConnections()...)
 	c.validateFeatures(add)
 	c.GeoIP.validate(add)
+	if mib := c.System.MemoryLimitMiB; mib != nil && (*mib < 1 || *mib > maxMemoryLimitMiB) {
+		add("system.memory_limit_mib: must be a positive integer no greater than %d", maxMemoryLimitMiB)
+	}
 
 	switch c.Intercept.Mode {
 	case InterceptRedirect, InterceptTProxy:
@@ -560,13 +645,9 @@ func validateConnection(cn Connection, add func(string, ...any)) {
 			add("%s: tag must not be set; it is derived from id", where)
 		}
 	case ConnTrustTunnel:
-		if cn.TrustTunnel == nil {
-			add("%s: missing trusttunnel section", where)
-		} else if _, err := trusttunnel.ParseLink(cn.TrustTunnel.Link); err != nil {
-			add("%s: %v", where, err)
-		}
+		// normalizeConnections already reported why this legacy type was not rewritten.
 	default:
-		add("%s: unknown type %q (wireguard, amneziawg, link, singbox, trusttunnel)", where, cn.Type)
+		add("%s: unknown type %q (wireguard, amneziawg, link, singbox)", where, cn.Type)
 	}
 }
 

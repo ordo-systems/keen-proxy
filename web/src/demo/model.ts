@@ -3,7 +3,7 @@ import initial from './config.json' with { type: 'json' }
 import { createTelemetry } from './telemetry.ts'
 import { activeExit, entryOff, isGeo, retainPresetActivation } from '../activation.ts'
 import { connectionChain } from '../connectionDraft.ts'
-import type { Catalog, Config, DiagnosticReport, DomainStatus, GeoLookup, GeoStatus, JournalKind, Status } from '../types'
+import { maxMemoryLimitMiB, type Catalog, type Config, type DiagnosticReport, type DomainStatus, type GeoLookup, type GeoStatus, type JournalKind, type Status } from '../types.ts'
 
 // Only synthetic examples are bundled; the demo never imports runtime configuration.
 export const catalog: Catalog = {
@@ -52,6 +52,10 @@ function validate(config: Config) {
   for (const group of config.groups ?? []) {
     if (!targets.has(group.target)) throw new Error('Unknown group target')
   }
+  const limit = config.system?.memory_limit_mib
+  if (limit != null && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > maxMemoryLimitMiB)) {
+    throw new Error('memory limit must be a positive integer number of MiB')
+  }
 }
 
 // Owns one browser session's synthetic applied state and previous configuration.
@@ -65,6 +69,11 @@ export function createDemo(now: () => number = () => Date.now()) {
     telemetry.sync(saved)
     previous = copy(saved)
     saved = copy(config)
+    // Null is inherit. Persist omission, never zero.
+    if (saved.system == null || saved.system.memory_limit_mib == null) {
+      if (saved.system) delete saved.system.memory_limit_mib
+      if (!saved.system || Object.keys(saved.system).length === 0) delete saved.system
+    }
     telemetry.applied()
     return copy(saved)
   }
@@ -183,7 +192,7 @@ function status(saved: Config, started: string): Status {
     started, mode: saved.intercept.mode, sources: 2, connections: saved.connections?.length ?? 0,
     groups: saved.groups?.length ?? 0, entries: (saved.groups ?? []).reduce((n, g) => n + g.entries.length, 0),
     clients: saved.clients?.length ?? 0, online_devices: 4, dns: '127.0.0.1:5353', firewall: true, restored: 0,
-    trusttunnel: [], geoip: geoSummary(saved, started), conn_countries: { fi: 'FI', nl: 'NL', de: 'DE' },
+    geoip: geoSummary(saved, started), conn_countries: { fi: 'FI', nl: 'NL', de: 'DE' },
     failover: failover(saved),
     health: Object.fromEntries(active.map(connection => [connection.id, { ok: true, checked: new Date().toISOString(), since: started, latency_ms: 42 }])),
   }

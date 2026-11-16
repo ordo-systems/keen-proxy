@@ -133,10 +133,24 @@ func configChanges(prev, cfg *model.Config) string {
 	if !reflect.DeepEqual(prev.GeoIP, cfg.GeoIP) {
 		parts = append(parts, "country database changed")
 	}
+	if !reflect.DeepEqual(prev.System.MemoryLimitMiB, cfg.System.MemoryLimitMiB) {
+		parts = append(parts, memoryLimitChange(prev.System.MemoryLimitMiB, cfg.System.MemoryLimitMiB))
+	}
 	if len(parts) == 0 {
 		return "no changes"
 	}
 	return strings.Join(parts, "; ")
+}
+
+func memoryLimitChange(prev, next *model.MemoryLimitMiB) string {
+	switch {
+	case next == nil:
+		return "memory limit cleared"
+	case prev == nil:
+		return fmt.Sprintf("memory limit: %d MiB", *next)
+	default:
+		return fmt.Sprintf("memory limit: %d → %d MiB", *prev, *next)
+	}
 }
 
 // neighborsChange summarizes newly visible and departed devices.

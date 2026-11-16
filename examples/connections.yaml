@@ -15,8 +15,8 @@ connections:
         keepalive: 25
 
   # 2. Connection links: vless:// (including REALITY, ws, grpc, http,
-  #    httpupgrade), vmess://, trojan://, ss://, hysteria2:// and hy2:// (port
-  #    hopping 20000-30000), tuic://, anytls://, socks5://.
+  #    httpupgrade, xhttp), VLESS encryption, vmess://, trojan://, ss://,
+  #    hysteria2:// and hy2:// (port hopping 20000-30000), tuic://, anytls://, socks5://.
   - id: nl
     name: Netherlands Reality
     type: link
@@ -39,15 +39,12 @@ connections:
       password: PASSWORD
       tls: {enabled: true, server_name: www.apple.com, utls: {enabled: true, fingerprint: chrome}}
 
-  # 4. TrustTunnel uses an external supervised client with a loopback SOCKS5
-  #    listener; the embedded engine routes selected traffic to that listener.
+  # 4. TrustTunnel runs inside sing-box-lx without a separate process or SOCKS port.
+  #    Replace the placeholder with the complete server-exported TLV link.
   - id: tt
     name: TrustTunnel
-    type: trusttunnel
-    trusttunnel:
-      link: "tt://?AQ…"                       # placeholder for a server-exported connection link
-      binary: /opt/bin/trusttunnel_client      # default
-      # socks_port: 17100                      # default 17100, 17101, …
+    type: link
+    link: "tt://?REPLACE_WITH_EXPORTED_LINK"
 
   # 5. Experimental sing-box-lx AWG 2/3 client profile, kept intact for editing.
   #    Use your server's keys and obfuscation values. DNS policy remains in KeenProxy;

@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math"
 	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -34,7 +36,6 @@ import (
 	"github.com/ordo-systems/keen-proxy/internal/model"
 	"github.com/ordo-systems/keen-proxy/internal/netfilter"
 	"github.com/ordo-systems/keen-proxy/internal/stats"
-	"github.com/ordo-systems/keen-proxy/internal/supervise"
 )
 
 // Options supplies local paths, runtime dependencies, and watchdog settings.
@@ -76,10 +77,6 @@ type Daemon struct {
 	planPending bool // installation failed after the plan and its dependencies were prepared
 	neighbors   map[string]netip.Addr
 	deviceNames map[string]cachedDeviceName
-	tt          []compile.TrustTunnelClient
-	ttProcs     map[string]*supervise.Process
-	ttStop      context.CancelFunc
-	ttWG        sync.WaitGroup
 	started     time.Time
 	restored    int // number of watchdog firewall restorations
 	stats       *stats.Tracker
@@ -96,6 +93,12 @@ type Daemon struct {
 	live atomic.Pointer[model.Config]
 	// coreRestarted records whether the latest applyLocked restarted the engine.
 	coreRestarted bool
+	// memoryBaseline is the process limit captured before configuration is applied.
+	memoryBaseline int64
+	// memoryDefault honors the startup limit, falling back to 768 MiB when unset.
+	memoryDefault int64
+	// memoryActive is the limit from the last successful activation.
+	memoryActive int64
 	// Fallback chains, selected members, and probe results from the latest
 	// compilation (see failover.go).
 	chains  []compile.FailoverChain
@@ -105,8 +108,14 @@ type Daemon struct {
 }
 
 // New creates a daemon with default paths and in-memory journals when omitted.
-// It does not start listeners or install interception rules.
+// It captures the current process memory limit and does not start listeners
+// or install interception rules.
 func New(opt Options) *Daemon {
+	baseline := debug.SetMemoryLimit(-1)
+	memoryDefault := baseline
+	if baseline == math.MaxInt64 && os.Getenv("GOMEMLIMIT") == "" {
+		memoryDefault = 768 * 1024 * 1024
+	}
 	if opt.DeviceNames == nil {
 		opt.DeviceNames = devices.NewNameLookup()
 	}
@@ -126,6 +135,9 @@ func New(opt Options) *Daemon {
 		domains: domaincache.New(time.Now), domainSlots: make(chan struct{}, 4), opt: opt, log: opt.Log, stats: stats.NewTracker(), journals: opt.Journals,
 		active: map[string]string{}, health: map[string]*health{}, allDown: map[string]bool{},
 	}
+	d.memoryBaseline = baseline
+	d.memoryDefault = memoryDefault
+	d.memoryActive = baseline
 	d.filters = filterlist.New(filepath.Join(filepath.Dir(opt.RuleSetDir), "filters"), nil)
 	d.geoStore = geoip.NewStore(filepath.Join(filepath.Dir(opt.RuleSetDir), "geoip"))
 	d.geoWake = make(chan struct{}, 1)
@@ -148,6 +160,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.stats.Run(ctx)
 	d.mu.Lock()
 	d.started = time.Now()
+	// Apply the saved recommendation before geo databases and the embedded core start.
+	if err := d.stageMemoryLimit(cfg); err != nil {
+		d.mu.Unlock()
+		return err
+	}
 	d.adoptLegacyGeo(cfg)
 	d.reloadGeoLocked(cfg)
 	d.neighbors = d.readNeighbors(cfg)
@@ -242,6 +259,15 @@ func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config) error {
 	prev := d.cfg
 	// A new attempt may change the old plan's dependencies before it reaches iptables.
 	d.planPending = false
+	if err := d.stageMemoryLimit(cfg); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			debug.SetMemoryLimit(d.memoryActive)
+		}
+	}()
 	d.resetDomainGeneration()
 	if prev != nil && !reflect.DeepEqual(prev.GeoIP, cfg.GeoIP) {
 		d.reloadGeoLocked(cfg)
@@ -254,12 +280,6 @@ func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config) error {
 		return err
 	}
 
-	// Start TrustTunnel clients first; sing-box SOCKS outbounds depend on them.
-	if !reflect.DeepEqual(out.TrustTunnel, d.tt) {
-		d.stopTrustTunnel()
-		d.startTrustTunnel(out.TrustTunnel)
-		d.tt = out.TrustTunnel
-	}
 
 	if restarted, err := d.eng.Apply(out.SingBox); err != nil {
 		return err
@@ -304,10 +324,13 @@ func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config) error {
 		d.planPending = true
 		return fmt.Errorf("interception rules: %w", err)
 	}
+	d.commitMemoryLimit(cfg)
+	committed = true
 	return nil
 }
 
-// shutdown removes interception before stopping the services it depends on.
+// shutdown removes interception before stopping the services it depends on
+// and restores the process memory limit captured at initialization.
 func (d *Daemon) shutdown() {
 	if g := d.domainGeneration.Load(); g != nil {
 		g.cancel()
@@ -325,10 +348,29 @@ func (d *Daemon) shutdown() {
 		d.dns.Close()
 	}
 	d.eng.Close()
-	d.stopTrustTunnel()
 	d.geo.set.Close()
 	d.geo.cats.Close()
 	d.geo.set, d.geo.cats = nil, nil
+	debug.SetMemoryLimit(d.memoryBaseline)
+	d.memoryActive = d.memoryBaseline
+}
+
+// stageMemoryLimit applies cfg's recommendation, or the selected startup/default budget when unset.
+// A rejected value is not forwarded to the runtime. Success is recorded only by commitMemoryLimit.
+func (d *Daemon) stageMemoryLimit(cfg *model.Config) error {
+	limit, ok := model.MemoryLimitBytes(cfg, d.memoryDefault)
+	if !ok {
+		return fmt.Errorf("system.memory_limit_mib: value cannot be applied")
+	}
+	debug.SetMemoryLimit(limit)
+	return nil
+}
+
+// commitMemoryLimit records the recommendation after activation succeeds.
+func (d *Daemon) commitMemoryLimit(cfg *model.Config) {
+	if limit, ok := model.MemoryLimitBytes(cfg, d.memoryDefault); ok {
+		d.memoryActive = limit
+	}
 }
 
 // startDNS installs runtime matchers and opens both DNS transports before interception.
@@ -437,47 +479,6 @@ func writeFile(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmp, path)
 }
 
-// startTrustTunnel starts external clients and retains their supervisor handles.
-func (d *Daemon) startTrustTunnel(clients []compile.TrustTunnelClient) {
-	d.ttProcs = map[string]*supervise.Process{}
-	if len(clients) == 0 {
-		return
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	d.ttStop = cancel
-	dir := filepath.Join(filepath.Dir(d.opt.RuleSetDir), "trusttunnel")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		d.log.Error("TrustTunnel directory", "err", err)
-		return
-	}
-	for _, c := range clients {
-		path := filepath.Join(dir, c.ID+".toml")
-		// Configuration contains secrets, so restrict access to the owner.
-		if err := writeFile(path, []byte(c.Config), 0o600); err != nil {
-			d.log.Error("TrustTunnel configuration", "connection", c.ID, "err", err)
-			continue
-		}
-		if _, err := os.Stat(c.Binary); err != nil {
-			d.log.Error("trusttunnel_client not found, connection will not work", "connection", c.ID, "binary", c.Binary)
-			continue
-		}
-		p := &supervise.Process{Name: "trusttunnel/" + c.ID, Path: c.Binary, Args: []string{"--config", path}, Log: d.log}
-		d.ttProcs[c.ID] = p
-		d.ttWG.Add(1)
-		go func() { defer d.ttWG.Done(); p.Run(ctx) }()
-		d.log.Info("TrustTunnel started", "connection", c.ID, "socks", c.SocksPort)
-	}
-}
-
-// stopTrustTunnel cancels supervisors and waits for all client processes to stop.
-func (d *Daemon) stopTrustTunnel() {
-	if d.ttStop != nil {
-		d.ttStop()
-		d.ttWG.Wait()
-		d.ttStop = nil
-	}
-	d.ttProcs = nil
-}
 
 // readNeighbors builds the MAC-to-IP snapshot for the configured LAN interface.
 func (d *Daemon) readNeighbors(cfg *model.Config) map[string]netip.Addr {
@@ -532,7 +533,6 @@ type Status struct {
 	DNS           string            `json:"dns"`
 	Firewall      bool              `json:"firewall"`
 	Restored      int               `json:"restored"`
-	TrustTunnel   []TrustTunnelInfo `json:"trusttunnel"`
 	GeoIP         GeoInfo           `json:"geoip"`
 	// ConnCountries maps connection IDs to server country codes for flags.
 	ConnCountries map[string]string `json:"conn_countries"`
@@ -540,13 +540,6 @@ type Status struct {
 	Failover map[string]FailoverInfo `json:"failover"`
 	// Health maps connection IDs to their latest probe results.
 	Health map[string]ConnHealth `json:"health"`
-}
-
-// TrustTunnelInfo reports the supervised client process associated with a connection.
-type TrustTunnelInfo struct {
-	ID      string `json:"id"`
-	Running bool   `json:"running"`
-	Starts  int64  `json:"starts"`
 }
 
 // Status snapshots runtime health under d.mu and checks active firewall entry jumps.
@@ -572,13 +565,6 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	st.GeoIP = d.geoInfoLocked()
 	st.ConnCountries = d.geo.conns
 	st.Failover, st.Health = d.failoverInfoLocked()
-	for _, c := range d.tt {
-		info := TrustTunnelInfo{ID: c.ID}
-		if p := d.ttProcs[c.ID]; p != nil {
-			info.Running, info.Starts = true, p.Starts()
-		}
-		st.TrustTunnel = append(st.TrustTunnel, info)
-	}
 	return st
 }
 

@@ -84,20 +84,6 @@ func TestParseLink(t *testing.T) {
 		t.Errorf("cannot parse PEM: %v", err)
 	}
 
-	toml := ClientConfig(ep, "127.0.0.1:17100")
-	for _, want := range []string{
-		`hostname = "vpn.example.com"`,
-		`addresses = ["1.2.3.4:443", "[2001:db8::1]:443"]`,
-		`password = "s3cret\"Pass"`,
-		`upstream_protocol = "http3"`,
-		`has_ipv6 = false`,
-		"[listener.socks]\naddress = \"127.0.0.1:17100\"",
-		`certificate = "-----BEGIN CERTIFICATE-----\n`,
-	} {
-		if !strings.Contains(toml, want) {
-			t.Errorf("configuration is missing %q:\n%s", want, toml)
-		}
-	}
 }
 
 func TestParseLinkErrors(t *testing.T) {

@@ -50,7 +50,7 @@ func TestDetachedInstallerKeepsLockAndPublishesResult(t *testing.T) {
 	// Ensure an assertion failure cannot strand the fixture process.
 	t.Cleanup(func() { _ = os.WriteFile(gate, nil, 0600) })
 	script := []byte(`
-[ "$*" = '--version v0.4.0 --expect-current v0.3.0 --without-trusttunnel --lite' ] || exit 1
+[ "$*" = '--version v0.4.0 --expect-current v0.3.0 --lite' ] || exit 1
 [ ! -e /proc/self/fd/3 ] || exit 1
 for try in 1 2 3 4 5 6 7 8 9 10; do
     [ ! -f "$KEENPROXY_PREFIX/proceed" ] || exit 0

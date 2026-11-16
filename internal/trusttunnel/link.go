@@ -1,5 +1,5 @@
-// Package trusttunnel supports AdGuard's TrustTunnel through an external
-// trusttunnel_client and a loopback SOCKS5 outbound used by sing-box.
+// Package trusttunnel decodes AdGuard TrustTunnel tt:// links and maps them
+// to sing-box-lx trusttunnel outbounds.
 //
 // Links use tt://?<unpadded-base64url> around TLV data with QUIC-style tag
 // and length integers (RFC 9000 §16), as documented in the upstream
@@ -17,21 +17,25 @@ const supportedVersion = 2
 
 // Endpoint contains server parameters decoded from a TrustTunnel link.
 type Endpoint struct {
-	Version          uint64
-	Hostname         string
-	Addresses        []string // host:port
-	CustomSNI        string
-	HasIPv6          bool
-	Username         string
-	Password         string
-	SkipVerification bool
-	CertificatePEM   string // PEM certificate chain; empty uses system CAs.
-	HTTP3            bool   // upstream_protocol = http3
-	AntiDPI          bool
-	ClientRandom     string
-	Name             string
-	DNSUpstreams     []string
-	SubscriptionURL  string
+	Version             uint64
+	Hostname            string
+	Addresses           []string // host:port
+	CustomSNI           string
+	HasIPv6             bool
+	Username            string
+	Password            string
+	SkipVerification    bool
+	CertificatePEM      string // PEM certificate chain; empty uses system CAs.
+	HTTP3               bool   // upstream_protocol = http3
+	AntiDPI             bool
+	ClientRandom        string // client_random_prefix, hex prefix[/mask]
+	ClientRandomAuthKey string // hex key the client must mix into client_random
+	Name                string
+	DNSUpstreams        []string
+	SubscriptionURL     string
+	// UpstreamProtocol is the 0x09 varint when the field is present: 1 = http2, 2 = http3.
+	UpstreamProtocol    uint64
+	UpstreamProtocolSet bool
 }
 
 // ParseLink decodes length-checked TLV fields from a base64url TrustTunnel link.
@@ -83,9 +87,9 @@ func ParseLink(link string) (Endpoint, error) {
 		case 0x08:
 			e.CertificatePEM = derToPEM(val)
 		case 0x09:
-			var p uint64
-			p, err = (&reader{b: val}).varint()
-			e.HTTP3 = p == 2
+			e.UpstreamProtocol, err = (&reader{b: val}).varint()
+			e.UpstreamProtocolSet = err == nil
+			e.HTTP3 = e.UpstreamProtocol == 2
 		case 0x0A:
 			e.AntiDPI, err = boolean(val)
 		case 0x0B:
@@ -96,6 +100,8 @@ func ParseLink(link string) (Endpoint, error) {
 			e.DNSUpstreams, err = stringList(val)
 		case 0x0E:
 			e.SubscriptionURL = string(val)
+		case 0x0F:
+			e.ClientRandomAuthKey = string(val)
 		default:
 			// Skip unknown tags as required by the specification.
 		}

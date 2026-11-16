@@ -22,16 +22,21 @@ import (
 	"github.com/sagernet/sing-box/protocol/shadowsocks"
 	"github.com/sagernet/sing-box/protocol/socks"
 	"github.com/sagernet/sing-box/protocol/trojan"
+	"github.com/sagernet/sing-box/protocol/trusttunnel"
 	"github.com/sagernet/sing-box/protocol/vless"
 	"github.com/sagernet/sing-box/protocol/wireguard"
+	// The with_xhttp tag compiles the constructor. This import is what runs it;
+	// a tag alone leaves "xhttp" unregistered in the curated lite registry.
+	_ "github.com/sagernet/sing-box/transport/v2rayxhttp"
 )
 
 // BuildVariant identifies the protocol registry compiled into this executable.
 const BuildVariant = "lite"
 
-// Context registers WireGuard, VLESS, Trojan, Shadowsocks, and SOCKS (including
-// TrustTunnel support) for memory-constrained keenproxy_lite builds. Other
-// protocol types are rejected as unknown.
+// Context registers WireGuard, VLESS, Trojan, Shadowsocks, SOCKS, XHTTP, and
+// native TrustTunnel for memory-constrained keenproxy_lite builds. QUIC is not
+// included: HTTP/3 TrustTunnel and XHTTP fail at validation instead of falling
+// back to HTTP/2. Other protocol types are rejected as unknown.
 func Context(ctx context.Context) context.Context {
 	in := inbound.NewRegistry()
 	redirect.RegisterRedirect(in)
@@ -47,6 +52,7 @@ func Context(ctx context.Context) context.Context {
 	shadowsocks.RegisterOutbound(out)
 	trojan.RegisterOutbound(out)
 	vless.RegisterOutbound(out)
+	trusttunnel.RegisterOutbound(out)
 
 	ep := endpoint.NewRegistry()
 	wireguard.RegisterEndpoint(ep)

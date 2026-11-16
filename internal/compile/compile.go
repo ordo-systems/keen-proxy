@@ -45,8 +45,6 @@ type Output struct {
 	// Categories lists labels whose geocat-<label>.json files the daemon must
 	// populate from category databases.
 	Categories []string
-	// TrustTunnel lists external clients the daemon must keep running.
-	TrustTunnel []TrustTunnelClient
 	// ServerHosts maps connection IDs to server addresses or hostnames.
 	ServerHosts map[string]string
 	// Failover describes chains the daemon probes and switches through selectors.
@@ -110,7 +108,6 @@ func Compile(in Input) (Output, error) {
 		RuleSets:    sets,
 		Countries:   geo.countries,
 		Categories:  geo.categories,
-		TrustTunnel: conns.trustTunnel,
 		ServerHosts: conns.hosts,
 		Failover:    chains,
 		Plan: netfilter.Plan{

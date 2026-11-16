@@ -58,8 +58,11 @@ test('demo API drives the UI without HTTP or EventSource operations', async () =
     assert.equal(link.type, 'link')
     assert.equal(link.port, 8443)
     assert.equal(link.tls, true)
-    assert.equal((await api.parseLink('tt://vpn.example.com?security=none')).type, 'trusttunnel')
-    assert.equal((await api.parseLink('tt://vpn.example.com?security=none')).tls, false)
+    const trustTunnel = await api.parseLink('tt://?EXPORTED_TLV')
+    assert.equal(trustTunnel.type, 'link')
+    assert.equal(trustTunnel.protocol, 'trusttunnel')
+    assert.equal(trustTunnel.tls, true)
+    assert.equal((await api.parseLink('vless://example@vpn.example.com:443?security=none')).tls, false)
     assert.equal((await api.parseLink('vless://vpn.example.com')).name, 'Demo connection')
     assert.equal((await api.parseLink('vless://vpn.example.com')).port, 443)
     for (const url of [api.configExportURL(), api.configExportURL(true), api.journalExportURL('system', '')]) {

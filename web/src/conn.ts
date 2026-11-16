@@ -7,13 +7,11 @@ export function protocolOf(c: Connection): string {
       return 'WireGuard'
     case 'amneziawg':
       return 'AmneziaWG'
-    case 'trusttunnel':
-      return 'TrustTunnel'
     case 'singbox':
       return String((c.outbound ?? c.endpoint)?.type ?? 'sing-box')
     default: {
       const s = (c.link ?? '').split('://')[0].toLowerCase()
-      return ({ vless: 'VLESS', vmess: 'VMess', trojan: 'Trojan', ss: 'Shadowsocks', hysteria2: 'Hysteria2', hy2: 'Hysteria2', tuic: 'TUIC', anytls: 'AnyTLS', socks5: 'SOCKS5', socks: 'SOCKS5' } as Record<string, string>)[s] ?? s.toUpperCase()
+      return ({ tt: 'TrustTunnel', vless: 'VLESS', vmess: 'VMess', trojan: 'Trojan', ss: 'Shadowsocks', hysteria2: 'Hysteria2', hy2: 'Hysteria2', tuic: 'TUIC', anytls: 'AnyTLS', socks5: 'SOCKS5', socks: 'SOCKS5' } as Record<string, string>)[s] ?? s.toUpperCase()
     }
   }
 }

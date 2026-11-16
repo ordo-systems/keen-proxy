@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -193,8 +194,50 @@ func TestParseLink(t *testing.T) {
 		t.Errorf("parse: %d %v", w.Code, got)
 	}
 	w = do(t, s.Handler(), "POST", "/api/links/parse", `{"link":"vless://u@h:1?type=xhttp"}`, "secret", lan)
+	json.Unmarshal(w.Body.Bytes(), &got)
+	transport, _ := got["transport"].(map[string]any)
+	if w.Code != 200 || got["type"] != "link" || got["protocol"] != "vless" || transport["type"] != "xhttp" {
+		t.Errorf("xhttp preview: %d %v", w.Code, got)
+	}
+	w = do(t, s.Handler(), "POST", "/api/links/parse", `{"link":"vless://u@h:1?type=nope"}`, "secret", lan)
 	if w.Code != http.StatusUnprocessableEntity {
-		t.Errorf("invalid link: %d", w.Code)
+		t.Errorf("invalid transport: %d %s", w.Code, w.Body)
+	}
+	w = do(t, s.Handler(), "POST", "/api/links/parse", `{"link":"`+ttPreviewLink()+`"}`, "secret", lan)
+	json.Unmarshal(w.Body.Bytes(), &got)
+	if w.Code != 200 || got["type"] != "link" || got["protocol"] != "trusttunnel" || got["name"] != "Finland" || got["server"] != "203.0.113.50" || got["tls"] != true {
+		t.Errorf("tt preview: %d %v", w.Code, got)
+	}
+	if _, ok := got["password"]; ok {
+		t.Errorf("preview exposed credentials: %v", got)
+	}
+}
+
+func ttPreviewLink() string {
+	var b []byte
+	field := func(tag byte, v string) { b = append(append(b, tag, byte(len(v))), v...) }
+	field(0x01, "vpn.example.com")
+	field(0x02, "203.0.113.50:443")
+	field(0x05, "user")
+	field(0x06, "pass")
+	field(0x0C, "Finland")
+	return "tt://?" + base64.RawURLEncoding.EncodeToString(b)
+}
+
+func TestLegacyTrustTunnelMixIsRejected(t *testing.T) {
+	s, d := newServer()
+	body := `{"connections":[{"id":"tt","type":"trusttunnel","link":"tt://?one","trusttunnel":{"link":"tt://?two","binary":"/opt/bin/trusttunnel_client"}}]}`
+	w := do(t, s.Handler(), "PUT", "/api/config", body, "secret", lan)
+	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "conflicts") {
+		t.Fatalf("raw API: %d %s", w.Code, w.Body)
+	}
+	if d.applied != nil {
+		t.Fatal("mixed payload was applied")
+	}
+	yaml := `{"yaml":"connections:\n  - {id: tt, type: link, link: 'tt://?one', trusttunnel: {link: 'tt://?two'}}\n"}`
+	w = do(t, s.Handler(), "POST", "/api/config/import", yaml, "secret", lan)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "conflicts") {
+		t.Fatalf("yaml import: %d %s", w.Code, w.Body)
 	}
 }
 

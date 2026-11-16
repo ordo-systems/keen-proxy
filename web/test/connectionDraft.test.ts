@@ -317,9 +317,9 @@ test('WireGuard optional values and SOCKS credentials survive manual entry', () 
 })
 test('imports links and endpoint wrappers while rejecting malformed containers', () => {
   assert.equal(importConnections('vless://example', 'x.txt')[0]!.type, 'link')
-  assert.equal(
-    importConnections('tt://?example', 'x.txt')[0]!.type,
-    'trusttunnel',
+  assert.deepEqual(
+    importConnections('tt://?example', 'x.txt')[0],
+    { id: '', name: '', type: 'link', link: 'tt://?example' },
   )
   assert.equal(
     importConnections(

@@ -21,7 +21,8 @@ const BuildVariant = "full"
 //
 // Outbounds, endpoints, and DNS transports use the full sing-box include set.
 // Build tags (see Makefile TAGS) determine supported protocols; excluded
-// protocols register stubs that return explanatory errors.
+// protocols register stubs that return explanatory errors. with_xhttp blank-imports
+// the XHTTP constructor, and with_trusttunnel registers the native outbound.
 //
 // Inbounds are limited to interception and DNS; server protocols are unnecessary.
 func Context(ctx context.Context) context.Context {

@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	github.com/amnezia-vpn/amneziawg-go/v3 v3.1.20260828
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/maxmind/mmdbwriter v1.2.0
 	github.com/miekg/dns v1.1.73
 	github.com/oschwald/maxminddb-golang/v2 v2.9.0
@@ -45,7 +46,6 @@ require (
 	github.com/dgryski/go-metro v0.0.0-20180109044635-280f6062b5bc // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/florianl/go-nfqueue/v2 v2.1.0 // indirect
-	github.com/fsnotify/fsnotify v1.9.0
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/gaissmai/bart v0.26.1 // indirect
 	github.com/go-chi/chi/v5 v5.2.5 // indirect

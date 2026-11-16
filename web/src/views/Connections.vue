@@ -296,15 +296,6 @@ const specific = computed<Row[]>(() => {
     })
     return out
   }
-  if (c.trusttunnel)
-    return [
-      {
-        icon: KeyRound,
-        label: t('conn.ttLink'),
-        value: mask(c.trusttunnel.link),
-        mono: true,
-      },
-    ]
   return [
     {
       icon: Activity,

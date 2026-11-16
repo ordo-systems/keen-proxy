@@ -5,7 +5,7 @@ export type Mode = '' | 'split' | 'full' | 'off'
 // Kernel interception mechanism selected by the backend.
 export type InterceptMode = 'redirect' | 'tproxy'
 // Selects which protocol-specific connection payload is populated.
-export type ConnType = 'wireguard' | 'amneziawg' | 'link' | 'singbox' | 'trusttunnel'
+export type ConnType = 'wireguard' | 'amneziawg' | 'link' | 'singbox'
 
 // Single WireGuard peer, including optional route and keepalive settings.
 export interface WGPeer {
@@ -24,13 +24,6 @@ export interface WireGuard {
   peer: WGPeer
 }
 
-// External TrustTunnel link and optional process settings.
-export interface TrustTunnel {
-  link: string
-  binary?: string
-  socks_port?: number
-}
-
 // Named routing target with protocol payload and optional fallback.
 export interface Connection {
   id: string
@@ -44,7 +37,6 @@ export interface Connection {
   link?: string
   outbound?: Record<string, unknown>
   endpoint?: Record<string, unknown>
-  trusttunnel?: TrustTunnel
   // Immediate fallback: another connection ID or direct.
   fallback?: string
 }
@@ -83,6 +75,9 @@ export interface Client {
   target?: string
 }
 
+// Largest MiB value whose byte size still fits in a signed 64-bit integer.
+export const maxMemoryLimitMiB = 8_796_093_022_207
+
 // Whole configuration exchanged with the API and edited as one shared draft.
 export interface Config {
  schema_version?: number
@@ -97,6 +92,8 @@ export interface Config {
   groups: Group[] | null
   networks: Network[] | null
   clients: Client[] | null
+  // Omitted or null uses the startup Go limit, or the daemon's 768 MiB default.
+  system?: { memory_limit_mib?: number | null } | null
 }
 
 // Authentication and trusted-network policy for the requesting address.
@@ -153,7 +150,6 @@ export interface Status {
   dns: string
   firewall: boolean
   restored: number
-  trusttunnel: { id: string; running: boolean; starts: number }[] | null
   // Primary database build and type; active counts databases answering lookups.
   geoip: { loaded: boolean; built?: string; type?: string; error?: string; active?: number; categories?: number; attributions?: GeoAttribution[] | null }
   conn_countries: Record<string, string> | null

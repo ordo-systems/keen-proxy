@@ -19,7 +19,7 @@ function dnsExit(config: Config): string {
 // The demo accepts only metadata previews; it never connects to the supplied endpoint.
 function parseLink(link: string): LinkPreview {
   const url = new URL(link)
-  return { type: url.protocol === 'tt:' ? 'trusttunnel' : 'link', name: decodeURIComponent(url.hash.slice(1)) || 'Demo connection', protocol: url.protocol.slice(0, -1), server: url.hostname, port: Number(url.port) || 443, tls: url.searchParams.get('security') !== 'none' }
+  return { type: 'link', name: decodeURIComponent(url.hash.slice(1)) || 'Demo connection', protocol: url.protocol === 'tt:' ? 'trusttunnel' : url.protocol.slice(0, -1), server: url.hostname, port: Number(url.port) || 443, tls: url.protocol === 'tt:' || url.searchParams.get('security') !== 'none' }
 }
 
 function download(data: unknown, type: string) {

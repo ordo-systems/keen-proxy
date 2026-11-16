@@ -11,6 +11,7 @@ ACCESS_URL = 'http://192.0.2.10:8086'
 
 class BootstrapFixture(unittest.TestCase):
     prefix_name = 'opt'
+    bootstrap_script = ROOT / 'tools/bootstrap.sh'
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -104,10 +105,10 @@ esac''')
             for p in sorted(folder.iterdir()) if p.name != 'SHA256SUMS'))
 
     def install(self, *args):
-        return self.bootstrap('--without-trusttunnel', *args)
+        return self.bootstrap(*args)
 
     def bootstrap(self, *args):
-        with (ROOT / 'tools/bootstrap.sh').open('rb') as script:
+        with self.bootstrap_script.open('rb') as script:
             return subprocess.run(['sh', '-s', '--', *args],
                                   stdin=script, env=self.env, capture_output=True,
                                   text=True, timeout=20)
@@ -332,6 +333,34 @@ done
         self.assertTrue((self.prefix / 'running').exists())
         self.assertEqual(self.binary.read_bytes(), (self.mirror / 'v1.2.4/keenproxy-linux-arm64').read_bytes())
         self.assert_url_queries(2)
+
+    def test_existing_updater_can_install_a_native_release(self):
+        release = self.release('v1.2.3')
+        for script in (ROOT / 'tools/bootstrap.sh',
+                       ROOT / 'test/install/fixtures/bootstrap-external-client.sh'):
+            with self.subTest(script=script.name):
+                self.bootstrap_script = script
+                result = self.bootstrap('--without-trusttunnel')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.binary.read_bytes(), release.read_bytes())
+                self.assertTrue((self.prefix / 'running').exists())
+                self.assertFalse((self.prefix / 'bin/trusttunnel_client').exists())
+
+    def test_historical_installer_does_not_fetch_external_client(self):
+        # This fixture is the unchanged tools/install.sh from release v0.3.0.
+        release = self.release('v0.3.0')
+        (release.parent / 'install.sh').write_bytes(
+            (ROOT / 'test/install/fixtures/install-external-client.sh').read_bytes())
+        self.write_checksums(release.parent)
+        for args in ((), ('--without-trusttunnel',)):
+            with self.subTest(args=args):
+                result = self.install('--version', 'v0.3.0', *args)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.binary.read_bytes(), release.read_bytes())
+                self.assertTrue((self.prefix / 'running').exists())
+                self.assertFalse((self.prefix / 'bin/trusttunnel_client').exists())
+                self.assertNotIn('TrustTunnel/TrustTunnelClient',
+                                 self.requests.read_text())
 
     def test_explicit_lite_version_skips_main(self):
         self.env['CPU'] = 'mipsel'

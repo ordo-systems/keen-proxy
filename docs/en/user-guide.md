@@ -87,6 +87,42 @@ connections:
 
 Replace the placeholders and obfuscation values with those exported by your server. Before rolling back to an official-sing-box build, remove or replace AmneziaWG connections in the draft and Apply: the older engine cannot use this profile type.
 
+### sing-box-lx compatibility
+
+Both builds support XHTTP and native TrustTunnel alongside existing VLESS, REALITY and AWG. Import server-exported links through the connection wizard or paste a raw sing-box outbound in **sing-box JSON**. Saving a connection only updates the shared draft; use the global **Apply** action to validate and activate it.
+
+VLESS links retain their `encryption` setting instead of silently discarding it. REALITY's hybrid key exchange and VLESS encryption are different mechanisms; neither adds support for Xray's `pqv` signatures or `spiderX`. Use parameters matching the server rather than enabling encryption arbitrarily.
+
+Supported link parameters include:
+
+| Feature | Parameters |
+| --- | --- |
+| XHTTP | `type=xhttp` or `splithttp`, `host`, `path`, `mode=auto/packet-up/stream-up/stream-one`, URL-encoded `extra` JSON and `xmux` |
+| VLESS encryption | `encryption=mlkem768x25519plus.…`; `none` leaves this layer disabled |
+| REALITY | `key_share=hybrid` or `classical` (alias `keyShare`), alongside `pbk`, `sid`, `sni` and `fp` |
+| TLS fragmentation | Explicit boolean `fragment`, `record_fragment` (alias `recordFragment`), and duration `fragment_fallback_delay` (alias `fragmentFallbackDelay`) |
+
+Malformed flags, unsupported XHTTP options, non-empty `pqv`/`fm` and custom `spx` values fail import. Raw sing-box JSON remains available for engine-supported options without a share-link mapping; Apply performs engine validation.
+
+The full build includes QUIC/HTTP/3. Lite keeps TCP/TLS transports, including XHTTP over HTTP/1.1 or HTTP/2 and TrustTunnel over HTTP/2; HTTP/3-only profiles require the full build. This engine-side transport choice does not change participant UDP/443 interception policy.
+
+TrustTunnel uses `type: link` with the complete exported `tt://?…` link. Legacy `type: trusttunnel` sections are normalized when loaded and saved in the link representation on Apply; `binary` and `socks_port` no longer control a process. Previously installed external clients are left untouched but are not used. Keep an old configuration backup before migration if you need to return to an external-client build.
+
+```yaml
+connections:
+  - id: tt
+    name: TrustTunnel
+    type: link
+    link: "tt://?REPLACE_WITH_EXPORTED_LINK"
+```
+
+The placeholder is not a usable credential. TLS certificate verification stays enabled unless the imported profile explicitly disables it. If an exported option cannot be represented by the embedded implementation, import reports an error rather than silently weakening the profile.
+
+Native TrustTunnel import rejects client-random authentication fields, subscription URLs, differing address ports and unsupported transports. Same-port IP lists use one address (IPv4 preferred), not the external client's address racing. HTTP/2 anti-DPI maps to TLS fragmentation; its packet timing is not identical to the external client. HTTP/3 with anti-DPI is rejected. Link DNS settings do not replace KeenProxy's DNS ownership.
+
+When certificate verification is enabled, `custom_sni` must match the exported `hostname` (case and a trailing dot are ignored). The native TLS schema cannot transmit one SNI while verifying a different hostname; such profiles are rejected rather than authenticating the wrong identity. This does not automatically disable verification.
+
+
 
 ## 3. Add a routing group
 
@@ -151,6 +187,23 @@ Open **Settings** with the gear icon. On narrow screens, choose a section from t
 Open **Settings → DNS** to choose the primary and secondary DNS servers. Choose a provider and protocol from the list or select **Custom DNS server** and enter an IP address or a DoH, DoT, or UDP URL. The provider list includes Cloudflare, Google Public DNS, Quad9, AdGuard, Yandex DNS, Cisco OpenDNS, CleanBrowsing, and Control D. Each choice shows its filtering policy. KeenProxy tries the primary first and uses the secondary if the primary is unavailable. To change the resolver list, specify two different servers. Existing configurations with fewer servers can still be used and saved when the list is unchanged. **Advanced settings** contains any additional resolvers, bootstrap addresses, and the listening address. The DNS route and tunnel failure policy are configured separately.
 
 Open **Settings → YAML configuration** to import, export, or restore a configuration. Importing or restoring prepares a draft. Review it and Apply. Keep unredacted backups private. The browser demo exports synthetic JSON-compatible data and disables YAML import.
+
+### Soft memory limit
+
+Open **Settings → System** only if the router is running short of memory. **Soft Go memory limit, MiB** is an optional recommendation for the Go runtime, covering KeenProxy and its embedded sing-box. Lowering it makes garbage collection more frequent, increases CPU usage, and may reduce connection speed. Leave it empty if the router has no memory problems.
+
+This is not a hard cap on process RSS and does not include all memory used by the operating system. Go may exceed the recommendation; leave room for the router firmware, network buffers, and other services. See the [Go memory-limit guide](https://go.dev/doc/gc-guide#Memory_limit).
+
+Use the shared **Apply** button to save and activate the value. A memory-only change does not require restarting the service or sing-box; the saved setting is also applied at startup. An empty field uses the Go limit set before daemon startup, including `GOMEMLIMIT`; if no limit was set, KeenProxy uses **768 MiB (805306368 bytes)**. An explicit value in the panel takes priority. Clearing the field and applying restores this default mode. An explicitly supplied `GOMEMLIMIT=off` is respected and keeps the inherited mode unlimited.
+
+For example, an explicit recommendation of 400 MiB is stored as:
+
+```yaml
+system:
+  memory_limit_mib: 400
+```
+
+Only positive whole MiB values are accepted. To remove the override, omit `memory_limit_mib`, rather than setting it to zero. The demo saves this setting in memory without imposing a real process limit.
 
 ## 9. Install or roll back a release
 

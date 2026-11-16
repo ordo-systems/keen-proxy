@@ -102,7 +102,7 @@ func (p supportProjection) address(host string) string {
 }
 
 func (p supportProjection) connection(c model.Connection) supportFields {
-	kind := supportEnum(c.Type, model.ConnWireGuard, model.ConnAmneziaWG, model.ConnLink, model.ConnSingBox, model.ConnTrustTunnel)
+	kind := supportEnum(c.Type, model.ConnWireGuard, model.ConnAmneziaWG, model.ConnLink, model.ConnSingBox)
 	return supportFields{
 		"id": p.target(c.ID), "type": kind, "fallback": p.target(c.Fallback), "disabled": c.Disabled,
 		"protocol": supportProtocol(c, kind),
@@ -111,11 +111,15 @@ func (p supportProjection) connection(c model.Connection) supportFields {
 
 func supportProtocol(c model.Connection, kind string) string {
 	switch kind {
-	case model.ConnWireGuard, model.ConnAmneziaWG, model.ConnTrustTunnel:
+	case model.ConnWireGuard, model.ConnAmneziaWG:
 		return kind
 	case model.ConnLink:
 		scheme, _, _ := strings.Cut(c.Link, "://")
-		return supportEnum(strings.ToLower(scheme), "vless", "vmess", "trojan", "ss", "hysteria2", "hy2", "tuic", "anytls", "socks", "socks5")
+		scheme = strings.ToLower(scheme)
+		if scheme == "tt" {
+			return "trusttunnel"
+		}
+		return supportEnum(scheme, "vless", "vmess", "trojan", "ss", "hysteria2", "hy2", "tuic", "anytls", "socks", "socks5")
 	case model.ConnSingBox:
 		object := c.Outbound
 		if c.Endpoint != nil {

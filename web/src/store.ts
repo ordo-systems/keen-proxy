@@ -25,6 +25,8 @@ export const authed = ref<boolean | null>(null)
 export const session = reactive({ trusted: false, network: '', ip: '' })
 
 // Fill optional collections in place so draft editors can mutate them safely.
+// Null is inherit, same as omission. Do not invent an empty system object: that
+// would make an untouched older config differ from the saved baseline.
 export function normalize(c: Config): Config {
   c.connections ??= []
   c.groups ??= []
@@ -37,6 +39,10 @@ export function normalize(c: Config): Config {
  c.filters.exceptions ??= []
  c.geoip ??= { databases: [] }
  c.geoip.databases ??= []
+  if (c.system == null || c.system.memory_limit_mib == null) {
+    if (c.system) delete c.system.memory_limit_mib
+    if (!c.system || Object.keys(c.system).length === 0) delete c.system
+  }
   return c
 }
 

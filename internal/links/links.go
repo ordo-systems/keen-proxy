@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/ordo-systems/keen-proxy/internal/trusttunnel"
 )
 
 // Outbound is a raw sing-box outbound object whose tag is assigned during compilation.
@@ -39,6 +41,8 @@ func Parse(link string) (Outbound, error) {
 		return parseAnyTLS(link)
 	case "socks", "socks5":
 		return parseSocks(link)
+	case "tt":
+		return trusttunnel.ParseOutbound(link)
 	default:
 		return nil, fmt.Errorf("scheme %q is not supported in links; use type: singbox with a complete outbound", scheme)
 	}
@@ -85,14 +89,20 @@ func splitList(v string) []string {
 }
 
 // tlsOptions maps Xray-style security, sni, fp, alpn, allowInsecure/insecure,
-// and REALITY pbk/sid parameters to sing-box TLS options.
+// and REALITY pbk/sid/key_share plus sing-box fragment flags.
 func tlsOptions(q url.Values, defaultSNI string, forceTLS bool) (map[string]any, error) {
+	if err := rejectUnrepresentableTLS(q); err != nil {
+		return nil, err
+	}
 	security := strings.ToLower(q.Get("security"))
 	if security == "" && forceTLS {
 		security = "tls"
 	}
 	switch security {
 	case "", "none":
+		if err := rejectTLSFlagsWithoutTLS(q); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	case "tls", "reality", "xtls":
 	default:
@@ -109,8 +119,8 @@ func tlsOptions(q url.Values, defaultSNI string, forceTLS bool) (map[string]any,
 	if sni != "" {
 		t["server_name"] = sni
 	}
-	if truthy(q.Get("allowInsecure")) || truthy(q.Get("insecure")) || truthy(q.Get("allow_insecure")) {
-		t["insecure"] = true
+	if err := applyBoolFlag(t, q, "insecure", "allowInsecure", "insecure", "allow_insecure"); err != nil {
+		return nil, err
 	}
 	if alpn := splitList(q.Get("alpn")); len(alpn) > 0 {
 		t["alpn"] = alpn
@@ -121,13 +131,22 @@ func tlsOptions(q url.Values, defaultSNI string, forceTLS bool) (map[string]any,
 		if pbk == "" {
 			return nil, fmt.Errorf("reality: missing pbk (public key)")
 		}
-		t["reality"] = map[string]any{"enabled": true, "public_key": pbk, "short_id": q.Get("sid")}
+		reality := map[string]any{"enabled": true, "public_key": pbk, "short_id": q.Get("sid")}
+		if err := applyRealityKeyShare(reality, q, security); err != nil {
+			return nil, err
+		}
+		t["reality"] = reality
 		if fp == "" {
 			fp = "chrome" // REALITY requires uTLS.
 		}
+	} else if err := applyRealityKeyShare(nil, q, security); err != nil {
+		return nil, err
 	}
 	if fp != "" {
 		t["utls"] = map[string]any{"enabled": true, "fingerprint": fp}
+	}
+	if err := applyTLSFlags(t, q); err != nil {
+		return nil, err
 	}
 	return t, nil
 }
@@ -137,6 +156,12 @@ func transport(q url.Values) (map[string]any, error) {
 	kind := strings.ToLower(q.Get("type"))
 	if kind == "" {
 		kind = strings.ToLower(q.Get("net"))
+	}
+	if kind == "" {
+		kind = strings.ToLower(q.Get("transport"))
+	}
+	if extra := strings.TrimSpace(q.Get("extra")); extra != "" && kind != "xhttp" && kind != "splithttp" {
+		return nil, fmt.Errorf("extra is only supported for xhttp transport")
 	}
 	host, path := q.Get("host"), q.Get("path")
 	switch kind {
@@ -194,7 +219,7 @@ func transport(q url.Values) (map[string]any, error) {
 		}
 		return t, nil
 	case "xhttp", "splithttp":
-		return nil, fmt.Errorf("transport %s is only available in Xray; sing-box does not support it", kind)
+		return xhttpTransport(q)
 	default:
 		return nil, fmt.Errorf("transport type=%q is not supported", kind)
 	}
@@ -221,6 +246,7 @@ func withTLSAndTransport(o Outbound, q url.Values, host string, forceTLS bool) e
 }
 
 // parseVLESS maps URL userinfo to UUID, defaults packet encoding to xudp, and preserves optional flow.
+// encryption=none leaves the layer off; other specs are preserved for engine validation.
 func parseVLESS(link string) (Outbound, error) {
 	u, err := url.Parse(link)
 	if err != nil {
@@ -239,6 +265,7 @@ func parseVLESS(link string) (Outbound, error) {
 	if flow := q.Get("flow"); flow != "" {
 		o["flow"] = flow
 	}
+	applyEncryption(o, q.Get("encryption"))
 	return o, withTLSAndTransport(o, q, host, false)
 }
 

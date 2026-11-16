@@ -10,24 +10,14 @@ import (
 	"github.com/ordo-systems/keen-proxy/internal/awg"
 	"github.com/ordo-systems/keen-proxy/internal/links"
 	"github.com/ordo-systems/keen-proxy/internal/model"
-	"github.com/ordo-systems/keen-proxy/internal/trusttunnel"
 )
-
-// TrustTunnelClient describes an external trusttunnel_client process owned by the daemon.
-type TrustTunnelClient struct {
-	ID        string
-	Binary    string
-	SocksPort uint16
-	Config    string // trusttunnel_client.toml
-}
 
 // connOut collects protocol objects and runtime dependencies for all connections.
 type connOut struct {
-	outbounds   []obj
-	endpoints   []obj
-	trustTunnel []TrustTunnelClient
-	servers     []netip.Addr      // server addresses excluded from LAN interception
-	hosts       map[string]string // connection ID to server address or hostname for country lookup
+	outbounds []obj
+	endpoints []obj
+	servers   []netip.Addr      // server addresses excluded from LAN interception
+	hosts     map[string]string // connection ID to server address or hostname for country lookup
 }
 
 // connections assigns stable tags and collects server addresses for interception bypass.
@@ -91,24 +81,6 @@ func connections(c *model.Config) (connOut, error) {
 							addServer(host)
 						}
 					}
-				}
-			}
-		case model.ConnTrustTunnel:
-			tt := cn.TrustTunnel
-			ep, err := trusttunnel.ParseLink(tt.Link)
-			if err != nil {
-				return out, fmt.Errorf("connection %q: %w", cn.ID, err)
-			}
-			socks := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(tt.SocksPort)))
-			out.trustTunnel = append(out.trustTunnel, TrustTunnelClient{
-				ID: cn.ID, Binary: tt.Binary, SocksPort: tt.SocksPort, Config: trusttunnel.ClientConfig(ep, socks),
-			})
-			out.outbounds = append(out.outbounds, obj{
-				"type": "socks", "tag": cn.ID, "server": "127.0.0.1", "server_port": tt.SocksPort, "version": "5",
-			})
-			for _, a := range ep.Addresses {
-				if host, _, err := net.SplitHostPort(a); err == nil {
-					addServer(host)
 				}
 			}
 		}

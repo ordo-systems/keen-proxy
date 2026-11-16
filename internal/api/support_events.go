@@ -45,7 +45,7 @@ func supportEntry(kind journal.Kind, e journal.Entry, alias supportAlias) journa
 		safe.Firewall = supportFirewall(e)
 	case journal.System:
 		safe.Level = known(e.Level, "INFO", "WARN", "ERROR")
-		safe.Source = known(e.Source, "keenproxy", "sing-box", "trusttunnel")
+		safe.Source = known(e.Source, "keenproxy", "sing-box")
 		safe.Message = systemEvent(e.Message)
 	}
 	return safe
@@ -92,7 +92,6 @@ func systemEvent(message string) string {
 		"new configuration failed to apply", "rollback also failed", "sing-box core restarted",
 		"interception rules disappeared", "rule restoration", "rule update", "remove rules",
 		"netfilter event hook enabled", "netfilter event hook unavailable", "netfilter event watcher error",
-		"TrustTunnel started", "TrustTunnel configuration", "trusttunnel_client not found",
 		"ARP unavailable", "IP database loaded", "IP database download failed",
 		"upstream DNS did not respond", "system resolver did not respond",
 		"scheduled update failed to start", "no connection in the chain is available",

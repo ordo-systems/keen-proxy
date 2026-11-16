@@ -4,6 +4,11 @@
 
 - Experimental AmneziaWG 2/3 single-peer `.conf` import and editing through the shared draft/Apply workflow, using pinned sing-box-lx 1.14.4-lx.35 and matching dependency forks.
 - Keep existing DNS ownership and participant UDP/443 rejection; no Amnezia subscription integration.
+- Enable XHTTP, preserve VLESS encryption and expose REALITY key-share/TLS fragmentation options when importing connection links.
+- Replace the external TrustTunnel client with the embedded lx outbound, migrate legacy connection settings on load, and remove external-client installation and process status.
+- Keep lite builds without QUIC/HTTP/3; both registries support XHTTP and native TrustTunnel over TCP/TLS.
+- Keep sing-box-lx v1.14.4-lx.35 and its four dependency forks pinned as versioned Go modules; use Go 1.27.3 consistently in local builds and CI.
+- Add a System settings tab with an optional process-wide Go memory recommendation through the shared draft/Apply workflow, including CPU/throughput warnings and restart-free application. Default to 768 MiB when no startup Go limit is set; preserve explicit configuration and GOMEMLIMIT precedence.
 - Import standalone Amnezia `vpn://` AWG exports locally, with bounded decompression, explicit multi-profile selection and translated errors for service/admin/unsupported exports. No service API calls or device registrations.
 - Keep AWG profiles out of redacted support exports and reject excessive junk-packet bursts before starting the engine.
 - Mask native AmneziaWG header-protection keys in both Base64 and normalized hexadecimal journal output, including profiles with whitespace around field names.

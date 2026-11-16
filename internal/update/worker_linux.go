@@ -141,7 +141,7 @@ func (m *Manager) startWorker(current installState, target string, installer []b
 	}
 	defer log.Close()
 	args := []string{"-c", worker, "keenproxy-update", m.shell, filepath.Join(m.dir, "job"), target,
-		"--version", target, "--expect-current", current.Current, "--without-trusttunnel"}
+		"--version", target, "--expect-current", current.Current}
 	if current.Variant == "lite" {
 		args = append(args, "--lite")
 	}

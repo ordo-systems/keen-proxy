@@ -107,9 +107,6 @@ func (d *Demo) Status(context.Context) daemon.Status {
 		}
 		st.ConnCountries[c.ID] = demoCountries[i%len(demoCountries)]
 		st.Health[c.ID] = daemon.ConnHealth{OK: true, Checked: time.Now().Add(-4 * time.Second), Since: d.started, Latency: int64(60 + 23*i)}
-		if c.Type == model.ConnTrustTunnel {
-			st.TrustTunnel = append(st.TrustTunnel, daemon.TrustTunnelInfo{ID: c.ID, Running: true, Starts: 1})
-		}
 	}
 	// Simulate failure of the first connection and traffic through its fallback.
 	for i, c := range d.cfg.Connections {

@@ -3,6 +3,7 @@ package links
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -70,7 +71,7 @@ func TestParse(t *testing.T) {
 
 func TestParseErrors(t *testing.T) {
 	for link, want := range map[string]string{
-		"vless://u@h:443?type=xhttp":       "Xray",
+		"vless://u@h:443?type=kcp":         "not supported",
 		"vless://u@h:443?security=reality": "pbk",
 		"wireguard://x":                    "not supported",
 		"ss://YWVzOnB3@h:1?plugin=obfs":    "plugins",
@@ -87,5 +88,149 @@ func TestParseErrors(t *testing.T) {
 func TestName(t *testing.T) {
 	if n := Name("vless://u@h:1#%D0%A4%D0%B8%D0%BD%D0%BB%D1%8F%D0%BD%D0%B4%D0%B8%D1%8F"); n != "\u0424\u0438\u043d\u043b\u044f\u043d\u0434\u0438\u044f" {
 		t.Errorf("Name = %q", n)
+	}
+}
+
+const supportedVLESSEncryption = "mlkem768x25519plus.native.0rtt.aMVnCpOnew7ZP35GkyCEsK90FCNRjSyacboJFaSlMBM"
+
+func TestVLESSEncryptionNoneIsNotALayer(t *testing.T) {
+	o, err := Parse("vless://11111111-2222-3333-4444-555555555555@203.0.113.1:443?encryption=NONE&security=tls")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := o["encryption"]; ok {
+		t.Fatalf("encryption=none stored a layer: %#v", o["encryption"])
+	}
+}
+
+func TestVLESSEncryptionPreserved(t *testing.T) {
+	link := "vless://11111111-2222-3333-4444-555555555555@203.0.113.1:443?encryption=" + supportedVLESSEncryption
+	o, err := Parse(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o["encryption"] != supportedVLESSEncryption {
+		t.Fatalf("encryption = %#v", o["encryption"])
+	}
+}
+
+func TestXHTTPPreservesModePathHostAndExtra(t *testing.T) {
+	q := url.Values{}
+	q.Set("type", "splithttp")
+	q.Set("security", "tls")
+	q.Set("encryption", "none")
+	q.Set("host", "cdn.example")
+	q.Set("path", "/game?ed=2048")
+	q.Set("mode", "auto")
+	q.Set("xPaddingBytes", "100-1000")
+	q.Set("noGRPCHeader", "true")
+	q.Set("sessionPlacement", "header")
+	q.Set("uplinkDataPlacement", "header")
+	q.Set("xPaddingObfsMode", "1")
+	q.Set("xPaddingMethod", "tokenish")
+	q.Set("extra", `{"mode":"packet-up","scMaxEachPostBytes":1000000,"scMinPostsIntervalMs":30.0,"scMaxConcurrentPosts":100,"xmux":{"maxConcurrency":"16-32","hMaxRequestTimes":[600,900],"hKeepAlivePeriod":-1},"headers":{"User-Agent":"Mozilla/5.0"}}`)
+	o, err := Parse("vless://11111111-2222-3333-4444-555555555555@203.0.113.1:443?" + q.Encode())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := o["encryption"]; ok {
+		t.Fatal("encryption=none was stored")
+	}
+	want := map[string]any{
+		"transport.type":                     "xhttp",
+		"transport.host":                     "cdn.example",
+		"transport.path":                     "/game?ed=2048",
+		"transport.mode":                     "packet-up",
+		"transport.x_padding_bytes":          "100-1000",
+		"transport.no_grpc_header":           true,
+		"transport.session_placement":        "header",
+		"transport.uplink_data_placement":    "header",
+		"transport.x_padding_obfs_mode":      true,
+		"transport.x_padding_method":         "tokenish",
+		"transport.sc_max_each_post_bytes":   "1000000",
+		"transport.sc_min_posts_interval_ms": "30",
+		"transport.xmux.max_concurrency":     "16-32",
+		"transport.xmux.h_max_request_times": "600-900",
+		"transport.xmux.h_keep_alive_period": float64(-1),
+		"transport.headers.User-Agent":       "Mozilla/5.0",
+	}
+	for path, value := range want {
+		got := get(o, path)
+		gj, _ := json.Marshal(got)
+		wj, _ := json.Marshal(value)
+		if string(gj) != string(wj) {
+			t.Errorf("%s = %s, expected %s", path, gj, wj)
+		}
+	}
+	if _, ok := get(o, "transport").(map[string]any)["sc_max_concurrent_posts"]; ok {
+		t.Fatal("legacy scMaxConcurrentPosts was copied into the client transport")
+	}
+}
+
+func TestXHTTPRejectsUnknownAndMalformedOptions(t *testing.T) {
+	for link, want := range map[string]string{
+		"vless://u@h:443?type=xhttp&mode=nope":                                                            "mode",
+		"vless://u@h:443?type=xhttp&noGRPCHeader=maybe":                                                   "boolean",
+		"vless://u@h:443?type=xhttp&extra=%7B%22downloadSettings%22%3A%7B%7D%7D":                          "downloadSettings",
+		"vless://u@h:443?type=xhttp&extra=%7B%22xmux%22%3A%7B%22foo%22%3A1%7D%7D":                         "foo",
+		"vless://u@h:443?type=xhttp&extra=not-json":                                                       "JSON",
+		"vless://u@h:443?type=xhttp&extra=%7B%22sessionKey%22%3A%22a%22%2C%22session_key%22%3A%22b%22%7D": "conflicting",
+		"vless://u@h:443?type=ws&extra=%7B%22mode%22%3A%22auto%22%7D":                                     "extra",
+	} {
+		_, err := Parse(link)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: error %v, expected %q", link, err, want)
+		}
+	}
+}
+
+func TestREALITYKeyShareAndFragmentBooleans(t *testing.T) {
+	o, err := Parse("vless://u@h:443?security=reality&pbk=PUBKEY&sid=ab&fp=chrome&spx=%2F&key_share=Hybrid&fragment=1&record_fragment=false&fragment_fallback_delay=300ms")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"tls.reality.key_share":       "hybrid",
+		"tls.fragment":                true,
+		"tls.record_fragment":         false,
+		"tls.fragment_fallback_delay": "300ms",
+	}
+	for path, value := range want {
+		got := get(o, path)
+		gj, _ := json.Marshal(got)
+		wj, _ := json.Marshal(value)
+		if string(gj) != string(wj) {
+			t.Errorf("%s = %s, expected %s", path, gj, wj)
+		}
+	}
+}
+
+func TestREALITYRejectsUnrepresentableOptions(t *testing.T) {
+	for link, want := range map[string]string{
+		"vless://u@h:443?security=reality&pbk=PUBKEY&key_share=classic":                    "key_share",
+		"vless://u@h:443?security=tls&key_share=hybrid":                                    "security=reality",
+		"vless://u@h:443?security=reality&pbk=PUBKEY&fragment=10-20,tlshello":              "boolean",
+		"vless://u@h:443?security=tls&record_fragment=maybe":                               "boolean",
+		"vless://u@h:443?security=reality&pbk=PUBKEY&pqv=abc":                              "pqv",
+		"vless://u@h:443?security=reality&pbk=PUBKEY&spx=/crawl":                           "spiderX",
+		"vless://u@h:443?fm=1-3":                                                           "fm",
+		"vless://u@h:443?fragment=true":                                                    "security",
+		"vless://u@h:443?security=tls&allowInsecure=1&insecure=0":                          "conflicting",
+		"vless://u@h:443?security=tls&insecure=maybe":                                      "boolean",
+		"vless://u@h:443?security=tls&fragment=false&fragment=true":                        "conflicting",
+		"vless://u@h:443?security=reality&pbk=PUBKEY&key_share=hybrid&key_share=classical": "conflicting",
+		"vless://u@h:443?security=reality&pbk=PUBKEY&pqv=&pqv=signature":                   "conflicting",
+	} {
+		_, err := Parse(link)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: error %v, expected %q", link, err, want)
+		}
+	}
+}
+
+func TestTrustTunnelLinkDispatches(t *testing.T) {
+	_, err := Parse("tt://?AQ")
+	if err == nil || strings.Contains(err.Error(), "not supported in links") {
+		t.Fatalf("tt:// was not dispatched to trusttunnel: %v", err)
 	}
 }

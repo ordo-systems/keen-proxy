@@ -3,6 +3,7 @@ import { computed, reactive, watch } from 'vue'
 import DNSSettings from '../components/DNSSettings.vue'
 import YAMLSettings from '../components/YAMLSettings.vue'
 import UpdateSettings from '../components/UpdateSettings.vue'
+import SystemSettings from '../components/SystemSettings.vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NCard, NForm, NFormItem, NInput, NInputNumber, NRadioGroup, NRadio, NDynamicInput, NAlert, NSelect } from 'naive-ui'
@@ -22,6 +23,7 @@ const sectionOptions = computed(() => [
   { value: 'yaml', label: t('settings.yamlTab') },
   { value: 'updates', label: t('settings.updatesTab') },
   { value: 'appearance', label: t('settings.appearanceTab') },
+  { value: 'system', label: t('settings.system') },
 ])
 const section = computed(() => sectionOptions.value.find(({ value }) => value === route.query.section)?.value ?? 'dns')
 const visited = reactive(new Set<string>())
@@ -166,6 +168,9 @@ const themeOptions = computed(() => [
             <NSelect :value="themePreference" :options="themeOptions" @update:value="(v: ThemePreference) => themePreference = v" />
           </NFormItem>
         </NForm>
+      </section>
+      <section v-if="visited.has('system')" v-show="section === 'system'">
+        <div class="settings-fields"><SystemSettings /></div>
       </section>
     </div>
   </div>

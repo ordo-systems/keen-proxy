@@ -19,9 +19,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: Read pinned Go version
+        id: go-version
+        run: |
+          version=$(awk '$1 == "go" {print $2}' go.mod)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version: ${{ steps.go-version.outputs.version }}
           cache-dependency-path: go.sum
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
@@ -49,8 +54,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: Read pinned Go version
+        id: go-version
+        run: |
+          version=$(awk '$1 == "go" {print $2}' go.mod)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version: ${{ steps.go-version.outputs.version }}
           cache-dependency-path: go.sum
       - run: make integration

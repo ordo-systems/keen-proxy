@@ -340,14 +340,20 @@ func (s *Server) parseLink(w http.ResponseWriter, r *http.Request) {
 	}
 	link := strings.TrimSpace(req.Link)
 	if strings.HasPrefix(link, "tt://") {
-		ep, err := trusttunnel.ParseLink(link)
+		outbound, err := trusttunnel.ParseOutbound(link)
 		if err != nil {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
+		name := links.Name(link)
+		if name == "" {
+			if ep, err := trusttunnel.ParseLink(link); err == nil {
+				name = ep.Name
+			}
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"type": model.ConnTrustTunnel, "name": ep.Name, "protocol": "trusttunnel",
-			"server": ep.Hostname, "addresses": ep.Addresses, "http3": ep.HTTP3,
+			"type": model.ConnLink, "name": name, "protocol": "trusttunnel",
+			"server": outbound["server"], "port": outbound["server_port"], "tls": outbound["tls"] != nil,
 		})
 		return
 	}

@@ -107,7 +107,9 @@ async function save() {
   const generation = ++saveGeneration
   const edit = props.edit
   const config = store.state.config
+  // Auto-detected AWG is parsed from wgText; compare that input after validation.
   const text = awgText.value
+  const wgSnap = wgText.value
   const idSnap = id.value
   const nameSnap = name.value
   const tabSnap = tab.value
@@ -142,7 +144,7 @@ async function save() {
       await api.validateConfig(cfg)
       if (
         generation !== saveGeneration || !props.show || props.edit !== edit ||
-        store.state.config !== config || awgText.value !== text ||
+        store.state.config !== config || awgText.value !== text || wgText.value !== wgSnap ||
         id.value !== idSnap || name.value !== nameSnap || tab.value !== tabSnap
       ) throw new Error(DRAFT_CHANGED)
     }

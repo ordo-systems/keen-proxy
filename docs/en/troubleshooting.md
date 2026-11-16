@@ -8,6 +8,18 @@ No. Every address, counter, DNS result, and connectivity check in the browser de
 
 Look for pending changes and choose **Apply**. All screens share a draft. Confirm that the selected network/client uses the intended routing mode, then inspect the route journal and test the applied connection.
 
+## I cannot retrieve the panel token
+
+`keenproxy --key` loads and validates the entire configuration before reading `api.token_file`. A configuration error after a manual edit therefore blocks the command even when the existing token file is intact. Fix or restore the configuration; do not delete or rotate the token to work around the error.
+
+In the router's Entware root shell, you can read the existing token file directly:
+
+```sh
+cat /opt/etc/keenproxy/token
+```
+
+Use your configured `api.token_file` path if it differs from the default. Keep the output private: it is a login credential, not a diagnostic attachment.
+
 ## HTTP passes but the application fails
 
 Run HTTPS and transfer checks separately. Inspect certificate/time errors, profile details, system logs, and fallback behavior. A process being alive or one HTTP response succeeding is weaker evidence than a successful application transfer.

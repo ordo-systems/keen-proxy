@@ -23,6 +23,17 @@ const (
 	MaxURISize     = 2 << 20
 )
 
+// MaxAWGCandidates is the maximum number of AmneziaWG containers constructed
+// from one export. The next candidate is rejected before it is built, and the
+// export is not partially imported.
+const MaxAWGCandidates = 32
+
+// MaxAggregateProfileBytes is the maximum cumulative native profile text
+// retained from one export. Structured fields such as root DNS are still
+// copied into each profile; a candidate that would exceed this total is not
+// retained, and the export is rejected as a whole.
+const MaxAggregateProfileBytes = 1 << 20
+
 var (
 	ErrInvalidProfile     = errors.New("amnezia_invalid_profile")
 	ErrServiceProfile     = errors.New("amnezia_service_profile")
@@ -154,17 +165,9 @@ func extract(root object) ([]model.Connection, error) {
 			return nil, ErrInvalidProfile
 		}
 	}
-	var profiles []model.Connection
-	for _, container := range containers {
-		kind := text(container, "container")
-		if kind != "amnezia-awg" && kind != "amnezia-awg2" {
-			continue
-		}
-		profile, err := containerProfile(root, container)
-		if err != nil {
-			return nil, err
-		}
-		profiles = append(profiles, model.Connection{Name: fmt.Sprintf("AmneziaWG (%s, %d)", kind, len(profiles)+1), Type: "amneziawg", AmneziaWG: profile})
+	profiles, err := collectAWGProfiles(root, containers)
+	if err != nil {
+		return nil, err
 	}
 	if len(profiles) != 0 {
 		return profiles, nil
@@ -173,6 +176,32 @@ func extract(root object) ([]model.Connection, error) {
 		return nil, ErrAdminProfile
 	}
 	return nil, ErrUnsupportedProfile
+}
+
+// collectAWGProfiles bounds retained candidates before any preview is returned.
+// The slice length is the candidate count; failed exports never return a prefix.
+func collectAWGProfiles(root object, containers []object) ([]model.Connection, error) {
+	profiles := make([]model.Connection, 0, min(len(containers), MaxAWGCandidates))
+	remaining := MaxAggregateProfileBytes
+	for _, container := range containers {
+		kind := text(container, "container")
+		if kind != "amnezia-awg" && kind != "amnezia-awg2" {
+			continue
+		}
+		if len(profiles) >= MaxAWGCandidates {
+			return nil, ErrInvalidProfile
+		}
+		profile, err := containerProfile(root, container)
+		if err != nil {
+			return nil, err
+		}
+		if len(profile) > remaining {
+			return nil, ErrInvalidProfile
+		}
+		remaining -= len(profile)
+		profiles = append(profiles, model.Connection{Name: fmt.Sprintf("AmneziaWG (%s, %d)", kind, len(profiles)+1), Type: "amneziawg", AmneziaWG: profile})
+	}
+	return profiles, nil
 }
 
 func hasAdminCredentials(root object) bool {

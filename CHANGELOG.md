@@ -9,6 +9,7 @@
 - Mask native AmneziaWG header-protection keys in both Base64 and normalized hexadecimal journal output, including profiles with whitespace around field names.
 - Align static and local Go demo build identities with the planned release preview without changing the last published installer version.
 - Print the panel URL after installation and updates; add read-only `--url` and `--key` commands for configured access details without starting the service or rotating the token.
+- Bound standalone export candidates and their cumulative profile size; preserve edits during asynchronous profile validation and accept validated ordinary WireGuard DNS metadata without importing DNS policy.
 
 ## [0.8.0](https://github.com/ordo-systems/keen-proxy/compare/v0.7.0...v0.8.0) (2026-11-10)
 

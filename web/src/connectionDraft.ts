@@ -175,15 +175,60 @@ function wgSection(state: WGParseState, name: string): void {
   if (state.section === 'peer' && ++state.peers > 1)
     throw new Error('Unsupported WireGuard section')
 }
+// wg-quick DNS is metadata: each comma-separated item is a zoneless IP or a search domain.
+// Empty items are rejected. The value is not stored and cannot replace KeenProxy DNS.
+function dnsMetadata(value: string): void {
+  for (const raw of value.split(',')) {
+    const item = raw.trim()
+    if (!ipv4(item) && !ipv6(item) && !hostname(item))
+      throw new Error('invalid DNS metadata')
+  }
+}
+
+function ipv4(value: string): boolean {
+  const parts = value.split('.')
+  if (parts.length !== 4) return false
+  for (const part of parts) {
+    if (!/^(0|[1-9]\d{0,2})$/.test(part) || Number(part) > 255) return false
+  }
+  return true
+}
+
+function ipv6(value: string): boolean {
+  // URL parses IPv6 without network access. Restrict its input first because
+  // URL normalization would otherwise discard embedded tabs or line breaks.
+  if (!/^[\da-f:.]+$/i.test(value)) return false
+  try {
+    new URL(`http://[${value}]/`)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function hostname(value: string): boolean {
+  if (value === '' || value.length > 253) return false
+  if (value.endsWith('.')) value = value.slice(0, -1)
+  if (/^[\d.]+$/.test(value)) return false
+  return value.split('.').every((label) =>
+    /^[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?$/i.test(label),
+  )
+}
+
 function wgAssignment(wg: WireGuard, section: string, line: string): void {
   const eq = line.indexOf('=')
   if (eq < 0) throw new Error('Invalid WireGuard line')
   const key = line.slice(0, eq).trim().toLowerCase()
+  const value = line.slice(eq + 1).trim()
+  if (section === 'interface' && key === 'dns') {
+    dnsMetadata(value)
+    return
+  }
   const assign = wgFields[section]?.[key]
   if (!assign) throw new Error('Unsupported WireGuard setting: ' + key)
-  assign(wg, line.slice(eq + 1).trim())
+  assign(wg, value)
 }
-// Reject unsupported sections, fields, and multiple peers instead of silently losing settings.
+// Reject unsupported sections, fields, and multiple peers. DNS metadata is checked and discarded.
 function parseWG(text: string): WireGuard {
   const wg: WireGuard = {
     private_key: '',
@@ -371,6 +416,7 @@ const connectionErrors: Record<string, string> = {
   'Unsupported WireGuard section': 'ui.unsupportedWG',
   'Incomplete WireGuard profile': 'ui.invalid',
   'Invalid WireGuard line': 'ui.invalid',
+  'invalid DNS metadata': 'ui.invalid',
   'Invalid connection link': 'ui.invalid',
   [DRAFT_CHANGED]: 'ui.configChanged',
 }

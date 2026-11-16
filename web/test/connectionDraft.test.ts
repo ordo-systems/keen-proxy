@@ -93,6 +93,98 @@ test('WireGuard import rejects commands, unknown options and multiple peers', ()
   )
 })
 
+test('ordinary WireGuard accepts DNS metadata and omits it from the tunnel', () => {
+  const plain =
+    '[Interface]\nPrivateKey=a\nAddress=10.1.0.2/32\nDNS=1.1.1.1,8.8.8.8\n[Peer]\nPublicKey=b\nEndpoint=vpn.example.test:51820'
+  const plainWG = importConnections(plain, 'profile.conf')[0]!
+  assert.equal(plainWG.type, 'wireguard')
+  assert.equal(plainWG.amneziawg, undefined)
+  assert.deepEqual(Object.keys(plainWG).sort(), ['id', 'name', 'type', 'wireguard'])
+  assert.deepEqual(plainWG.wireguard, {
+    private_key: 'a',
+    address: ['10.1.0.2/32'],
+    peer: { endpoint: 'vpn.example.test:51820', public_key: 'b' },
+  })
+  const plainRaw = JSON.stringify(plainWG)
+  assert.equal(plainRaw.includes('1.1.1.1'), false)
+  assert.equal(plainRaw.includes('8.8.8.8'), false)
+
+  const repeated = importConnections(
+    '[Interface]\nPrivateKey=a\nAddress=10.1.0.2/32\nDNS=1.1.1.1\nDNS=9.9.9.9\n[Peer]\nPublicKey=b\nEndpoint=vpn.example.test:51820',
+    'profile.conf',
+  )[0]!
+  assert.equal(repeated.wireguard?.peer.endpoint, 'vpn.example.test:51820')
+  assert.equal(JSON.stringify(repeated).includes('9.9.9.9'), false)
+
+  const mixed =
+    '[Interface]\nPrivateKey=a\nAddress=10.1.0.2/32\nDNS = 1.1.1.1, 2001:DB8::53, ::ffff:192.0.2.1, resolver.example., corp.lan\nMTU=1280\n[Peer]\nPublicKey=b\nPresharedKey=c\nEndpoint=vpn.example.test:51820\nAllowedIPs=0.0.0.0/0, ::/0\nPersistentKeepalive=25'
+  const connection = importConnections(mixed, 'profile.conf')[0]!
+  assert.deepEqual(connection.wireguard, {
+    private_key: 'a',
+    address: ['10.1.0.2/32'],
+    mtu: 1280,
+    peer: {
+      endpoint: 'vpn.example.test:51820',
+      public_key: 'b',
+      preshared_key: 'c',
+      allowed_ips: ['0.0.0.0/0', '::/0'],
+      keepalive: 25,
+    },
+  })
+  const raw = JSON.stringify(connection)
+  for (const token of ['1.1.1.1', '2001:DB8::53', '192.0.2.1', 'resolver.example', 'corp.lan'])
+    assert.equal(raw.includes(token), false, token)
+})
+
+test('ordinary WireGuard rejects invalid DNS metadata, hooks and extra peers', () => {
+  const iface = '[Interface]\nPrivateKey=a\nAddress=10.1.0.2/32\n'
+  const peer = '[Peer]\nPublicKey=b\nEndpoint=vpn.example.test:51820'
+  for (const dns of [
+    'https://resolver.example',
+    '999.1.1.1',
+    'fe80::1%eth0',
+    '1.1.1.1,',
+    '1.1.1.1,,8.8.8.8',
+    '',
+    '192.168.001.1',
+    '[2001:db8::1]',
+    '2001:\tdb8::53',
+    '::ffff:192.168.001.1',
+    '2001:db8:::53',
+    'b\u00fccher.example',
+    '-bad.example',
+    'bad-.example',
+    'bad..example',
+    'a'.repeat(64) + '.example',
+  ])
+    assert.throws(() => importConnections(iface + 'DNS = ' + dns + '\n' + peer, 'profile.conf'), {
+      message: 'invalid DNS metadata',
+    })
+  assert.throws(
+    () => importConnections(iface + 'DNS=1.1.1.1\nDNS=https://bad.example\n' + peer, 'profile.conf'),
+    { message: 'invalid DNS metadata' },
+  )
+  assert.throws(
+    () => importConnections(iface + 'DNS=1.1.1.1\nPostUp=echo bad\n' + peer, 'profile.conf'),
+    { message: 'Unsupported WireGuard setting: postup' },
+  )
+  assert.throws(
+    () => importConnections(iface + 'DNS=1.1.1.1\nPreUp=echo bad\n' + peer, 'profile.conf'),
+    { message: 'Unsupported WireGuard setting: preup' },
+  )
+  assert.throws(
+    () => importConnections(iface + 'DNS=1.1.1.1\nTable=off\n' + peer, 'profile.conf'),
+    { message: 'Unsupported WireGuard setting: table' },
+  )
+  assert.throws(
+    () => importConnections(iface + 'DNS=1.1.1.1\n' + peer + '\n[Peer]\nPublicKey=c', 'profile.conf'),
+    { message: 'Unsupported WireGuard section' },
+  )
+  assert.throws(() => importConnections(iface + peer + '\nDNS=1.1.1.1', 'profile.conf'), {
+    message: 'Unsupported WireGuard setting: dns',
+  })
+})
+
 const awgProfile = '\uFEFF# keep this profile intact\r\n[Interface]\r\nPrivateKey = private-secret\r\nAddress = 10.1.0.2/32\r\nDNS = 1.1.1.1\r\nJc = 4\r\nJmin = 40\r\nJmax = 70\r\nS1 = 0\r\nS2 = 0\r\nS3 = 12\r\nS4 = 16\r\nH1 = 100-200\r\nH2 = 201-300\r\nH3 = 301-400\r\nH4 = 401-500\r\nI1 = <b 0xc0ffee><r 32><t><c>\r\n[Peer]\r\nPublicKey = peer-key\r\nPresharedKey = psk-secret\r\nEndpoint = vpn.example.test:51820\r\nAllowedIPs = 0.0.0.0/0, ::/0\r\n'
 
 test('AWG imports preserve the complete profile including ranges and CPS data', () => {

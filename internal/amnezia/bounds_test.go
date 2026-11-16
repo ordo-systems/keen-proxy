@@ -198,3 +198,133 @@ func TestNativeConfigIgnoresUnknownServerBookkeeping(t *testing.T) {
 		t.Fatalf("native config must stay authoritative: %v", err)
 	}
 }
+
+func nativeAWGContainers(n int) []any {
+	containers := make([]any, n)
+	for i := range containers {
+		containers[i] = map[string]any{"container": "amnezia-awg", "awg": map[string]any{"last_config": map[string]any{"config": nativeConfig}}}
+	}
+	return containers
+}
+
+func structuredExport(n int, dns string, stretchLast bool) map[string]any {
+	containers := make([]any, n)
+	for i := range containers {
+		last := map[string]any{"client_ip": "10.8.0.2", "client_priv_key": testKey, "server_pub_key": testKey, "port": 51820}
+		if stretchLast && i == n-1 {
+			// One extra hostname byte lengthens only this profile's Endpoint line.
+			last["hostName"] = "vvpn.example"
+		}
+		containers[i] = map[string]any{"container": "amnezia-awg", "awg": map[string]any{"last_config": last}}
+	}
+	return map[string]any{"format_version": 1, "hostName": "vpn.example", "dns1": dns, "containers": containers}
+}
+
+func TestImportAcceptsMaxAWGCandidates(t *testing.T) {
+	containers := make([]any, 0, MaxAWGCandidates+2)
+	ignored := map[string]any{"container": "amnezia-openvpn", "openvpn": map[string]any{"last_config": "ignored"}}
+	containers = append(containers, ignored)
+	containers = append(containers, nativeAWGContainers(MaxAWGCandidates)...)
+	containers = append(containers, ignored)
+	obj := map[string]any{"format_version": 1, "hostName": "vpn.example", "dns1": "1.1.1.1", "containers": containers}
+	profiles, err := Import(uriFor(t, obj, false, false))
+	if err != nil || len(profiles) != MaxAWGCandidates {
+		t.Fatalf("profiles=%d err=%v", len(profiles), err)
+	}
+	for _, profile := range profiles {
+		if profile.Type != "amneziawg" || profile.AmneziaWG != nativeConfig {
+			t.Fatal("native profile text must stay authoritative")
+		}
+	}
+}
+
+func TestImportRejectsSurplusAWGCandidate(t *testing.T) {
+	obj := map[string]any{"format_version": 1, "hostName": "vpn.example", "containers": nativeAWGContainers(MaxAWGCandidates + 1)}
+	profiles, err := Import(uriFor(t, obj, false, false))
+	if !errors.Is(err, ErrInvalidProfile) || len(profiles) != 0 {
+		t.Fatalf("33 candidates: %v profiles=%d", err, len(profiles))
+	}
+
+	// The surplus container would be unsupported if it were built. Count must
+	// reject it first so construction never reclassifies the export.
+	containers := nativeAWGContainers(MaxAWGCandidates)
+	containers = append(containers, map[string]any{"container": "amnezia-awg2", "awg": map[string]any{"last_config": map[string]any{"config": nativeConfig + "PostUp = secret\n"}}})
+	obj["containers"] = containers
+	profiles, err = Import(uriFor(t, obj, false, false))
+	if !errors.Is(err, ErrInvalidProfile) || errors.Is(err, ErrUnsupportedProfile) || len(profiles) != 0 {
+		t.Fatalf("surplus candidate was constructed: %v profiles=%d", err, len(profiles))
+	}
+}
+
+func TestImportRejectsSharedDNSAmplification(t *testing.T) {
+	const candidates = 8
+	if candidates >= MaxAWGCandidates || MaxAggregateProfileBytes%candidates != 0 {
+		t.Fatal("amplification fixture must stay inside the candidate cap")
+	}
+	probe := "1.1.1.1"
+	probed, err := Import(uriFor(t, structuredExport(1, probe, false), false, false))
+	if err != nil || len(probed) != 1 || !strings.Contains(probed[0].AmneziaWG, "DNS = "+probe) {
+		t.Fatalf("structured DNS metadata changed: %v", err)
+	}
+	grow := MaxAggregateProfileBytes/candidates - len(probed[0].AmneziaWG) + 1
+	if grow < 1 {
+		t.Fatalf("probe profile %d exceeds an even share", len(probed[0].AmneziaWG))
+	}
+	dns := probe + strings.Repeat(" ", grow)
+	one, err := Import(uriFor(t, structuredExport(1, dns, false), false, false))
+	if err != nil || len(one) != 1 || !strings.Contains(one[0].AmneziaWG, "DNS = "+dns) {
+		t.Fatalf("single profile must retain shared DNS: %v", err)
+	}
+	if len(one[0].AmneziaWG) > MaxAggregateProfileBytes {
+		t.Fatalf("fixture exceeded one profile budget: %d", len(one[0].AmneziaWG))
+	}
+	profiles, err := Import(uriFor(t, structuredExport(candidates, dns, false), false, false))
+	if !errors.Is(err, ErrInvalidProfile) || len(profiles) != 0 {
+		t.Fatalf("amplified export accepted: %v profiles=%d", err, len(profiles))
+	}
+}
+
+func TestImportAggregateProfileBytesBoundary(t *testing.T) {
+	const candidates = 16
+	if candidates > MaxAWGCandidates || MaxAggregateProfileBytes%candidates != 0 {
+		t.Fatal("boundary fixture does not divide the budget")
+	}
+	target := MaxAggregateProfileBytes / candidates
+	probe := "1.1.1.1"
+	probed, err := Import(uriFor(t, structuredExport(1, probe, false), false, false))
+	if err != nil || len(probed) != 1 || !strings.Contains(probed[0].AmneziaWG, "DNS = "+probe) {
+		t.Fatalf("probe: %v", err)
+	}
+	grow := target - len(probed[0].AmneziaWG)
+	if grow < 0 {
+		t.Fatalf("probe %d exceeds target %d", len(probed[0].AmneziaWG), target)
+	}
+	dns := probe + strings.Repeat(" ", grow)
+	profiles, err := Import(uriFor(t, structuredExport(candidates, dns, false), false, false))
+	if err != nil || len(profiles) != candidates {
+		t.Fatalf("exact budget: profiles=%d err=%v", len(profiles), err)
+	}
+	total := 0
+	for _, profile := range profiles {
+		if !strings.Contains(profile.AmneziaWG, "DNS = "+dns) {
+			t.Fatal("shared DNS was dropped from a structured profile")
+		}
+		total += len(profile.AmneziaWG)
+	}
+	if total != MaxAggregateProfileBytes {
+		t.Fatalf("retained %d, want %d", total, MaxAggregateProfileBytes)
+	}
+
+	stretched, err := Import(uriFor(t, structuredExport(1, dns, true), false, false))
+	if err != nil || len(stretched) != 1 || len(stretched[0].AmneziaWG) != target+1 {
+		got := 0
+		if len(stretched) == 1 {
+			got = len(stretched[0].AmneziaWG)
+		}
+		t.Fatalf("endpoint stretch must add one retained byte: got %d want %d err=%v", got, target+1, err)
+	}
+	over, err := Import(uriFor(t, structuredExport(candidates, dns, true), false, false))
+	if !errors.Is(err, ErrInvalidProfile) || len(over) != 0 {
+		t.Fatalf("one byte over budget: %v profiles=%d", err, len(over))
+	}
+}

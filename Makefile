@@ -17,7 +17,7 @@ NPM := PATH="$(NODE_BIN):$$PATH" npm
 # Preview identity is separate from the last published installer version.
 DEMO_VERSION = $(shell PATH="$(NODE_BIN):$$PATH" node -p "require('./web/src/demo/release.json').version")
 
-.PHONY: test vet web build ui-demo build-router build-router-lite clean integration test-install check-language docs docs-preview memory-regression memory-regression-unit
+.PHONY: test vet web build ui-demo build-router build-router-lite clean integration test-install check-language docs docs-preview memory-regression memory-regression-unit memory-stress
 
 check-language:
 	python3 -B -m unittest discover -s test/language -v
@@ -40,12 +40,17 @@ memory-regression-unit:
 
 memory-regression: memory-regression-unit
 	sh test/memory/run.sh
+# Continuous AWG stress of the current daemon only. Not a baseline comparison.
+# Local builds require this and memory-regression. Pass -o memory-stress only after a
+# separate successful stress step in the same job; it is not a bypass or a cache.
+memory-stress:
+	sh test/memory/run.sh --stress
 
 # Embed the production web/dist assets when building with the ui tag.
 web:
 	cd web && $(NPM) ci --no-audit --no-fund && $(NPM) run build
 
-build: memory-regression web
+build: memory-regression memory-stress web
 	$(GO) build -tags $(TAGS),ui -o bin/keenproxy ./cmd/keenproxy
 
 # Run the local preview without relabeling the normal development binary.
@@ -54,7 +59,7 @@ ui-demo: web
 	mkdir -p bin/demo && ./bin/keenproxy-demo -ui-demo -config examples/demo.yaml
 
 # Cross-compile Linux router binaries; x86 uses baseline v1 and 32-bit SSE2.
-build-router: memory-regression web
+build-router: memory-regression memory-stress web
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 $(GO) build -tags $(TAGS),ui -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-linux-amd64 ./cmd/keenproxy
 	CGO_ENABLED=0 GOOS=linux GOARCH=386 GO386=sse2 $(GO) build -tags $(TAGS),ui -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-linux-386 ./cmd/keenproxy
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=5,softfloat $(GO) build -tags $(TAGS),ui -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-linux-armv5 ./cmd/keenproxy
@@ -65,7 +70,7 @@ build-router: memory-regression web
 # Use the reduced protocol registry for memory-constrained routers.
 # See internal/engine/registry_lite.go for supported protocols.
 LITE_TAGS := keenproxy_lite,$(PROTO_TAGS),ui
-build-router-lite: memory-regression web
+build-router-lite: memory-regression memory-stress web
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 $(GO) build -tags $(LITE_TAGS) -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-lite-linux-amd64 ./cmd/keenproxy
 	CGO_ENABLED=0 GOOS=linux GOARCH=386 GO386=sse2 $(GO) build -tags $(LITE_TAGS) -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-lite-linux-386 ./cmd/keenproxy
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=5,softfloat $(GO) build -tags $(LITE_TAGS) -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-lite-linux-armv5 ./cmd/keenproxy

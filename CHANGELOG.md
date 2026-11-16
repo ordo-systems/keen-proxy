@@ -24,6 +24,7 @@
 - Pause connections, groups, and individual domain/IP/country/category rules without deleting their settings, through the shared draft/Apply workflow; disabled targets use configured fallbacks or block rather than silently route direct.
 - Separate connection parameter and diagnostic actions, and keep activation controls available in desktop/mobile layouts and both demos.
 - Require a reproducible full-daemon memory regression gate for local application builds, CI, and releases, comparing identical WireGuard workloads against the parent of PR #25 and recording AWG separately.
+- Require a separate continuous AWG stress gate before application builds, CI, and releases. The measured daemon uses a 320 MiB Go limit; RSS or lifetime `VmHWM` at or above 384 MiB, stalled streams, or low verified load fail the gate. It does not compare against the pre-PR-#25 binary.
 
 ## [0.8.0](https://github.com/ordo-systems/keen-proxy/compare/v0.7.0...v0.8.0) (2026-11-10)
 

@@ -47,7 +47,8 @@ jobs:
   memory:
     name: Memory regression and builds
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # Covers the separate AWG stress step plus the baseline gate and cross-builds.
+    timeout-minutes: 60
     env:
       CGO_ENABLED: '0'
     steps:
@@ -64,8 +65,12 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
+      # Own step so a stress failure is visible and does not start the baseline gate.
+      # The next make -o only avoids repeating this success; GitHub skips that step if this one fails.
+      - name: AWG 320 stress
+        run: make memory-stress
       - name: Memory gate and router cross-builds
-        run: make build-router build-router-lite
+        run: make -o memory-stress build-router build-router-lite
       - name: Preserve memory evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

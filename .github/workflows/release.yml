@@ -56,7 +56,8 @@ jobs:
     needs: version
     if: needs.version.outputs.tag != ''
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Covers the separate AWG stress step plus the baseline gate, cross-builds, and packaging.
+    timeout-minutes: 60
     permissions:
       contents: write
     env:
@@ -87,10 +88,15 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
+      # After the tag check and before publication. A failure does not start the build.
+      # The next make -o only avoids repeating this success.
+      - name: AWG 320 stress
+        run: make memory-stress
       - name: Build router binaries from tagged source
         run: |
           test "$(cat version.txt)" = "${RELEASE_TAG#v}"
-          make build-router build-router-lite RELEASE_VERSION="$RELEASE_TAG" RELEASE_REVISION="$(git rev-parse HEAD)"
+          # -o skips only this job's already successful stress step. The version check above stays before publication.
+          make -o memory-stress build-router build-router-lite RELEASE_VERSION="$RELEASE_TAG" RELEASE_REVISION="$(git rev-parse HEAD)"
       - name: Preserve release memory evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

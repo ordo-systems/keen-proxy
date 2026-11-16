@@ -54,6 +54,17 @@ Reports, raw samples, transfer evidence, logs, and build identities are retained
 
 The fixture runs at the Docker server's native Linux architecture. Results are not an ARM64/MIPS hardware certification, a long-duration leak audit, or a DNS-leak/security guarantee. The gates measure the full daemon with production protocol features but without embedded UI assets; router cross-builds still compile the normal UI-enabled binaries. Build entry points do not bypass either gate when Docker is unavailable.
 
+### Runtime and conflicting host measurements
+
+Local build gating is deliberate: the three application build targets keep the same fail-closed checks as CI and releases. A successful serial run schedules at least 5 minutes 21 seconds of measurements and Apply pauses: seven comparison scenarios at 38 seconds each, plus 55 seconds of stress phases. Baseline/candidate/server compilation, downloads, image builds, startup, drain waits, evidence handoff, frontend compilation, and router cross-builds add time; cold runs take longer. This is a lower bound for serial execution, not a completion-time guarantee. Avoid parallel make and competing CPU/memory workloads when collecting comparable measurements; prefer a controlled Linux build host.
+
+If a local comparison fails while CI passes:
+
+1. Stop the build and retain that run's `report.json`, raw phase samples, logs, and manifest. The CI pass does not erase or override the local failure.
+2. Compare source/binary identities, Go toolchains, protocol tags, Docker architectures and resource limits. Record host CPU/memory pressure and other workloads; different architectures or environments are separate observations, not interchangeable repetitions.
+3. Investigate the failed phase and distinguish a reproducible increase from an identified environmental cause. If such a cause is corrected, record a separate measurement and retain the original failure and explanation. Do not retry merely until a run passes, force GC, or change thresholds/baseline to hide the result.
+4. If the discrepancy remains unexplained, keep the build blocked and review the evidence. Do not bypass the local gate with `-o`, direct build commands, or a previously successful CI result.
+
 ### AWG memory stress
 
 `make memory-stress` (`sh test/memory/run.sh --stress`) is a separate gate. It builds only the current daemon and the test server, copies the fixture, and does not archive, build, or run the pre-PR-#25 baseline. The result is not an input to the comparison report.

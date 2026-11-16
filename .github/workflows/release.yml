@@ -119,9 +119,32 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           evidence=".agents-work/release-legacy/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          trap 'status=$?; printf "%s\n" "$status" > "$evidence/exit-code"' EXIT
+          tee_pid=
+          finish_verification() {
+            status=$?
+            trap - EXIT
+            set +e
+            set +x
+            # Close the pipe before waiting; preserve the build failure if logging fails too.
+            exec >&- 2>&-
+            if [ -n "$tee_pid" ]; then
+              wait "$tee_pid"
+              log_status=$?
+              if [ "$status" -eq 0 ]; then
+                status=$log_status
+              fi
+            fi
+            printf '%s\n' "$status" > "$evidence/exit-code"
+            record_status=$?
+            if [ "$status" -eq 0 ]; then
+              status=$record_status
+            fi
+            exit "$status"
+          }
+          trap finish_verification EXIT
           # Retain commands, toolchains and failures without changing the tagged Makefile.
           exec > >(tee "$evidence/verification.log") 2>&1
+          tee_pid=$!
           set -x
           go version
           node --version

@@ -11,7 +11,7 @@ The repository defines [CI](.github/workflows/ci.yml) and [release](.github/work
 1. Merge reviewed changes into `main` after the relevant checks pass. With squash merges, preserve the Conventional Commit PR title and any breaking-change details in the resulting commit.
 2. Release Please accumulates releasable changes since the previous release and creates or updates a release PR containing the proposed version and changelog. Its pre-1.0 settings match the project's policy.
 3. A maintainer checks the bump against the actual compatibility impact, edits release notes as needed, and verifies migration instructions, validation results, and the publication checks below. The automation's proposal does not replace this review.
-4. Merge the release PR when the release is ready. After checks pass on `main`, Release Please creates the corresponding Git tag, such as `v1.5.0`, and GitHub Release. A dependent job builds from that exact tag and attaches full/lite ARM64/MIPSLE binaries, `install.sh`, the Entware service script `S99keenproxy`, source archive, license notices, build identity, and `SHA256SUMS`. Check that the asset job succeeds before announcing the release.
+4. Merge the release PR when the release is ready. After checks pass on `main`, Release Please creates the corresponding Git tag, such as `v1.5.0`, and GitHub Release. A dependent job builds from that exact tag and attaches full/lite Linux binaries for AMD64 (baseline v1), 386 (SSE2), ARMv5, ARM64, MIPSLE, and MIPSBE, `install.sh`, the Entware service script `S99keenproxy`, source archive, license notices, build identity, and `SHA256SUMS`. Check that the asset job succeeds before announcing the release.
 5. The default automation produces stable releases. Release candidates require a separately reviewed prerelease configuration and must be marked as prereleases with their known limits. A candidate such as `v1.5.0-rc.1` must pass the relevant release checks before promotion to `v1.5.0`.
 
 Use the Git tag as the release identity and derive build versions from it; any tracked version metadata must be updated consistently by the release PR. Keep published versions immutable: do not move a published tag or replace its binaries with a different build. Publish a new version to correct a released defect.
@@ -54,7 +54,7 @@ CGO_ENABLED=0 make vet
 cd web && npm ci && npm test && npm run build
 ```
 
-Run `make integration` for the full network test suite. Test the relevant ARM32, ARM64, or MIPS build and the relevant protocol registry on the intended hardware; a host build alone is insufficient. Auxiliary tools have separate Go modules. Document checks that could not be run.
+Run `make integration` for the full network test suite. Test the relevant x86, ARM32, ARM64, or MIPS build and the relevant protocol registry on the intended hardware; a host build alone is insufficient. Auxiliary tools have separate Go modules. Document checks that could not be run.
 
 Build from the reviewed source with dependencies locked, record commit/build tags/toolchains, and generate checksums for the exact published files. Exercise the installer, authentication, configuration backup/recovery, and expected startup mechanism on a disposable or recoverable target.
 

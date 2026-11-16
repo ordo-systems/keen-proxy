@@ -2,7 +2,7 @@
 
 ## Experimental OpenWrt support
 
-You can try KeenProxy on OpenWrt routers with **at least 128 MiB of RAM** and enough storage for the binary and its data. Releases provide full and lite Linux binaries for ARM32 (ARMv5 or later, soft float, suffix `armv5`), ARM64 (`arm64`), little-endian MIPS (`mipsle`, soft float), and big-endian MIPS (`mipsbe`, soft float).
+You can try KeenProxy on OpenWrt routers with **at least 128 MiB of RAM** and enough storage for the binary and its data. Releases provide full and lite Linux binaries for x86-64 (`amd64`, baseline v1), 32-bit x86 (`386`, requires SSE2), ARM32 (ARMv5 or later, soft float, suffix `armv5`), ARM64 (`arm64`), little-endian MIPS (`mipsle`, soft float), and big-endian MIPS (`mipsbe`, soft float).
 
 OpenWrt testing uses a manually installed binary and configuration. The automated installation and update instructions below apply to Keenetic and Netcraze with Entware. The current interception runtime requires compatible `iptables`, `iptables-restore`, and kernel support. Verify interception with a test client on your firmware, especially on systems using firewall4. [OpenWrt netfilter documentation](https://openwrt.org/docs/guide-user/firewall/netfilter_iptables/netfilter_management)
 

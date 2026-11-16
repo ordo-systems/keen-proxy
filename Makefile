@@ -46,8 +46,10 @@ ui-demo: web
 	$(GO) build -tags $(TAGS),ui -ldflags "-X github.com/ordo-systems/keen-proxy/internal/api.releaseVersion=v$(DEMO_VERSION)" -o bin/keenproxy-demo ./cmd/keenproxy
 	mkdir -p bin/demo && ./bin/keenproxy-demo -ui-demo -config examples/demo.yaml
 
-# Cross-compile Linux router binaries for ARM32, ARM64 and both MIPS byte orders.
+# Cross-compile Linux router binaries; x86 uses baseline v1 and 32-bit SSE2.
 build-router: web
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 $(GO) build -tags $(TAGS),ui -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-linux-amd64 ./cmd/keenproxy
+	CGO_ENABLED=0 GOOS=linux GOARCH=386 GO386=sse2 $(GO) build -tags $(TAGS),ui -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-linux-386 ./cmd/keenproxy
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=5,softfloat $(GO) build -tags $(TAGS),ui -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-linux-armv5 ./cmd/keenproxy
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -tags $(TAGS),ui -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-linux-arm64 ./cmd/keenproxy
 	CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat $(GO) build -tags $(TAGS),ui -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-linux-mipsle ./cmd/keenproxy
@@ -57,6 +59,8 @@ build-router: web
 # See internal/engine/registry_lite.go for supported protocols.
 LITE_TAGS := keenproxy_lite,$(PROTO_TAGS),ui
 build-router-lite: web
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 $(GO) build -tags $(LITE_TAGS) -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-lite-linux-amd64 ./cmd/keenproxy
+	CGO_ENABLED=0 GOOS=linux GOARCH=386 GO386=sse2 $(GO) build -tags $(LITE_TAGS) -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-lite-linux-386 ./cmd/keenproxy
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=5,softfloat $(GO) build -tags $(LITE_TAGS) -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-lite-linux-armv5 ./cmd/keenproxy
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -tags $(LITE_TAGS) -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-lite-linux-arm64 ./cmd/keenproxy
 	CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat $(GO) build -tags $(LITE_TAGS) -trimpath -ldflags "$(LDFLAGS)" -o dist/keenproxy-lite-linux-mipsle ./cmd/keenproxy

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add full and lite Linux release binaries for x86-64 (AMD64 v1) and 32-bit x86 with SSE2; these use manual installation rather than the ARM64/MIPSLE Entware bootstrap.
 - Experimental AmneziaWG 2/3 single-peer `.conf` import and editing through the shared draft/Apply workflow, using pinned sing-box-lx 1.14.4-lx.35 and matching dependency forks.
 - Keep existing DNS ownership and participant UDP/443 rejection; no Amnezia subscription integration.
 - Enable XHTTP, preserve VLESS encryption and expose REALITY key-share/TLS fragmentation options when importing connection links.

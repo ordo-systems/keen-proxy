@@ -2,7 +2,7 @@
 
 ## Экспериментальная поддержка OpenWrt { #experimental-openwrt-support }
 
-KeenProxy можно попробовать на роутерах с OpenWrt, **не менее 128 МиБ оперативной памяти** и достаточным местом для бинарника и его данных. В релизах доступны обычные сборки и lite для Linux на ARM32 (ARMv5 и новее, soft float, суффикс `armv5`), ARM64 (`arm64`), MIPS little-endian (`mipsle`, soft float) и MIPS big-endian (`mipsbe`, soft float).
+KeenProxy можно попробовать на роутерах с OpenWrt, **не менее 128 МиБ оперативной памяти** и достаточным местом для бинарника и его данных. В релизах доступны обычные сборки и lite для Linux на x86-64 (`amd64`, базовый уровень v1), 32-битной x86 (`386`, требуется SSE2), ARM32 (ARMv5 и новее, soft float, суффикс `armv5`), ARM64 (`arm64`), MIPS little-endian (`mipsle`, soft float) и MIPS big-endian (`mipsbe`, soft float).
 
 Для тестирования на OpenWrt бинарник и конфигурацию устанавливают вручную. Инструкции по автоматической установке и обновлению ниже относятся к Keenetic и Netcraze с Entware. Для перехвата трафика нужны совместимые `iptables`, `iptables-restore` и поддержка в ядре. Проверьте перехват на тестовом клиенте с вашей прошивкой, особенно если она использует firewall4. [Документация OpenWrt по Netfilter](https://openwrt.org/docs/guide-user/firewall/netfilter_iptables/netfilter_management)
 

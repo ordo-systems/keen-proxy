@@ -56,6 +56,8 @@ The Entware service tests use a C compiler (`cc`) on Linux to build a small test
 
 For routing, DNS, or firewall behavior, also run `make integration` with Docker. This uses a privileged disposable container; review the Makefile and test script before running it. Changes to separate tools should be tested from their own Go modules as appropriate.
 
+Application builds also require `make memory-regression`. The fixed pre-PR-#25 baseline and candidate run identical synthetic WireGuard workloads in disposable Linux containers; a separate AWG scenario records the new protocol's cost. Run `make memory-regression-unit` for the gate's own contract tests. Preserve phase samples, transfer/Apply evidence, and failed results; never relax the threshold or rebase the baseline solely to pass a change. See the [memory gate contract](docs/en/development.md#memory-regression-gate). Docker absence is a failure, not a bypass.
+
 For a comment-only change, executable-token comparison plus normal build/test checks can establish that behavior was preserved. Do not invent tests that only assert comment wording. Report unavailable checks and remaining failures explicitly.
 
 ## Submit a reviewable change

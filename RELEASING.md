@@ -27,7 +27,7 @@ Use the Git tag as the release identity and derive build versions from it; any t
 - `web/src/demo/release.json` records the planned demo preview separately from the last published installer/package versions. Update it when planning the next feature release; the release PR synchronizes it through the same JSON extra-file updater. Both the static demo and `make ui-demo` read this one source, so previewing an unpublished version never redirects the bootstrap to missing assets.
 - The main-branch `tools/bootstrap.sh` reads `version.txt` unless the user supplies `--version`. It needs the selected release's checksum file, binary, and platform-specific installer assets before touching a running service. Entware requires `install.sh` and `S99keenproxy`; native OpenWrt requires `keenproxy.openwrt`. Missing native assets must not prevent Entware upgrades to existing releases. Validate these assets on the published release before advertising the installation command.
 - If asset publication fails after release creation, manually run the Release workflow from `main` with its existing tag in the `tag` input. Packaging includes `keenproxy.openwrt` only when that controller exists in the checked-out tag, including its checksum and upload entry; retries of older Entware-only tags must not require it. Existing assets must be byte-identical before missing ones are uploaded. A different rebuild fails rather than replacing files; investigate toolchain/dependency differences and publish a new version when needed. Running without a tag retries Release Please.
-- Configure branch protection or a ruleset separately to require review and passing CI. Workflow files alone do not enforce merge requirements.
+- Configure branch protection or a ruleset separately to require review and passing CI, including **Memory regression and builds**. Workflow files alone do not enforce merge requirements; changing repository rules is a separate administrative action.
 
 ## Review the material being published
 
@@ -55,6 +55,8 @@ cd web && npm ci && npm test && npm run build
 ```
 
 Run `make integration` for the full network test suite. Test the relevant x86, ARM32, ARM64, or MIPS build and the relevant protocol registry on the intended hardware; a host build alone is insufficient. Auxiliary tools have separate Go modules. Document checks that could not be run.
+
+The application build targets require the [memory regression gate](docs/en/development.md#memory-regression-gate), and CI runs it independently before release checks can succeed. Preserve the report and raw evidence for the selected source. A failed comparison against the fixed parent of PR #25 blocks binary production; do not bypass it, retry away the failure, or raise the threshold without a separately reviewed justification. The AWG-only sample is not a comparison against the unsupported old engine.
 
 Build from the reviewed source with dependencies locked, record commit/build tags/toolchains, and generate checksums for the exact published files. Exercise the installer, authentication, configuration backup/recovery, and expected startup mechanism on a disposable or recoverable target.
 

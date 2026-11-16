@@ -46,6 +46,8 @@ If a skill, Serena, or a quality tool is unavailable, report the specific limita
 - Run relevant Go tests with the Makefile's sing-box build tags; use CGO_ENABLED=0 where a C toolchain is unavailable.
 - Run frontend tests and the production build after frontend changes. Run installer tests when changing installer behavior.
 - Use make integration for routing/DNS/firewall changes when Docker is available; it runs privileged network namespaces inside a disposable container.
+- Before producing application binaries, run `make memory-regression`; the normal build targets enforce this gate. Compare against the fixed parent of PR #25 using identical synthetic configuration, workload, compiler, and architecture. Preserve raw phase metrics and traffic/Apply evidence. Treat missing or failed measurements as failures. Do not force GC in the measured daemon, silently skip unavailable Docker, or replace a failed result with a retry.
+- Keep candidate-only AWG measurements separate from the common WireGuard comparison. Do not raise memory thresholds or move the baseline to hide a regression; require an explicit rationale and before/after evidence. See the [memory gate guide](docs/en/development.md#memory-regression-gate). Native Docker results do not certify router architectures or long-duration memory behavior.
 - For documentation-only edits, check links and prove executable tokens are unchanged rather than adding implementation-mirroring tests.
 - Report validation limits honestly. A successful HTTP probe does not prove HTTPS transfers or DNS-leak protection.
 

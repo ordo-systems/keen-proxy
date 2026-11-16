@@ -71,6 +71,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Read pinned Go version
         id: go-version
@@ -90,6 +91,22 @@ jobs:
         run: |
           test "$(cat version.txt)" = "${RELEASE_TAG#v}"
           make build-router build-router-lite RELEASE_VERSION="$RELEASE_TAG" RELEASE_REVISION="$(git rev-parse HEAD)"
+      - name: Preserve release memory evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-memory-regression-${{ github.run_id }}-${{ github.run_attempt }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            .agents-work/memory-regression/*/results/
+            .agents-work/memory-regression/*/container-tmp/
+            .agents-work/memory-regression/*/manifest.txt
+            .agents-work/memory-regression/*/*-build-info.txt
+            .agents-work/memory-regression/*/*-build.log
+            .agents-work/memory-regression/*/cleanup.log
+            .agents-work/memory-regression/*/exit-code
       - name: Package source, notices, and build identity
         run: |
           source_dir=$(mktemp -d)

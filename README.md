@@ -43,7 +43,7 @@ Requirements:
 
 - Go **1.27.3**, declared by the `go` directive in `go.mod`; Makefile commands select this compiler through `GOTOOLCHAIN`.
 - Node.js **22.12+** (or another Vite-compatible version) and npm.
-- Docker for the network-namespace integration suite.
+- Docker with privileged-container support, Python 3.12+, and repository history for the mandatory build-time memory gate and the network-namespace integration suite.
 - For a router: Entware or native OpenWrt/procd, supported Linux kernel facilities, and compatible iptables tools.
 
 From the repository root:
@@ -79,6 +79,8 @@ make build-router-lite   # Smaller protocol set for constrained routers
 ```
 
 The full build enables QUIC, uTLS, WireGuard/AmneziaWG, gVisor, XHTTP and native TrustTunnel. The lite registry retains XHTTP and TrustTunnel over TCP/TLS but excludes QUIC/HTTP/3 and several other protocols; see `internal/engine/registry_lite.go`. See the [connection guide](docs/en/user-guide.md#sing-box-lx-compatibility) for supported link parameters and migration limits.
+
+These three build targets first run the [memory regression gate](docs/en/development.md#memory-regression-gate) against the fixed pre-PR-#25 source. Run `make memory-regression` separately to inspect its report, or `make memory-regression-unit` for its contract tests. Docker absence, invalid evidence, or a regression blocks binary production; the gate is not silently skipped.
 
 ## Configuration and router installation
 

@@ -34,6 +34,25 @@ Makefile and CI select Go **1.27.3** from the root `go.mod` `go` directive, pres
 
 Release source archives contain the module manifests and build scripts. Rebuilding fetches the exact versions verified by `go.sum`; it does not require Git submodule initialization. Do not replace pins with `@latest`.
 
+## Memory regression gate
+
+`make build`, `make build-router`, and `make build-router-lite` require the memory gate before producing application binaries. Docker (including permission to run privileged containers), Python 3, Git history, and the Go toolchain from `go.mod` are required. Run the gate independently with:
+
+```sh
+make memory-regression-unit
+make memory-regression
+```
+
+The gate builds the current source and `9d398fb3754036cbe35df1cf07098164ff62a9d5`, the parent of PR #25, using the same Go compiler and matching full protocol features. Only the candidate enables AWG. Both daemons run the same synthetic two-WireGuard configuration and TCP/UDP workload, without a router, production credentials, or external test destinations. Namespace and firewall changes stay inside uniquely owned disposable Linux containers.
+
+Three paired runs measure idle, loaded, TCP-drained, and repeated-Apply phases. The loaded phase carries concurrent TCP streams and verified UDP exchanges on both tunnels. After TCP closes, the same two UDP sockets keep exchanging payloads during the drained measurements. Zero client/server TCP streams, fresh UDP echoes, and exactly one daemon session per tunnel prove the drain; arbitrary residual tracker entries are not classified as UDP. Apply-cycle sampling includes transient RSS peaks, not only the final settled state. The comparison uses the median RSS, anonymous RSS, and sampled RSS peak for each phase. An increase greater than `max(10% of baseline, 8 MiB)` fails the gate; equality passes. Missing samples, failed transfers, incomplete TCP drain, and failed Apply operations are errors, not skipped checks. No forced GC or scavenging changes the measured process.
+
+A separate candidate-only AWG run proves traffic and records its memory. It is not compared with the old binary, which cannot consume AWG profiles. This separates dependency regressions on existing configurations from the cost of a newly added tunnel.
+
+Reports, raw samples, transfer evidence, logs, and build identities are retained under `.agents-work/memory-regression/`. CI retains the results even when the gate fails. Review the report before changing a threshold or baseline; do not raise a budget merely to make a regression green. A threshold or baseline change requires a separate rationale and before/after measurements.
+
+The fixture runs at the Docker server's native Linux architecture. Results are not an ARM64/MIPS hardware certification, a long-duration leak audit, or a DNS-leak/security guarantee. The gate measures the full daemon with production protocol features but without embedded UI assets; router cross-builds still compile the normal UI-enabled binaries. Build entry points do not bypass the gate when Docker is unavailable.
+
 ## Edit and translate
 
 Maintain matching Markdown filenames under `docs/en/` and `docs/ru/`. Navigation is configured in `mkdocs.yml`; the i18n plugin creates language switching and localized search/navigation. Add screenshots under `docs/assets/screenshots/` in both UI languages. Capture only synthetic sessions and update related captions when screens change.

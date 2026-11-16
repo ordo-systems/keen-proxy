@@ -23,6 +23,7 @@
 - Bound standalone export candidates and their cumulative profile size; preserve edits during asynchronous profile validation and accept validated ordinary WireGuard DNS metadata without importing DNS policy.
 - Pause connections, groups, and individual domain/IP/country/category rules without deleting their settings, through the shared draft/Apply workflow; disabled targets use configured fallbacks or block rather than silently route direct.
 - Separate connection parameter and diagnostic actions, and keep activation controls available in desktop/mobile layouts and both demos.
+- Require a reproducible full-daemon memory regression gate for local application builds, CI, and releases, comparing identical WireGuard workloads against the parent of PR #25 and recording AWG separately.
 
 ## [0.8.0](https://github.com/ordo-systems/keen-proxy/compare/v0.7.0...v0.8.0) (2026-11-10)
 

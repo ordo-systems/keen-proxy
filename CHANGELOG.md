@@ -28,6 +28,7 @@
 - Export private memory-gate evidence with host-readable ownership, measure throughput over matching counter timestamps, and replace stale reports when result directories cannot be read.
 - Preserve explicit pre-AWG release-asset recovery using the tagged source's verification contract without weakening memory gates for newer source.
 - Wait for historical release logs to finish flushing, propagate logger failures without replacing build failures, and document local memory-gate runtime and conflicting host measurements.
+- Keep memory-gate fixtures aligned with the current full protocol tags and pinned Go compiler after upstream build changes.
 
 ## [0.8.0](https://github.com/ordo-systems/keen-proxy/compare/v0.7.0...v0.8.0) (2026-11-10)
 

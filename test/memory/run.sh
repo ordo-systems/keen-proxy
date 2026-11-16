@@ -18,7 +18,6 @@ fi
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 BASELINE=9d398fb3754036cbe35df1cf07098164ff62a9d5
 BASE_TAGS=with_quic,with_utls,with_wireguard,with_gvisor
-CANDIDATE_TAGS=with_quic,with_utls,with_wireguard,with_awg,with_gvisor
 # 2 GiB with swap disabled. The 320 MiB Go limit belongs only to the measured daemon.
 STRESS_MEMORY=2147483648
 mkdir -p "$ROOT/.agents-work/memory-regression"
@@ -364,7 +363,7 @@ PY
     fi
 }
 
-for tool in docker go git python3; do
+for tool in docker go git python3 make; do
     command -v "$tool" >/dev/null || fail "required tool unavailable: $tool"
 done
 ARCH=$(docker info --format '{{.Architecture}}')
@@ -373,7 +372,19 @@ case "$ARCH" in
     x86_64|amd64) GOARCH=amd64 ;;
     *) fail "unsupported Docker architecture: $ARCH" ;;
 esac
-TOOLCHAIN=$(go env GOVERSION)
+make --no-print-directory -s -C "$ROOT" memory-build-settings >"$OUT/build-settings.txt"
+{
+    IFS= read -r CANDIDATE_TAGS || fail "candidate build tags are missing"
+    IFS= read -r TOOLCHAIN || fail "candidate Go version is missing"
+    if IFS= read -r extra || [ -n "${extra:-}" ]; then
+        fail "unexpected memory build settings output"
+    fi
+} <"$OUT/build-settings.txt"
+[ -n "$CANDIDATE_TAGS" ] || fail "candidate build tags are empty"
+case "$TOOLCHAIN" in
+    go[0-9]*) ;;
+    *) fail "invalid candidate Go version: $TOOLCHAIN" ;;
+esac
 if [ "$MODE" = compare ]; then
     git -C "$ROOT" cat-file -e "$BASELINE^{commit}" || fail "fixed baseline missing; fetch repository history before running the gate"
 fi

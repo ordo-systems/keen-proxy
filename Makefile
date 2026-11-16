@@ -17,7 +17,7 @@ NPM := PATH="$(NODE_BIN):$$PATH" npm
 # Preview identity is separate from the last published installer version.
 DEMO_VERSION = $(shell PATH="$(NODE_BIN):$$PATH" node -p "require('./web/src/demo/release.json').version")
 
-.PHONY: test vet web build ui-demo build-router build-router-lite clean integration test-install check-language docs docs-preview memory-regression memory-regression-unit memory-stress
+.PHONY: test vet web build ui-demo build-router build-router-lite clean integration test-install check-language docs docs-preview memory-regression memory-regression-unit memory-stress memory-build-settings
 
 check-language:
 	python3 -B -m unittest discover -s test/language -v
@@ -33,6 +33,11 @@ test: check-language test-install memory-regression-unit
 vet:
 	$(GO) vet -tags $(TAGS) ./...
 	$(GO) vet -tags keenproxy_lite,$(PROTO_TAGS) ./internal/engine/ ./internal/links/
+
+# Share the actual full-build tags and compiler with both memory fixtures.
+memory-build-settings:
+	@printf '%s\n' '$(TAGS)'
+	@$(GO) env GOVERSION
 
 # Compare full daemons against the fixed pre-PR-25 baseline before building.
 memory-regression-unit:

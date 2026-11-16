@@ -322,6 +322,10 @@ func (s *Server) hosts(w http.ResponseWriter, r *http.Request) {
 		limit = 200
 	}
 	list, total := s.D.Hosts(q.Get("tag"), q.Get("q"), limit)
+	// Keep the JSON list contract independent of nil backend slices.
+	if list == nil {
+		list = []stats.Host{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"hosts": list, "total": total})
 }
 

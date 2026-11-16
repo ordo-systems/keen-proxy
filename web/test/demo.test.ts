@@ -185,6 +185,33 @@ test('preset updates report removed entries and retain their position', () => {
   emptyId.connections![0]!.id = ''
   assert.throws(() => demo.validate(emptyId), /non-empty/i)
 })
+test('demo routing skips a disabled connection and entry and keeps preset switches', () => {
+  let now = Date.UTC(2026, 0, 1)
+  const demo = createDemo(() => now)
+  const config = demo.config()
+  config.connections![0]!.disabled = true
+  config.groups![1]!.disabled_entries = ['chatgpt.com']
+  demo.save(config)
+  assert.equal(demo.status().health?.fi, undefined)
+  assert.equal(demo.status().health?.nl?.ok, true)
+  assert.equal(demo.status().failover?.fi?.active, 'nl')
+  assert.throws(() => demo.diagnostics('fi'), /disabled/)
+  assert.equal(demo.diagnostics('nl').demo, true)
+  const idle = demo.stats(false).outbounds!.find((outbound) => outbound.tag === 'fi')!
+  assert.equal(idle.active, 0)
+  assert.equal(idle.down, 0)
+  assert.ok(!demo.domains().records.some((record) => record.name === 'chatgpt.com'))
+  assert.ok(demo.domains().records.some((record) => record.name === 'openai.com'))
+  now += 3000
+  assert.notEqual(demo.journal('routes').entries[0]!.outbound, 'fi')
+  config.groups![0]!.disabled = true
+  config.groups![0]!.disabled_entries = ['youtube.com', 'later.example']
+  config.groups![0]!.preset = { id: 'sample-work', version: 'old', base: ['youtube.com'], auto_update: true }
+  const preview = demo.preview(config, 'sample-work', 'nl', 0)
+  assert.equal(preview.config.groups![0]!.disabled, true)
+  assert.ok(preview.config.groups![0]!.disabled_entries!.includes('later.example'))
+  assert.equal(preview.diff.removed.includes('later.example'), false)
+})
 
 test('audit demo presents both recovery triggers, failed verification and a true legacy record', () => {
   const now = Date.parse('2026-01-01T12:00:00Z')
@@ -208,4 +235,35 @@ test('audit demo presents both recovery triggers, failed verification and a true
   const first = demo.journal('audit', { limit: 2 }).entries
   const rest = demo.journal('audit', { before: first.at(-1)!.id }).entries
   assert.deepEqual([...first, ...rest].map(e => e.id), all.map(e => e.id))
+})
+
+test('simulated journal applies country and category switches without rewriting saved rules', () => {
+  let now = Date.UTC(2026, 0, 1)
+  const demo = createDemo(() => now)
+  const config = demo.config()
+  config.geoip.databases.push({ id: 'runetfreedom-services', enabled: true, kind: 'category' })
+  config.groups = [{ name: 'selectors', target: 'block', entries: [], countries: ['US'], categories: ['GOOGLE'] }]
+  demo.save(config)
+  const routes = () => Array.from({ length: 12 }, () => {
+    now += 3000
+    return demo.journal('routes', { limit: 1 }).entries[0]!
+  })
+  const blocked = routes().filter(route => route.outbound === 'block')
+  assert.ok(blocked.length > 0)
+  assert.ok(blocked.every(route => demo.lookupGeo(route.ip!).country === 'US'))
+  config.groups[0]!.disabled_countries = ['US']
+  demo.save(config)
+  assert.ok(routes().some(route => route.outbound === 'block'))
+  config.groups[0]!.disabled_categories = ['GOOGLE']
+  assert.ok(routes().some(route => route.outbound === 'block'), 'draft edits must not change applied routing')
+  demo.save(config)
+  assert.ok(routes().every(route => route.outbound !== 'block'))
+  assert.deepEqual(demo.config().groups![0]!.countries, ['US'])
+  assert.deepEqual(demo.config().groups![0]!.categories, ['GOOGLE'])
+  config.groups = [{ name: 'address', target: 'block', entries: ['8.8.8.0/24'] }]
+  demo.save(config)
+  assert.ok(routes().some(route => route.outbound === 'block'))
+  config.groups[0]!.disabled_entries = ['8.8.8.17/24']
+  demo.save(config)
+  assert.ok(routes().every(route => route.outbound !== 'block'))
 })

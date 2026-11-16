@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   sameAppliedConnection,
   safeDiagnosticsReport,
+  diagnosticErrorKey,
 } from '../src/diagnostics.ts'
 import type { Connection, Status, DiagnosticReport } from '../src/types.ts'
 test('edited profile cannot borrow results from old applied definition', () => {
@@ -74,4 +75,8 @@ test('diagnostics never claims DNS route verification', () => {
     safeDiagnosticsReport(null, null, 'one', false, false).dns_route_verified,
     false,
   )
+})
+test('a disabled profile check maps to a translation key instead of transport text', () => {
+  assert.equal(diagnosticErrorKey(new Error('disabled')), 'conn.unavailable')
+  assert.equal(diagnosticErrorKey(new Error('password=PRIVATE')), 'ui.unavailable')
 })

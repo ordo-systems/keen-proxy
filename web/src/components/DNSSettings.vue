@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NCheckbox, NDynamicInput, NForm, NFormItem, NInput, NSelect } from 'naive-ui'
 import { api } from '../api'
-import { store } from '../store'
+import { store, selectableConnections } from '../store'
 import { selectDNSResolver } from '../dnsSettings'
 import type { DNSProfile, DNSCheck, FeatureStatus, DNSConfig } from '../types'
 const { t } = useI18n()
@@ -62,7 +62,7 @@ function selectedResolversFor(endpoint: string) {
 
 watch(cfg, () => customSlots.value.clear())
 watch(dns, () => { result.value = undefined }, { deep: true })
-const conns = computed(() => (cfg.value.connections ?? []).map((c) => ({ value: c.id, label: c.name || c.id })))
+const conns = computed(() => selectableConnections(dns.value.connection))
 const routes = computed(() => [
   { label: t('features.dnsLegacy'), value: '' },
   { label: t('features.dnsDirect'), value: 'direct' },
@@ -98,7 +98,7 @@ function removeBootstrap(host: string) {
 // Reset route-specific settings when switching policies.
 function changeRoute(route: DNSConfig['route']) {
   dns.value.route = route
-  dns.value.connection = route === 'connection' ? dns.value.connection || conns.value[0]?.value : undefined
+  dns.value.connection = route === 'connection' ? dns.value.connection || selectableConnections()[0]?.value : undefined
   dns.value.failure = route === 'connection' ? 'strict' : undefined
   if (route) dns.value.fallback = ''
 }

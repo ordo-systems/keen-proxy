@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { NButton, NInput, NSelect, NSwitch, NTooltip, useDialog } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { Users, Plus, Trash2, RefreshCw, ChevronDown, ChevronRight, Network as NetIcon, Search, UserPlus } from '@lucide/vue'
-import { modeOptions, store, targets, targetLabel } from '../store'
+import { modeOptions, store, selectableConnections, targetLabel } from '../store'
 import type { Client, Device, Network } from '../types'
 import { deviceDisplayName, deviceMatches } from '../deviceNames'
 
@@ -12,7 +12,7 @@ const { t } = useI18n()
 const cfg = computed(() => store.state.config!)
 const q = ref('')
 const closed = ref<Record<string, boolean>>({})
-const tunnelTargets = computed(() => targets.value.filter((x) => x.value !== 'block' && x.value !== 'direct'))
+const enabledTunnels = computed(() => selectableConnections())
 
 // Convert IPv4 addresses to unsigned integers for subnet membership checks.
 function ip4(s: string): number | null {
@@ -97,7 +97,7 @@ function setFull(r: Row, on: boolean) {
   const c = ensureClient(r)
   if (on) {
     c.mode = 'full'
-    c.target ||= networkOf(r)?.target || tunnelTargets.value[0]?.value
+    c.target ||= networkOf(r)?.target || enabledTunnels.value[0]?.value
   } else {
     c.mode = ''
   }
@@ -168,7 +168,7 @@ function modeText(m: string) {
             <NSelect
               v-if="sec.net.mode === 'full'"
               v-model:value="sec.net.target"
-              :options="tunnelTargets"
+              :options="selectableConnections(sec.net.target)"
               size="tiny"
               class="net-target"
               :placeholder="t('clients.connection')"
@@ -202,7 +202,7 @@ function modeText(m: string) {
               <NSelect
                 v-if="effective(r).mode === 'full' && r.client?.mode === 'full'"
                 :value="r.client.target"
-                :options="tunnelTargets"
+                :options="selectableConnections(r.client.target)"
                 size="tiny"
                 @update:value="(v: string) => (r.client!.target = v)"
               />

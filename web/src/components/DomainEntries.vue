@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NButton, NInput, NModal, NAlert, useDialog } from 'naive-ui'
+import { NButton, NInput, NModal, NAlert, NSwitch, useDialog } from 'naive-ui'
 import { Plus, Pencil, Trash2, RefreshCw, ChevronRight, ChevronDown } from '@lucide/vue'
 import type { Group, DomainStatus, DomainRecord } from '../types'
 import { store } from '../store'
 import { api } from '../api'
 import { domainName } from '../domain'
+import { dropRemoved, entryIdentity, entryOff, migrateFlag, setEntryEnabled } from '../activation'
 
 // Edit group entries in the shared draft and display live or isolated preview DNS records.
 const props = defineProps<{ group: Group; status: DomainStatus | null; query: string; preview: boolean; refreshing: boolean }>()
@@ -40,19 +41,27 @@ async function save() {
     const cfg = JSON.parse(JSON.stringify(store.state.config))
     const groupIndex = store.state.config!.groups!.indexOf(props.group)
     const next = [...props.group.entries]
+    const previous = editing.value === null ? '' : props.group.entries[editing.value]!
     if (editing.value === null) next.push(...lines.filter(s => !next.includes(s)))
     else next[editing.value] = lines[0]!
+    const flags = editing.value === null ? props.group.disabled_entries : migrateFlag(props.group.disabled_entries, previous, lines[0]!, entryIdentity)
     cfg.groups[groupIndex].entries = next
+    cfg.groups[groupIndex].disabled_entries = flags
     await api.validateConfig(cfg)
     props.group.entries = next
+    props.group.disabled_entries = flags
     show.value = false
-    const domains = lines.filter(isDomain).map(normalize)
+    const domains = lines.filter(isDomain).map(normalize).filter(name => !next.some(entry => normalize(entry) === name && entryOff(props.group, entry)))
     if (domains.length && !props.group.preset && !props.group.disabled) emit('refresh', domains)
   } catch (e) { error.value = (e as Error).message || t('domains.saveError') }
   finally { saving.value = false }
 }
 function remove(index: number) {
-  dialog.warning({ title: t('domains.remove'), content: props.group.entries[index], positiveText: t('common.delete'), negativeText: t('common.cancel'), onPositiveClick: () => props.group.entries.splice(index, 1) })
+  dialog.warning({ title: t('domains.remove'), content: props.group.entries[index], positiveText: t('common.delete'), negativeText: t('common.cancel'), onPositiveClick: () => {
+    const remaining = props.group.entries.filter((_, current) => current !== index)
+    props.group.disabled_entries = dropRemoved(props.group.disabled_entries, props.group.entries, remaining, entryIdentity)
+    props.group.entries.splice(index, 1)
+  } })
 }
 </script>
 
@@ -63,17 +72,19 @@ function remove(index: number) {
       <NButton size="small" @click="open(null)"><template #icon><Plus :size="14" /></template>{{ t('domains.add') }}</NButton>
     </div>
     <div v-if="preview" class="hint preview">{{ t('domains.preview') }}</div>
+    <p v-if="group.disabled" class="hint">{{ t('groups.parentOff') }}</p>
     <p v-if="!rows.length" class="hint">{{ t('domains.emptyGroup') }}</p>
-    <div v-for="row in rows" :key="`${row.index}:${row.entry}`" class="entry">
+    <div v-for="row in rows" :key="`${row.index}:${row.entry}`" class="entry" :class="{ off: entryOff(group, row.entry) || group.disabled }">
       <div class="entry-line">
+        <NSwitch size="small" :value="!entryOff(group, row.entry)" :aria-label="t('groups.toggleEntry', { name: row.entry })" @update:value="(v: boolean) => setEntryEnabled(group, row.entry, v)" />
         <button class="entry-label" :aria-label="`${t('domains.details')}: ${row.entry}`" :aria-expanded="expanded.has(row.entry)" @click="toggle(row.entry)">
           <ChevronDown v-if="expanded.has(row.entry)" :size="14" /><ChevronRight v-else :size="14" />
           <span class="entry-type">{{ t(isDomain(row.entry) ? 'domains.domain' : 'domains.address') }}</span>
           <strong>{{ row.entry }}</strong>
-          <span v-if="isDomain(row.entry)" class="ip-count">{{ t('domains.ipCount', { n: ips(row.entry).length }) }}</span>
+          <span class="ip-count">{{ group.disabled ? t('groups.parentOffShort') : entryOff(group, row.entry) ? t('groups.entryOff') : isDomain(row.entry) ? t('domains.ipCount', { n: ips(row.entry).length }) : t('groups.entryOn') }}</span>
         </button>
         <div class="entry-actions">
-          <NButton v-if="isDomain(row.entry) && !group.disabled && !(group.preset && preview)" size="tiny" quaternary :loading="refreshing" :title="t('domains.refresh')" :aria-label="`${t('domains.refresh')}: ${row.entry}`" @click="emit('refresh', [normalize(row.entry)])"><template #icon><RefreshCw :size="14" /></template></NButton>
+          <NButton v-if="isDomain(row.entry) && !group.disabled && !entryOff(group, row.entry) && !(group.preset && preview)" size="tiny" quaternary :loading="refreshing" :title="t('domains.refresh')" :aria-label="`${t('domains.refresh')}: ${row.entry}`" @click="emit('refresh', [normalize(row.entry)])"><template #icon><RefreshCw :size="14" /></template></NButton>
           <NButton size="tiny" quaternary :title="t('common.edit')" :aria-label="`${t('common.edit')}: ${row.entry}`" @click="open(row.index)"><template #icon><Pencil :size="14" /></template></NButton>
           <NButton size="tiny" quaternary type="error" :title="t('common.delete')" :aria-label="`${t('common.delete')}: ${row.entry}`" @click="remove(row.index)"><template #icon><Trash2 :size="14" /></template></NButton>
         </div>
@@ -106,8 +117,10 @@ function remove(index: number) {
 .domain-entries { padding: 10px 16px 14px; }
 .entries-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .entry { border-top: 1px solid var(--line, #ffffff12); }
+.entry.off { color: var(--muted); }
 .entry-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; }
-.entry-label { display: flex; align-items: center; gap: 8px; border: 0; padding: 0; background: none; color: inherit; cursor: pointer; text-align: left; min-width: 0; }
+.entry-line > :deep(.n-switch) { flex-shrink: 0; }
+.entry-label { display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: 8px; border: 0; padding: 0; background: none; color: inherit; cursor: pointer; text-align: left; min-width: 0; }
 .entry-label strong { font: 600 13px ui-monospace, monospace; overflow-wrap: anywhere; }
 .entry-type, .ip-count { font-size: 10px; border-radius: 3px; padding: 2px 5px; background: #739ee91a; color: var(--muted); white-space: nowrap; }
 .entry-actions, .dialog-actions { display: flex; justify-content: flex-end; gap: 6px; flex-shrink: 0; }

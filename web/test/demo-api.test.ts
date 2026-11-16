@@ -17,6 +17,14 @@ test('demo API drives the UI without HTTP or EventSource operations', async () =
     assert.equal((await api.updates()).demo, true)
     const config = await api.config()
     assert.equal((await api.checkDNS(config)).demo, true)
+    const offDNS = structuredClone(config)
+    offDNS.dns.route = 'connection'
+    offDNS.dns.connection = 'fi'
+    offDNS.dns.failure = 'strict'
+    for (const connection of offDNS.connections ?? []) connection.disabled = true
+    assert.equal((await api.checkDNS(offDNS)).rcode, 2)
+    offDNS.dns.failure = 'direct'
+    assert.equal((await api.checkDNS(offDNS)).route, 'simulated: direct')
     assert.equal((await api.validateConfig(config)).ok, true)
     assert.equal((await api.devices()).length, 4)
     const status = await api.status()

@@ -104,7 +104,7 @@ func (p supportProjection) address(host string) string {
 func (p supportProjection) connection(c model.Connection) supportFields {
 	kind := supportEnum(c.Type, model.ConnWireGuard, model.ConnAmneziaWG, model.ConnLink, model.ConnSingBox, model.ConnTrustTunnel)
 	return supportFields{
-		"id": p.target(c.ID), "type": kind, "fallback": p.target(c.Fallback),
+		"id": p.target(c.ID), "type": kind, "fallback": p.target(c.Fallback), "disabled": c.Disabled,
 		"protocol": supportProtocol(c, kind),
 	}
 }
@@ -135,6 +135,8 @@ func (p supportProjection) group(g model.Group) supportFields {
 		"disabled": g.Disabled, "except": g.Except,
 		"entries":       supportList(g.Entries, p.entry),
 		"country_count": len(g.Countries), "category_count": len(g.Categories),
+		"disabled_entry_count":   len(g.DisabledEntries),
+		"disabled_country_count": len(g.DisabledCountries), "disabled_category_count": len(g.DisabledCategories),
 	}
 	if g.Preset != nil {
 		out["preset"] = supportFields{"id": p("preset", g.Preset.ID), "auto_update": g.Preset.AutoUpdate}

@@ -13,9 +13,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/miekg/dns"
+	"github.com/ordo-systems/keen-proxy/internal/compile"
 	"github.com/ordo-systems/keen-proxy/internal/dnsfront"
 	"github.com/ordo-systems/keen-proxy/internal/model"
-	"github.com/miekg/dns"
 )
 
 func TestEncryptedDNSThroughEngineOutbound(t *testing.T) {
@@ -101,5 +102,32 @@ func TestEncryptedDNSThroughEngineOutbound(t *testing.T) {
 	defer resolver.CloseIdle()
 	if r := resolver.ResolveRaw(context.Background(), q); r.Rcode != dns.RcodeServerFailure {
 		t.Fatal("strict bypassed dead outbound")
+	}
+	// Disabling the configured profile leaves strict DNS blocked even though the
+	// trusted upstream remains directly reachable.
+	cfg.Connections[0].Disabled = true
+	out, err := compile.Compile(compile.Input{Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var compiled map[string]json.RawMessage
+	if err := json.Unmarshal(out.SingBox, &compiled); err != nil {
+		t.Fatal(err)
+	}
+	raw, err = json.Marshal(map[string]json.RawMessage{"outbounds": compiled["outbounds"]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.eng.Apply(raw); err != nil {
+		t.Fatal(err)
+	}
+	resolver.CloseIdle()
+	c = d.dnsConfig(cfg.DNS)
+	c.TLSRoots = x509.NewCertPool()
+	c.TLSRoots.AddCert(upstream.Certificate())
+	resolver = dnsfront.New(c)
+	defer resolver.CloseIdle()
+	if r := resolver.ResolveRaw(context.Background(), q); r.Rcode != dns.RcodeServerFailure || connects.Load() != 1 {
+		t.Fatal("strict bypassed disabled outbound", r, connects.Load())
 	}
 }

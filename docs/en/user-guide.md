@@ -35,6 +35,12 @@ The file picker accepts `.conf`, `.txt`, `.json`, and `.vpn` up to 2 MiB. For a 
 
 Changes enter the shared draft. Real credentials belong only in your local management session. In the browser demo, use synthetic values.
 
+Use the connection's **Enabled** switch to pause it without deleting its profile, credentials, or routing references. The switch changes the draft only; the running connection changes after **Apply**, and **Discard** restores the saved state. A disabled connection stays visible and editable, but its tunnel/client and availability checks do not run.
+
+Groups, devices, networks, and DNS settings keep their references to a disabled connection. Traffic follows its configured enabled fallback chain; with no enabled fallback it is blocked, not silently routed directly or passed to the next rule. An explicitly configured **Direct** fallback remains intentional. DNS keeps its separate strict/direct failure policy: disabling a connection must not create a direct DNS path in strict mode.
+
+Raw sing-box profiles keep their `detour` and selector references to the configured connection ID. When that connection is disabled, its runtime relay uses the same enabled fallback chain, or blocks if none is available; the saved raw profile is not rewritten.
+
 ![Connection profiles and routing targets](../assets/screenshots/en-connections.png)
 
 ![Connection creation wizard](../assets/screenshots/en-wizard.png)
@@ -90,6 +96,12 @@ To move several domain or country groups together, select their checkboxes, choo
 
 Expand an entry to see its current DNS observations and expiration. A resolved address alone does not prove that application traffic followed the intended tunnel.
 
+Use the on/off switches to pause an entire group or an individual domain/IP rule without removing its value. Country/category groups also have group and per-selector switches. Disabled items remain visible; the active/total counts distinguish saved rules from effective rules. Turning a group off preserves its children's individual states, so turning it on again does not re-enable rules you had paused separately.
+
+An off group or rule is skipped, not blocked: the remaining rules and device policy determine the route. In particular, disabling a block rule stops that rule from blocking. Off domain rules do not contribute active DNS rule sets or initiate background resolution. A country/category group with no active selectors is inactive even in **All except** mode; it never becomes a match-all rule. Review the shared draft and **Apply** to change live behavior.
+
+In YAML, connection and group switches use `disabled: true`. Per-rule states are retained in `disabled_entries`, `disabled_countries`, and `disabled_categories`; the original entries/selectors remain present. Missing fields preserve the previous enabled behavior. Older releases reject unknown activation fields: prepare and validate a compatible configuration before downgrading. Removing the fields re-enables the corresponding items, so review the resulting routes first.
+
 ![Domain groups, targets, and address observations](../assets/screenshots/en-rules.png)
 
 See [Country rules](routing.md#country-rules) for an illustrated setup, country exclusions, and rule precedence.
@@ -99,6 +111,8 @@ See [Country rules](routing.md#country-rules) for an illustrated setup, country 
 Open **Rules → Presets**, select a target, then preview a collection. Inspect the added/removed entries and accept it into the draft. Presets can be enabled, disabled, or removed. The static demo includes one original example collection; it does not redistribute the full community catalog.
 
 The catalog shows domain lists without resolving them. KeenProxy resolves IPs for enabled presets after **Apply**. Enable **Update with new app versions** to adopt changes to the bundled preset after upgrading KeenProxy. To block ads or other domains through DNS, see [DNS filters](routing.md#dns-filters).
+
+Updating a preset preserves per-entry off states separately from deletions, including entries that disappear from one preset revision and return later. Disabling a rule does not remove it from the preset or discard your saved value.
 
 ## 5. Choose devices and networks
 

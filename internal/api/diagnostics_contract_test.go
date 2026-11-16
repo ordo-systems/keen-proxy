@@ -34,7 +34,7 @@ func TestDiagnosticRPCProvidesUsableBoundedContext(t *testing.T) {
 }
 
 func TestDemoDiagnosticResultsAreExplicitSyntheticSuccesses(t *testing.T) {
-	d := &Demo{}
+	d := &Demo{cfg: &model.Config{Connections: []model.Connection{{ID: "one"}}}}
 	report, err := d.DiagnosticChecks(context.Background(), "one")
 	if err != nil || !report.Demo || report.Connection != "one" || len(report.Results) != 3 {
 		t.Fatalf("invalid demo report: %+v, %v", report, err)

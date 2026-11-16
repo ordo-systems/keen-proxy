@@ -6,17 +6,18 @@ import { useHealthState } from '../health'
 const props = defineProps<{ id: string; compact?: boolean }>()
 const { t, locale } = useI18n()
 // Display HTTP probe freshness; a running process alone does not imply connectivity.
-const health = computed(() => store.state.status?.health?.[props.id])
+const appliedOff = computed(() => !!store.applied.value?.connections?.find((connection) => connection.id === props.id)?.disabled)
+const health = computed(() => appliedOff.value ? undefined : store.state.status?.health?.[props.id])
 const tone = useHealthState(() => health.value, () => store.state.config?.failover?.interval)
-const label = computed(() => tone.value === 'up' ? t('conn.probeLatency', { ms: health.value!.latency_ms }) : t(`conn.probe${tone.value === 'down' ? 'Down' : tone.value === 'stale' ? 'Stale' : 'Unknown'}`))
+const label = computed(() => appliedOff.value ? t('conn.probesOff') : tone.value === 'up' ? t('conn.probeLatency', { ms: health.value!.latency_ms }) : t(`conn.probe${tone.value === 'down' ? 'Down' : tone.value === 'stale' ? 'Stale' : 'Unknown'}`))
 const checked = computed(() => health.value ? new Date(health.value.checked).toLocaleTimeString(locale.value) : '')
-const title = computed(() => [t('conn.probeHint'), label.value, checked.value ? t('conn.probeChecked', { time: checked.value }) : '', health.value?.error ?? ''].filter(Boolean).join(' · '))
+const title = computed(() => appliedOff.value ? t('conn.probesOff') : [t('conn.probeHint'), label.value, checked.value ? t('conn.probeChecked', { time: checked.value }) : '', health.value?.error ?? ''].filter(Boolean).join(' · '))
 </script>
 <template>
-  <span :class="['connection-health', tone, { compact }]" :title="title" :aria-label="title">
+  <span :class="['connection-health', appliedOff ? 'off' : tone, { compact }]" :title="title" :aria-label="title">
     <span class="probe-dot" aria-hidden="true" />
     <span>{{ label }}</span>
-    <template v-if="!compact">
+    <template v-if="!compact && !appliedOff">
       <small v-if="checked">{{ t('conn.probeChecked', { time: checked }) }}</small>
       <small v-else>{{ t('conn.probeHint') }}</small>
       <small v-if="health?.error" class="probe-error">{{ health.error }}</small>
@@ -30,6 +31,7 @@ const title = computed(() => [t('conn.probeHint'), label.value, checked.value ? 
 .probe-dot { width:7px; height:7px; border-radius:50%; background:currentColor; flex:none; }
 .up { color:var(--ok); }
 .down { color:var(--bad); }
+.off { color:var(--muted); }
 small { color:var(--muted); font-size:11px; }
 .probe-error { width:100%; color:var(--bad); overflow-wrap:anywhere; }
 </style>

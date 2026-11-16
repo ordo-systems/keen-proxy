@@ -101,6 +101,10 @@ func (d *Demo) Status(context.Context) daemon.Status {
 	st.Health = map[string]daemon.ConnHealth{}
 	demoCountries := []string{"FI", "NL", "DE", "SE", "EE", "LV"}
 	for i, c := range d.cfg.Connections {
+		if c.Disabled {
+			st.Health[c.ID] = daemon.ConnHealth{Error: "connection is disabled"}
+			continue
+		}
 		st.ConnCountries[c.ID] = demoCountries[i%len(demoCountries)]
 		st.Health[c.ID] = daemon.ConnHealth{OK: true, Checked: time.Now().Add(-4 * time.Second), Since: d.started, Latency: int64(60 + 23*i)}
 		if c.Type == model.ConnTrustTunnel {
@@ -109,20 +113,20 @@ func (d *Demo) Status(context.Context) daemon.Status {
 	}
 	// Simulate failure of the first connection and traffic through its fallback.
 	for i, c := range d.cfg.Connections {
-		if c.Fallback == "" {
+		if c.Fallback == "" && !c.Disabled {
 			continue
 		}
 		if st.Failover == nil {
 			st.Failover = map[string]daemon.FailoverInfo{}
 		}
-		chain := d.cfg.Chain(c.ID)
-		active := c.ID
-		if i == 0 {
+		chain := d.cfg.ActiveChain(c.ID)
+		active := chain[0]
+		if i == 0 && !c.Disabled && len(chain) > 1 {
 			active = chain[1]
 		}
 		st.Failover[c.ID] = daemon.FailoverInfo{Active: active, Chain: chain}
 		for j, m := range chain {
-			if m == model.TargetDirect {
+			if m == model.TargetDirect || m == model.TargetBlock {
 				continue
 			}
 			h := daemon.ConnHealth{OK: true, Checked: time.Now().Add(-4 * time.Second), Since: d.started, Latency: int64(60 + 23*j)}
@@ -157,10 +161,15 @@ func (d *Demo) Devices() []daemon.Device {
 // demoHosts supplies synthetic statistics with group domains routed to the
 // selected connection and a few unrelated hosts.
 func (d *Demo) demoHosts(tag string) []string {
+	for _, cn := range d.cfg.Connections {
+		if cn.ID == tag && cn.Disabled {
+			return nil
+		}
+	}
 	var out []string
 	for _, g := range d.cfg.Groups {
-		if g.Target == tag {
-			for _, e := range g.Entries {
+		if !g.Disabled && demoActive(d.cfg, g.Target) == tag {
+			for e := range g.ActiveEntries() {
 				out = append(out, strings.TrimPrefix(e, "*."), "www."+strings.TrimPrefix(e, "*."))
 			}
 		}
@@ -172,6 +181,18 @@ func (d *Demo) demoHosts(tag string) []string {
 		out = []string{"api.example.com", "cdn.example.net"}
 	}
 	return out
+}
+
+// demoActive mirrors the synthetic first-profile failure without reviving off profiles.
+func demoActive(cfg *model.Config, target string) string {
+	if target == model.TargetDirect || target == model.TargetBlock {
+		return target
+	}
+	chain := cfg.ActiveChain(target)
+	if len(cfg.Connections) > 0 && cfg.Connections[0].ID == target && !cfg.Connections[0].Disabled && len(chain) > 1 {
+		return chain[1]
+	}
+	return chain[0]
 }
 
 func seed(s string) float64 {
@@ -188,6 +209,9 @@ func (d *Demo) Stats(withSeries bool) stats.Snapshot {
 	now := time.Now()
 	tags := []string{"direct"}
 	for _, c := range d.cfg.Connections {
+		if c.Disabled {
+			continue
+		}
 		tags = append(tags, c.ID)
 	}
 	var snap stats.Snapshot

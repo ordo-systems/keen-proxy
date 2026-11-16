@@ -36,6 +36,8 @@ export interface Connection {
   id: string
   name: string
   type: ConnType
+  // Administrative state; saved profiles and fallback references are retained.
+  disabled?: boolean
   wireguard?: WireGuard
   // Complete single-peer AWG .conf; contains secrets and is parsed server-side.
   amneziawg?: string
@@ -58,6 +60,10 @@ export interface Group {
   // Labels from category databases, such as RU-BLOCKED; combined with countries.
   categories?: string[]
   except?: boolean
+  // Value-based exclusions preserve entries, selector order and preset membership.
+  disabled_entries?: string[]
+  disabled_countries?: string[]
+  disabled_categories?: string[]
 }
 
 // Subnet-level default routing policy for matching devices.

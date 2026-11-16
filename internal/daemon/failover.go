@@ -44,6 +44,9 @@ func (h *health) down(now time.Time, downAfter time.Duration) bool {
 // priority only after upAfter of success. Once active has failed for downAfter,
 // choose the first currently responsive member; keep active if none respond.
 func pick(chain []string, cur string, hs map[string]*health, now time.Time, downAfter, upAfter time.Duration) string {
+	if len(chain) == 0 {
+		return model.TargetBlock
+	}
 	ci := -1
 	for i, m := range chain {
 		if m == cur {
@@ -82,6 +85,9 @@ func (d *Daemon) runFailover(ctx context.Context) {
 			d.mu.Lock()
 			now := time.Now()
 			for id, r := range results {
+				if !connectionEnabled(d.cfg, id) {
+					continue
+				}
 				h := d.health[id]
 				if h == nil {
 					h = &health{}
@@ -105,9 +111,22 @@ func (d *Daemon) runFailover(ctx context.Context) {
 func probeMembers(cfg *model.Config) []string {
 	ids := make([]string, 0, len(cfg.Connections))
 	for _, c := range cfg.Connections {
-		ids = append(ids, c.ID)
+		if !c.Disabled {
+			ids = append(ids, c.ID)
+		}
 	}
 	return ids
+}
+
+func connectionEnabled(cfg *model.Config, id string) bool {
+	if cfg != nil {
+		for _, cn := range cfg.Connections {
+			if cn.ID == id {
+				return !cn.Disabled
+			}
+		}
+	}
+	return false
 }
 
 // probeResult carries one HTTP probe outcome back to serialized health updates.
@@ -142,6 +161,9 @@ func (d *Daemon) probeAll(ctx context.Context, ids []string, f model.Failover) m
 // reachability, regardless of content. It resolves the probe host locally
 // because a WireGuard outbound may lack a sing-box DNS resolver.
 func (d *Daemon) probe(ctx context.Context, id, rawURL string) (time.Duration, error) {
+	if !connectionEnabled(d.live.Load(), id) {
+		return 0, fmt.Errorf("connection is not running")
+	}
 	out, engCtx, ok := d.eng.Outbound(id)
 	if !ok {
 		return 0, fmt.Errorf("connection is not running")
@@ -212,7 +234,7 @@ func (d *Daemon) switchLocked(now time.Time) {
 	for _, fc := range d.chains {
 		cur := d.active[fc.ID]
 		if cur == "" {
-			cur = fc.ID
+			cur = fc.Chain[0]
 		}
 		next := pick(fc.Chain, cur, d.health, now, downAfter, upAfter)
 		if next == cur {
@@ -248,18 +270,20 @@ func (d *Daemon) switchLocked(now time.Time) {
 }
 
 // reselectLocked restores selections after engine restarts, which reset to the
-// primary member, and discards state for removed chains. Requires d.mu.
+// first enabled member, and discards state for removed chains. Requires d.mu.
 func (d *Daemon) reselectLocked() {
 	keep := map[string]bool{}
 	for _, fc := range d.chains {
 		keep[fc.ID] = true
-		cur, ok := d.active[fc.ID]
-		if !ok || cur == fc.ID {
-			continue
+		cur := d.active[fc.ID]
+		if index(fc.Chain, cur) < 0 {
+			cur = fc.Chain[0]
+			delete(d.allDown, fc.ID)
 		}
-		if index(fc.Chain, cur) < 0 || !d.eng.Select(fc.Tag, cur) {
-			delete(d.active, fc.ID)
+		if cur != fc.Chain[0] && !d.eng.Select(fc.Tag, cur) {
+			cur = fc.Chain[0]
 		}
+		d.active[fc.ID] = cur
 	}
 	for id := range d.active {
 		if !keep[id] {
@@ -268,9 +292,9 @@ func (d *Daemon) reselectLocked() {
 		}
 	}
 	members := map[string]bool{}
-	for _, fc := range d.chains {
-		for _, m := range fc.Chain {
-			members[m] = true
+	for _, cn := range d.cfg.Connections {
+		if !cn.Disabled {
+			members[cn.ID] = true
 		}
 	}
 	for id := range d.health {
@@ -340,13 +364,17 @@ func (d *Daemon) failoverInfoLocked() (map[string]FailoverInfo, map[string]ConnH
 	for _, fc := range d.chains {
 		active := d.active[fc.ID]
 		if active == "" {
-			active = fc.ID
+			active = fc.Chain[0]
 		}
 		fo[fc.ID] = FailoverInfo{Active: active, Chain: fc.Chain}
 	}
 	hs := map[string]ConnHealth{}
 	for _, c := range d.cfg.Connections {
 		id := c.ID
+		if c.Disabled {
+			hs[id] = ConnHealth{Error: "connection is disabled"}
+			continue
+		}
 		h := d.health[id]
 		if h != nil && h.known {
 			hs[id] = ConnHealth{OK: h.ok, Checked: h.checked, Since: h.since, Latency: h.latency.Milliseconds(), Error: h.err}

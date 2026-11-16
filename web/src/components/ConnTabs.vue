@@ -34,9 +34,14 @@ onUnmounted(() => observer?.disconnect())
 watch(() => props.modelValue, reveal)
 
 const tabs = computed(() => {
-  const conns = (store.state.config?.connections ?? []).map((c) => ({
-    value: c.id, label: c.name || c.id, badge: protocolOf(c), kind: 'conn',
-  }))
+  const conns = (store.state.config?.connections ?? [])
+    .filter((c) => !c.disabled || c.id === props.modelValue)
+    .map((c) => ({
+      value: c.id,
+      label: c.disabled ? t('groups.disabledChoice', { name: c.name || c.id }) : (c.name || c.id),
+      badge: protocolOf(c),
+      kind: 'conn',
+    }))
   const out = [...conns, { value: 'direct', label: t('target.direct'), badge: '', kind: 'direct' }]
   if (props.withBlock) out.push({ value: 'block', label: t('target.block'), badge: '', kind: 'block' })
   return out

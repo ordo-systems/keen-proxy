@@ -1,6 +1,8 @@
 import dnsProfiles from '../../../internal/catalog/dns.json' with { type: 'json' }
 import initial from './config.json' with { type: 'json' }
 import { createTelemetry } from './telemetry.ts'
+import { activeExit, entryOff, isGeo, retainPresetActivation } from '../activation.ts'
+import { connectionChain } from '../connectionDraft.ts'
 import type { Catalog, Config, DiagnosticReport, DomainStatus, GeoLookup, GeoStatus, JournalKind, Status } from '../types'
 
 // Only synthetic examples are bundled; the demo never imports runtime configuration.
@@ -56,8 +58,7 @@ function validate(config: Config) {
 export function createDemo(now: () => number = () => Date.now()) {
   let saved = copy(initial as Config)
   let previous = copy(saved)
-  const telemetry = createTelemetry(now)
-  telemetry.sync(saved)
+  const telemetry = createTelemetry(now, lookupGeo)
 
   function save(config: Config) {
     validate(config)
@@ -97,6 +98,8 @@ export function createDemo(now: () => number = () => Date.now()) {
     return { ip: ip.trim(), country: hit?.country, database: hit?.id, categories, results }
   }
 
+  telemetry.sync(saved)
+
 
   return {
     geoip, updateGeo, lookupGeo,
@@ -120,22 +123,34 @@ function preview(config: Config, id: string, target: string, index?: number) {
   if (!preset) throw new Error('Unknown demo preset')
   const draft = copy(config)
   draft.groups ??= []
-  const old = index === undefined ? [] : draft.groups[index]?.entries ?? []
-  const group = { name: preset.name, target, entries: [...preset.domains], preset: { id, version: 'demo', base: [...preset.domains], auto_update: false } }
+  const previous = index === undefined ? undefined : draft.groups[index]
+  const old = previous?.entries ?? []
+  const group = retainPresetActivation(previous, {
+    name: preset.name,
+    target,
+    entries: [...preset.domains],
+    preset: { id, version: 'demo', base: [...preset.domains], auto_update: false },
+  })
   if (index === undefined) draft.groups.push(group)
   else draft.groups[index] = group
   validate(draft)
   return { config: draft, diff: { added: group.entries.filter(e => !old.includes(e)), removed: old.filter(e => !group.entries.includes(e)) } }
 }
 
-// Return simulated checks only for applied profiles.
+// A disabled profile is unavailable. Do not invent a network measurement for it.
 function diagnostics(saved: Config, connection: string): DiagnosticReport {
-  if (!saved.connections?.some(c => c.id === connection)) throw new Error('Unknown connection')
+  const profile = saved.connections?.find(c => c.id === connection)
+  if (!profile) throw new Error('Unknown connection')
+  if (profile.disabled) throw new Error('disabled')
   return { connection, demo: true, results: (['http', 'https', 'transfer'] as const).map((kind, i) => ({ kind, ok: true, checked: new Date().toISOString(), latency_ms: 42 + i * 17, bytes: kind === 'transfer' ? 65536 : undefined })) }
 }
 
+function routingNames(saved: Config): string[] {
+  return (saved.groups ?? []).flatMap(group => group.disabled || isGeo(group) ? [] : group.entries.filter(entry => !entryOff(group, entry)))
+}
+
 // Reserved example IPs represent every synthetic DNS answer.
-function domains(saved: Config, names = (saved.groups ?? []).flatMap(g => g.entries)): DomainStatus {
+function domains(saved: Config, names = routingNames(saved)): DomainStatus {
   const now = new Date().toISOString()
   return { demo: true, limited: false, conflicts: {}, written_at: now, application: 'synthetic', records: [...new Set(names)].map(name => ({ name, source: 'demo', checked_at: now, attempted_at: now, addresses: name.endsWith('.invalid') ? [] : [{ ip: '192.0.2.10', expires_at: new Date(Date.now() + 300000).toISOString() }], error: name.endsWith('.invalid') ? 'Synthetic NXDOMAIN' : undefined })) }
 }
@@ -152,14 +167,24 @@ function geoSummary(saved: Config, started: string): Status['geoip'] {
   return { loaded: countries.length > 0, type: 'Synthetic demo', built: started.slice(0, 10), active: countries.length, categories: enabled.length - countries.length, attributions, error: countries.length ? undefined : 'No enabled country databases' }
 }
 
+function failover(saved: Config): Status['failover'] {
+  const connections = saved.connections ?? []
+  const rows = connections.filter(connection => connection.fallback).map(connection => [connection.id, {
+    active: activeExit(saved, connection.id),
+    chain: connectionChain(connections, connection.id),
+  }] as const)
+  return rows.length ? Object.fromEntries(rows) : undefined
+}
+
 // Derive summary counts and health from the synthetic applied configuration.
 function status(saved: Config, started: string): Status {
+  const active = (saved.connections ?? []).filter(connection => !connection.disabled)
   return {
     started, mode: saved.intercept.mode, sources: 2, connections: saved.connections?.length ?? 0,
     groups: saved.groups?.length ?? 0, entries: (saved.groups ?? []).reduce((n, g) => n + g.entries.length, 0),
     clients: saved.clients?.length ?? 0, online_devices: 4, dns: '127.0.0.1:5353', firewall: true, restored: 0,
     trusttunnel: [], geoip: geoSummary(saved, started), conn_countries: { fi: 'FI', nl: 'NL', de: 'DE' },
-    failover: { fi: { active: 'fi', chain: ['fi', 'nl', 'de'] } },
-    health: Object.fromEntries((saved.connections ?? []).map(c => [c.id, { ok: true, checked: new Date().toISOString(), since: started, latency_ms: 42 }])),
+    failover: failover(saved),
+    health: Object.fromEntries(active.map(connection => [connection.id, { ok: true, checked: new Date().toISOString(), since: started, latency_ms: 42 }])),
   }
 }

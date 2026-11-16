@@ -22,8 +22,8 @@ watch(
 const list = computed(() => store.state.config?.connections ?? [])
 const options = computed(() => [
   ...list.value
-    .filter((c) => canFallback(list.value, props.connection.id, c.id))
-    .map((c) => ({ value: c.id, label: c.name || c.id })),
+    .filter((c) => canFallback(list.value, props.connection.id, c.id) && (!c.disabled || c.id === target.value))
+    .map((c) => ({ value: c.id, label: c.disabled ? t('groups.disabledChoice', { name: c.name || c.id }) : (c.name || c.id) })),
   { value: 'direct', label: t('dialog.directFallback') },
 ])
 const inherited = computed(() =>

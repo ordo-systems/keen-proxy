@@ -54,6 +54,9 @@ func (s *Server) yamlExport(w http.ResponseWriter, r *http.Request) {
 			cn.TrustTunnel = nil
 			cn.AmneziaWG = ""
 		}
+		for i := range cp.Groups {
+			cp.Groups[i].DisabledEntries = nil
+		}
 		raw, err = cp.Marshal()
 		if err != nil {
 			writeError(w, 500, err.Error())

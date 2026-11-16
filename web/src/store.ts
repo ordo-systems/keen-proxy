@@ -44,6 +44,7 @@ export function normalize(c: Config): Config {
 export const store = {
   state,
   dirty: computed(() => state.config !== null && JSON.stringify(state.config) !== state.saved),
+  applied: computed(() => (state.saved ? (JSON.parse(state.saved) as Config) : null)),
   invalidDNSPair,
 
   // Replace only the draft; the saved snapshot remains the dirty-state baseline.
@@ -113,6 +114,25 @@ export function targetLabel(id: string | undefined): string {
   if (id === 'block') return t('target.block')
   const c = state.config?.connections?.find((x) => x.id === id)
   return c ? c.name || c.id : id
+}
+
+function connectionChoice(id: string, name: string, disabled: boolean) {
+  return { value: id, label: disabled ? t('groups.disabledChoice', { name }) : name }
+}
+
+// New choices exclude disabled profiles. The current reference stays visible and labeled.
+export function selectableConnections(current?: string | null) {
+  return (state.config?.connections ?? [])
+    .filter((connection) => !connection.disabled || connection.id === current)
+    .map((connection) => connectionChoice(connection.id, connection.name || connection.id, !!connection.disabled))
+}
+
+export function selectableTargets(current?: string | null) {
+  return [
+    ...selectableConnections(current),
+    { label: t('target.direct'), value: 'direct' },
+    { label: t('target.block'), value: 'block' },
+  ]
 }
 
 export const modeOptions = computed(() => [

@@ -363,6 +363,17 @@ export function copyConnection(connection: Connection): Connection {
   return JSON.parse(JSON.stringify(connection)) as Connection
 }
 
+// Reimporting a profile replaces its payload. Administrative state is not part of that payload.
+export function editedConnection(previous: Connection | null | undefined, next: Connection): Connection {
+  if (!previous) return next
+  const edited: Connection = { ...next }
+  if (previous.disabled) edited.disabled = true
+  else delete edited.disabled
+  if (previous.fallback) edited.fallback = previous.fallback
+  else delete edited.fallback
+  return edited
+}
+
 // Multiple exported tunnels require an explicit choice; never import the first silently.
 export function selectAmneziaProfile(profiles: Connection[], chosen: number | null): Connection {
   const index = chosen === null && profiles.length === 1 ? 0 : chosen

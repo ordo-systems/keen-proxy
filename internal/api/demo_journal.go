@@ -82,8 +82,12 @@ func (d *Demo) addDemoRoute(t time.Time) {
 	}
 	var groups []int
 	for i, g := range cfg.Groups {
-		if g.Target != model.TargetBlock && len(g.Entries) > 0 {
+		if g.Target == model.TargetBlock {
+			continue
+		}
+		for range g.ActiveEntries() {
 			groups = append(groups, i)
+			break
 		}
 	}
 	source := "source_ip_cidr=192.168.7.0/24"
@@ -94,18 +98,19 @@ func (d *Demo) addDemoRoute(t time.Time) {
 	case r < 6 && len(groups) > 0:
 		gi := groups[rand.IntN(len(groups))]
 		g := cfg.Groups[gi]
-		e.Host = g.Entries[rand.IntN(len(g.Entries))]
+		entries := slices.Collect(g.ActiveEntries())
+		e.Host = entries[rand.IntN(len(entries))]
 		if rand.IntN(2) == 0 {
 			e.Host = "www." + e.Host
 		}
-		e.Outbound = outboundOf(g.Target)
+		e.Outbound = demoActive(cfg, g.Target)
 		e.RuleRaw = source + " rule_set=group-" + strconv.Itoa(gi)
 	case r < 8:
 		e.Host = []string{"ya.ru", "mail.ru", "vk.com", "gosuslugi.ru", "ozon.ru", "dzen.ru"}[rand.IntN(6)]
 		e.Outbound = "direct"
 		e.RuleRaw = source
 		for _, g := range cfg.Groups {
-			if g.IsGeo() && g.Except {
+			if g.IsGeo() && g.Except && tagsOf(g) != "[]" {
 				e.RuleRaw = "" // A Russian address misses the inverted country rule and uses final.
 			}
 		}
@@ -113,8 +118,8 @@ func (d *Demo) addDemoRoute(t time.Time) {
 		e.Host = []string{"api.github.com", "cdn.jsdelivr.net", "fonts.gstatic.com", "discord.com", "www.figma.com"}[rand.IntN(5)]
 		e.Outbound, e.RuleRaw = "direct", source
 		for _, g := range cfg.Groups {
-			if g.IsGeo() && g.Except {
-				e.Outbound = outboundOf(g.Target)
+			if g.IsGeo() && g.Except && tagsOf(g) != "[]" {
+				e.Outbound = demoActive(cfg, g.Target)
 				e.RuleRaw = source + " && !(rule_set=" + tagsOf(g) + ")"
 				break
 			}
@@ -131,19 +136,12 @@ func (d *Demo) addDemoRoute(t time.Time) {
 	}
 }
 
-func outboundOf(target string) string {
-	if target == "" || target == model.TargetDirect {
-		return "direct"
-	}
-	return target
-}
-
 func tagsOf(g model.Group) string {
 	var tags []string
-	for _, c := range g.Countries {
+	for c := range g.ActiveCountries() {
 		tags = append(tags, "geoip-"+strings.ToLower(c))
 	}
-	for _, c := range g.Categories {
+	for c := range g.ActiveCategories() {
 		tags = append(tags, compile.CategoryTagPrefix+strings.ToLower(c))
 	}
 	if len(tags) == 1 {

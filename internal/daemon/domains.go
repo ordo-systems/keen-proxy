@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/miekg/dns"
 	"github.com/ordo-systems/keen-proxy/internal/compile"
 	"github.com/ordo-systems/keen-proxy/internal/dnsfront"
 	"github.com/ordo-systems/keen-proxy/internal/domaincache"
 	"github.com/ordo-systems/keen-proxy/internal/model"
-	"github.com/miekg/dns"
 )
 
 // DomainStatus reports cached DNS routes and file-write status, without certifying
@@ -280,12 +280,13 @@ func containsName(names []string, name string) bool {
 // service refreshes do not count as device use.
 func refreshDomainNames(cfg *model.Config, records []domaincache.Record, now time.Time) []string {
 	names := compile.DomainNames(cfg)
+	matcher := compile.NewDomainMatcher(cfg)
 	seen := map[string]bool{}
 	for _, n := range names {
 		seen[n] = true
 	}
 	for _, r := range records {
-		if !seen[r.Name] && !r.ObservedAt.IsZero() && now.Sub(r.ObservedAt) < 10*time.Minute {
+		if matcher.Match(r.Name) && !seen[r.Name] && !r.ObservedAt.IsZero() && now.Sub(r.ObservedAt) < 10*time.Minute {
 			names = append(names, r.Name)
 			seen[r.Name] = true
 		}

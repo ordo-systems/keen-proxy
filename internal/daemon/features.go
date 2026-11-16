@@ -8,13 +8,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/miekg/dns"
 	"github.com/ordo-systems/keen-proxy/internal/compile"
 	"github.com/ordo-systems/keen-proxy/internal/dnsfront"
 	"github.com/ordo-systems/keen-proxy/internal/filterlist"
 	"github.com/ordo-systems/keen-proxy/internal/journal"
 	"github.com/ordo-systems/keen-proxy/internal/model"
 	"github.com/ordo-systems/keen-proxy/internal/stats"
-	"github.com/miekg/dns"
 	M "github.com/sagernet/sing/common/metadata"
 )
 
@@ -81,7 +81,7 @@ func (d *Daemon) dnsDial(id string) func(context.Context, string, string) (net.C
 		cfg := d.live.Load()
 		if cfg != nil {
 			for _, cn := range cfg.Connections {
-				if cn.ID == id && cn.Fallback != "" {
+				if cn.ID == id && (cn.Fallback != "" || cn.Disabled) {
 					tag = compile.FailoverTagPrefix + id
 				}
 			}

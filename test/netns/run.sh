@@ -284,6 +284,111 @@ api_get config/previous | python3 -c 'import json,sys;assert not json.load(sys.s
 dig +short +time=2 +tries=1 @127.0.0.1 -p 5354 example.test A | grep -q '198.51.100.2' || fail "guard blocked own DNS"
 ok "DNS guard rejects redirected port 853, own resolver works, previous YAML available"
 
+# --- Activation is applied through the real API without deleting profiles or references.
+# Register cleanup before creating this phase's uniquely owned temporary directory.
+ACTIVATION_TMP=""
+activation_cleanup() {
+	if [ -n "$ACTIVATION_TMP" ]; then
+		rm -rf "$ACTIVATION_TMP"
+		[ ! -e "$ACTIVATION_TMP" ] || fail "activation temporary files remain"
+	fi
+}
+trap activation_cleanup 0
+trap 'exit 1' 1 2 15
+ACTIVATION_TMP=$(mktemp -d /tmp/keenproxy-activation.XXXXXX)
+api_get config >"$ACTIVATION_TMP/baseline.json"
+activation_apply() {
+	python3 - "$ACTIVATION_TMP/baseline.json" "$1" >"$ACTIVATION_TMP/draft.json" <<'PY'
+import json,sys
+c=json.load(open(sys.argv[1]))
+mode=sys.argv[2]
+for cn in c["connections"]:
+    cn["disabled"] = cn["id"] == "main" or mode in ("blocked", "client-blocked", "direct")
+    if mode == "intermediate" and cn["id"] == "vless":
+        cn["disabled"], cn["fallback"] = True, "ss"
+    if mode == "direct" and cn["id"] == "main":
+        cn["fallback"] = "direct"
+if mode in ("blocked", "direct"):
+    c["networks"][0]["mode"], c["networks"][0]["target"] = "full", "main"
+if mode == "client-blocked":
+    c["clients"] = [{"name":"Activation client","mac":"02:00:00:00:00:77","ip":"192.168.77.10","mode":"full","target":"main"}]
+print(json.dumps(c))
+PY
+	curl -fsS -m 15 -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+		--data-binary @"$ACTIVATION_TMP/draft.json" http://127.0.0.1:8086/api/config >/dev/null || fail "activation $1 apply"
+}
+activation_rule_apply() {
+	python3 - "$ACTIVATION_TMP/baseline.json" "$1" >"$ACTIVATION_TMP/draft.json" <<'PY'
+import json,sys
+c=json.load(open(sys.argv[1]))
+mode=sys.argv[2]
+g={"name":"Activation rules","target":"block","entries":["ads.test","198.51.100.3/32"]}
+if mode == "entries-off":
+    g["disabled_entries"]=["ADS.TEST","198.51.100.3/32"]
+elif mode in ("parent-off","parent-on"):
+    g["disabled"]=mode == "parent-off"
+    g["disabled_entries"]=["ADS.TEST"]
+elif mode == "geo-off":
+    g={"name":"Empty inverted geo","target":"block","countries":[" ru "],
+       "disabled_countries":["rU"],"except":True}
+c["groups"]=[g]
+c["clients"]=[]
+c["networks"][0]["mode"]="split"
+c["networks"][0].pop("target",None)
+print(json.dumps(c))
+PY
+	curl -fsS -m 15 -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+		--data-binary @"$ACTIVATION_TMP/draft.json" http://127.0.0.1:8086/api/config >/dev/null || fail "rule activation $1 apply"
+}
+activation_ads_allowed() {
+	answer=$(ip netns exec client dig +short +time=2 +tries=1 @8.8.8.8 x.ads.test A)
+	[ "$answer" = "198.51.100.2" ] || fail "disabled block domain still affects DNS: $answer"
+}
+activation_apply reserve
+route_is vless "group «With fallback»"
+activation_apply intermediate
+route_is ss "group «With fallback»"
+for activation_mode in blocked client-blocked; do
+	activation_apply "$activation_mode"
+	if ip netns exec client curl -fsS -m 3 -H 'Host: backup.test' http://198.51.100.3/ >/dev/null 2>&1; then
+		fail "all-disabled $activation_mode selection escaped directly"
+	fi
+	api_get status | python3 -c 'import json,sys;s=json.load(sys.stdin);assert s["failover"]["main"]["active"]=="block";assert all(not h["ok"] and h.get("error")=="connection is disabled" for h in s["health"].values())' || fail "disabled status or stale selection"
+done
+activation_apply direct
+ip netns exec client curl -fsS -m 3 -H 'Host: backup.test' http://198.51.100.3/ >/dev/null || fail "explicit direct fallback"
+curl -fsS -m 15 -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+	--data-binary @"$ACTIVATION_TMP/baseline.json" http://127.0.0.1:8086/api/config >/dev/null || fail "activation restore"
+route_is main "group «With fallback»"
+activation_rule_apply rules-on
+if ip netns exec client curl -fsS -m 3 http://198.51.100.3/ >/dev/null 2>&1; then
+	fail "active IP block did not reject traffic"
+fi
+answer=$(ip netns exec client dig +short +time=2 +tries=1 @8.8.8.8 x.ads.test A)
+[ "$answer" = "0.0.0.0" ] || fail "active domain block did not affect DNS"
+activation_rule_apply entries-off
+ip netns exec client curl -fsS -m 3 http://198.51.100.3/ >/dev/null || fail "disabled IP block remained active"
+activation_ads_allowed
+api_get config | python3 -c 'import json,sys;g=json.load(sys.stdin)["groups"][0];assert len(g["entries"])==2 and len(g["disabled_entries"])==2' || fail "off state deleted original rules"
+activation_rule_apply parent-off
+ip netns exec client curl -fsS -m 3 http://198.51.100.3/ >/dev/null || fail "disabled group remained active"
+activation_ads_allowed
+activation_rule_apply parent-on
+if ip netns exec client curl -fsS -m 3 http://198.51.100.3/ >/dev/null 2>&1; then
+	fail "re-enabled parent did not restore its active child"
+fi
+activation_ads_allowed
+activation_rule_apply geo-off
+ip netns exec client curl -fsS -m 3 http://198.51.100.3/ >/dev/null || fail "all-off inverted geo became a global block"
+curl -fsS -m 15 -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+	--data-binary @"$ACTIVATION_TMP/baseline.json" http://127.0.0.1:8086/api/config >/dev/null || fail "rule activation restore"
+route_is main "group «With fallback»"
+ok "activation rules: off domain/IP and group release DNS/traffic; parent preserves child state; all-off country inversion stays inactive"
+activation_cleanup
+ACTIVATION_TMP=""
+trap - 0 1 2 15
+ok "activation: disabled primary and intermediate bypassed; all-off network/client references block; explicit direct and re-enable restore"
+
 # --- Shutdown removes all interception owned by KeenProxy
 kill -TERM $KPID
 wait $KPID || true

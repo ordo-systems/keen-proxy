@@ -10,19 +10,21 @@ import {
   NTabs,
   NTab,
   NAlert,
+  NSwitch,
   useDialog,
   type DataTableColumns,
 } from 'naive-ui'
 import { ListChecks, Plus, Trash2, Search, Globe, RefreshCw, Tags } from '@lucide/vue'
-import { store, targets, targetLabel } from '../store'
+import { store, targets, targetLabel, selectableTargets } from '../store'
 import type { Group, DomainStatus, GeoBuiltin } from '../types'
 import { countries, flag } from '../countries'
 import { categoryOptions, hasCategoryDatabase } from '../geoip'
-
 import DomainEntries from '../components/DomainEntries.vue'
+import SelectorEntries from '../components/SelectorEntries.vue'
 import { api } from '../api'
 import { domainName } from '../domain'
 import { groupKey, changeGroupTargets } from '../groups'
+import { dropRemoved, entryOff, geoIdentity, geoInactive, isGeo, ruleActive, ruleTotal, setGroupEnabled } from '../activation'
 const domainStatus = ref<DomainStatus | null>(null)
 const domainError = ref('')
 const previews = reactive(new Map<Group, DomainStatus>())
@@ -64,7 +66,7 @@ async function refresh(g: Group, names?: string[]) {
     return
   }
   const wanted =
-    names ?? g.entries.map(domainName).filter((n): n is string => n !== null)
+    names ?? g.entries.filter((entry) => !entryOff(g, entry)).map(domainName).filter((n): n is string => n !== null)
   if (!wanted.length) return
   refreshing.add(g)
   domainError.value = ''
@@ -104,7 +106,7 @@ const tabs = computed(() => [
 const isCountry = (g: Group) => g.countries !== undefined || g.categories !== undefined
 const categoryChoices = computed(() => categoryOptions(builtins.value, groups.value))
 const noCategoryDB = computed(
-  () => groups.value.some((g) => g.categories?.length && !g.disabled) && !hasCategoryDatabase(store.state.config!.geoip.databases, builtins.value),
+  () => groups.value.some((g) => !g.disabled && (g.categories ?? []).some((label) => !(g.disabled_categories ?? []).some((flag) => geoIdentity(flag) === geoIdentity(label)))) && !hasCategoryDatabase(store.state.config!.geoip.databases, builtins.value),
 )
 
 const filtered = computed(() => {
@@ -165,7 +167,7 @@ function saveBulk() {
     groups.value,
     selected.value,
     newTarget.value,
-    targets.value.map((t) => t.value),
+    selectableTargets().map((choice) => choice.value),
   )
   selected.value = new Set()
   newTarget.value = null
@@ -182,27 +184,35 @@ const selectionColumn = () => ({
     }),
 })
 
-const total = computed(() =>
-  groups.value.reduce((n, g) => n + g.entries.length, 0),
-)
+const entryTotals = computed(() => {
+  let total = 0
+  let active = 0
+  for (const group of groups.value) {
+    if (isGeo(group)) continue
+    total += group.entries.length
+    active += ruleActive(group)
+  }
+  return { total, active }
+})
+
+function allowedTarget(preferred?: string, tunnel = false) {
+  const choices = selectableTargets()
+  if (preferred && preferred !== 'all' && choices.some((choice) => choice.value === preferred)) return preferred
+  const tunnelChoice = choices.find((choice) => choice.value !== 'direct' && choice.value !== 'block')
+  if (tunnel && tunnelChoice) return tunnelChoice.value
+  return choices[0]?.value ?? 'direct'
+}
 
 function addGroup() {
-  const target =
-    tab.value !== 'all' ? tab.value : (targets.value[0]?.value ?? 'direct')
-  groups.value.push({ name: t('groups.newGroup'), target, entries: [] })
+  groups.value.push({ name: t('groups.newGroup'), target: allowedTarget(tab.value), entries: [] })
   expanded.value = [groupKey(groups.value.at(-1)!)]
 }
 
 // Default country routing sends everything except Russia to the first connection.
 function addCountryGroup() {
-  const target =
-    (tab.value !== 'all' ? tab.value : undefined) ??
-    targets.value.find((t) => t.value !== 'direct' && t.value !== 'block')
-      ?.value ??
-    'direct'
   groups.value.push({
     name: t('groups.exceptRussia'),
-    target,
+    target: allowedTarget(tab.value, true),
     entries: [],
     countries: ['RU'],
     except: true,
@@ -211,13 +221,9 @@ function addCountryGroup() {
 
 // Category routing defaults to the lists of resources blocked in Russia.
 function addCategoryGroup() {
-  const target =
-    (tab.value !== 'all' ? tab.value : undefined) ??
-    targets.value.find((t) => t.value !== 'direct' && t.value !== 'block')?.value ??
-    'direct'
   groups.value.push({
     name: t('groups.blockedInRussia'),
-    target,
+    target: allowedTarget(tab.value, true),
     entries: [],
     categories: ['RU-BLOCKED', 'RU-BLOCKED-COMMUNITY', 'RE-FILTER'],
   })
@@ -260,28 +266,20 @@ watch(search, (q) => {
 
 const nameCell = (g: Group) =>
   h('div', { class: 'gname' }, [
-    // Use blue for tunnels, green for direct routing, and red for blocking.
     h('i', {
-      class: [
-        'tdot',
-        g.target === 'block'
-          ? 'block'
-          : g.target === 'direct'
-            ? 'direct'
-            : 'tunnel',
-      ],
+      class: ['tdot', g.target === 'block' ? 'block' : g.target === 'direct' ? 'direct' : 'tunnel'],
       title: targetLabel(g.target),
     }),
-    h(
-      NButton,
-      { text: true, strong: true, onClick: () => renameGroup(g) },
-      { default: () => g.name },
-    ),
+    h('div', { class: 'gname-text' }, [
+      h(NButton, { text: true, strong: true, onClick: () => renameGroup(g) }, { default: () => g.name }),
+      g.disabled ? h('span', { class: 'pill dim' }, t('groups.groupOff')) : null,
+      geoInactive(g) ? h('span', { class: 'pill dim' }, t('groups.inactive')) : null,
+    ]),
   ])
 const targetCell = (g: Group) =>
   h(NSelect, {
     value: g.target,
-    options: targets.value,
+    options: selectableTargets(g.target),
     size: 'small',
     'onUpdate:value': (v: string) => (g.target = v),
   })
@@ -308,16 +306,47 @@ const countryOptions = computed(() =>
 const modeOptions = computed(() => [
   { label: t('groups.onlyThese'), value: 'only' },
   { label: t('groups.allExcept'), value: 'except' },
-])
+] )
+function setCountries(g: Group, values: string[]) {
+  const next = values.length || !g.categories ? values : undefined
+  g.disabled_countries = dropRemoved(g.disabled_countries, g.countries ?? [], next ?? [], geoIdentity)
+  g.countries = next
+}
+function setCategories(g: Group, raw: string[]) {
+  const labels = [...new Set(raw.map((item) => item.trim().toUpperCase()).filter(Boolean))]
+  g.disabled_categories = dropRemoved(g.disabled_categories, g.categories ?? [], labels, geoIdentity)
+  g.categories = labels.length ? labels : undefined
+  if (!g.categories) g.countries ??= []
+}
+const switchColumn = () => ({
+  title: t('groups.colOn'),
+  key: 'enabled',
+  width: 72,
+  render: ({ g }: { g: Group }) => h(NSwitch, {
+    size: 'small',
+    value: !g.disabled,
+    'aria-label': t('groups.toggleGroup', { name: g.name }),
+    'onUpdate:value': (enabled: boolean) => setGroupEnabled(g, enabled),
+    onClick: (event: Event) => event.stopPropagation(),
+  }),
+})
 
 const countryColumns = computed<DataTableColumns<{ g: Group; key: string }>>(
   () => [
     selectionColumn(),
+    switchColumn(),
+    { type: 'expand', renderExpand: ({ g }) => h(SelectorEntries, { group: g }) },
     {
       title: t('groups.colGroup'),
       key: 'name',
       minWidth: 200,
       render: ({ g }) => nameCell(g),
+    },
+    {
+      title: t('groups.colEntries'),
+      key: 'active',
+      width: 120,
+      render: ({ g }) => h('span', { class: 'pill dim' }, t('groups.activeRules', { n: ruleActive(g), total: ruleTotal(g) })),
     },
     {
       title: t('groups.colRule'),
@@ -362,7 +391,7 @@ const countryColumns = computed<DataTableColumns<{ g: Group; key: string }>>(
                 '×',
               ),
             ]),
-          'onUpdate:value': (v: string[]) => (g.countries = v.length || !g.categories ? v : undefined),
+          'onUpdate:value': (v: string[]) => setCountries(g, v),
         }),
     },
     {
@@ -378,11 +407,7 @@ const countryColumns = computed<DataTableColumns<{ g: Group; key: string }>>(
           tag: true,
           size: 'small',
           placeholder: t('groups.pickCategories'),
-          'onUpdate:value': (v: string[]) => {
-            const labels = v.map((x) => x.trim().toUpperCase()).filter(Boolean)
-            g.categories = labels.length ? [...new Set(labels)] : undefined
-            if (!g.categories) g.countries ??= []
-          },
+          'onUpdate:value': (v: string[]) => setCategories(g, v),
         }),
     },
     {
@@ -397,6 +422,7 @@ const countryColumns = computed<DataTableColumns<{ g: Group; key: string }>>(
 
 const columns = computed<DataTableColumns<{ g: Group; key: string }>>(() => [
   selectionColumn(),
+  switchColumn(),
   {
     type: 'expand',
     renderExpand: ({ g }) =>
@@ -420,9 +446,8 @@ const columns = computed<DataTableColumns<{ g: Group; key: string }>>(() => [
   {
     title: t('groups.colEntries'),
     key: 'count',
-    width: 90,
-    render: ({ g }) =>
-      h('span', { class: 'pill dim' }, String(g.entries.length)),
+    width: 120,
+    render: ({ g }) => h('span', { class: 'pill dim' }, t('groups.activeRules', { n: ruleActive(g), total: ruleTotal(g) })),
   },
   {
     title: t('groups.colTarget'),
@@ -459,7 +484,7 @@ const columns = computed<DataTableColumns<{ g: Group; key: string }>>(() => [
     <div class="page-head">
       <div>
         <h1><ListChecks :size="22" /> {{ t('nav.whitelist') }}</h1>
-        <p>{{ t('groups.intro', { n: total }) }}</p>
+        <p>{{ t('groups.intro', { n: entryTotals.total, active: entryTotals.active }) }}</p>
       </div>
       <div class="head-actions">
         <NButton type="primary" @click="addGroup">
@@ -566,19 +591,21 @@ const columns = computed<DataTableColumns<{ g: Group; key: string }>>(() => [
 
           <section v-if="countryRows.length" class="countries">
             <h2><Globe :size="16" /> {{ t('groups.byGeo') }}</h2>
-            <p class="muted">{{ t('groups.countryIntro') }}</p>
+            <p class="muted">{{ t('groups.countryIntro') }} {{ t('groups.countrySwitch') }}</p>
             <NAlert v-if="noCategoryDB" type="warning" class="cat-warn">
               {{ t('groups.noCategoryDB') }}
               <router-link to="/lists/geoip">{{ t('nav.geoip') }}</router-link>
             </NAlert>
             <NDataTable
+              v-model:expanded-row-keys="expanded"
               :columns="countryColumns"
               :data="countryRows"
               :row-key="(r) => r.key"
               :bordered="false"
-              :scroll-x="900"
+              :scroll-x="1040"
               size="small"
             />
+            <p class="muted">{{ t('groups.skipped') }}</p>
           </section>
         </div>
         <div class="mobile-groups">
@@ -596,6 +623,7 @@ const columns = computed<DataTableColumns<{ g: Group; key: string }>>(() => [
               class="mobile-group"
             >
               <div class="mobile-group-head">
+                <NSwitch size="small" :value="!g.disabled" :aria-label="t('groups.toggleGroup', { name: g.name })" @update:value="(v: boolean) => setGroupEnabled(g, v)" />
                 <NCheckbox
                   :checked="selected.has(key)"
                   :aria-label="g.name"
@@ -608,13 +636,15 @@ const columns = computed<DataTableColumns<{ g: Group; key: string }>>(() => [
                       : [...expanded, key]
                   "
                   >{{ g.name }}</NButton
-                ><small class="muted">{{ targetLabel(g.target) }}</small>
+                ><small class="muted">{{ t('groups.activeRules', { n: ruleActive(g), total: ruleTotal(g) }) }} · {{ targetLabel(g.target) }}</small>
               </div>
               <div v-if="expanded.includes(key)" class="mobile-group-body">
+                <p v-if="g.disabled" class="muted">{{ t('groups.parentOff') }}</p>
                 <NSelect
-                  v-model:value="g.target"
-                  :options="targets"
+                  :value="g.target"
+                  :options="selectableTargets(g.target)"
                   :aria-label="t('groups.colTarget')"
+                  @update:value="(v: string) => (g.target = v)"
                 />
                 <template v-if="isCountry(g)"
                   ><NSelect
@@ -623,24 +653,19 @@ const columns = computed<DataTableColumns<{ g: Group; key: string }>>(() => [
                     @update:value="
                       (v) => (g.except = v === 'except' || undefined)
                     " /><NSelect
-                    v-model:value="g.countries"
+                    :value="g.countries"
                     multiple
                     filterable
-                    :options="countryOptions" /><NSelect
+                    :options="countryOptions"
+                    @update:value="(v: string[]) => setCountries(g, v)" /><NSelect
                     :value="g.categories ?? []"
                     multiple
                     filterable
                     tag
                     :options="categoryChoices"
                     :placeholder="t('groups.pickCategories')"
-                    @update:value="
-                      (v: string[]) => {
-                        const labels = v.map((x) => x.trim().toUpperCase()).filter(Boolean)
-                        g.categories = labels.length ? [...new Set(labels)] : undefined
-                        if (!g.categories) g.countries ??= []
-                      }
-                    "
-                /></template>
+                    @update:value="(v: string[]) => setCategories(g, v)"
+                /><SelectorEntries :group="g" /></template>
                 <DomainEntries
                   v-else
                   :group="g"
@@ -661,7 +686,8 @@ const columns = computed<DataTableColumns<{ g: Group; key: string }>>(() => [
               </div>
             </article>
           </section>
-          <p class="muted">{{ t('groups.countryIntro') }}</p>
+          <p class="muted">{{ t('groups.countryIntro') }} {{ t('groups.countrySwitch') }}</p>
+          <p class="muted">{{ t('groups.skipped') }}</p>
         </div>
       </div>
       <aside v-if="selectedGroups.length" class="bulk-panel">
@@ -669,7 +695,7 @@ const columns = computed<DataTableColumns<{ g: Group; key: string }>>(() => [
         <p>{{ t('ui.selected', { n: selectedGroups.length }) }}</p>
         <NSelect
           v-model:value="newTarget"
-          :options="targets"
+          :options="selectableTargets()"
           :placeholder="t('groups.colTarget')"
           :aria-label="t('groups.colTarget')"
         />
@@ -688,7 +714,7 @@ const columns = computed<DataTableColumns<{ g: Group; key: string }>>(() => [
         <NButton
           type="primary"
           block
-          :disabled="!newTarget || !targets.some((t) => t.value === newTarget)"
+          :disabled="!newTarget || !selectableTargets().some((choice) => choice.value === newTarget)"
           @click="saveBulk"
           >{{ t('ui.saveDraft') }}</NButton
         >
@@ -708,6 +734,8 @@ const columns = computed<DataTableColumns<{ g: Group; key: string }>>(() => [
 }
 .head-actions {
   display: flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   gap: 8px;
   flex-shrink: 0;
 }
@@ -764,6 +792,13 @@ const columns = computed<DataTableColumns<{ g: Group; key: string }>>(() => [
   display: flex;
   align-items: center;
   gap: 10px;
+}
+:deep(.gname-text) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 :deep(.tdot) {
   width: 8px;

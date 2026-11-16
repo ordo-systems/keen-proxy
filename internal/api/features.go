@@ -112,7 +112,9 @@ func (s *Server) checkDNS(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	d, ok := s.D.(featureDaemon)
+	d, ok := s.D.(interface {
+		CheckDNS(context.Context, *model.Config) (daemon.DNSCheck, error)
+	})
 	if !ok {
 		writeJSON(w, 200, daemon.DNSCheck{Demo: true, Route: "demo", Error: "Demo: network requests are disabled"})
 		return

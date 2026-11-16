@@ -8,6 +8,14 @@ export function sameAppliedConnection(
     !!draft && !!applied && JSON.stringify(draft) === JSON.stringify(applied)
   )
 }
+
+const diagnosticErrors: Record<string, string> = { disabled: 'conn.unavailable' }
+
+// Map stable check failures to translation keys. Never echo transport text.
+export function diagnosticErrorKey(cause: unknown): string {
+  const code = cause instanceof Error ? cause.message : ''
+  return diagnosticErrors[code] ?? 'ui.unavailable'
+}
 // Allowlist of machine results only: never copy display strings or raw errors
 // from config, GeoIP download URLs, transport errors or source profiles.
 export function safeDiagnosticsReport(

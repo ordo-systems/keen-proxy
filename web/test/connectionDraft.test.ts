@@ -6,6 +6,7 @@ import {
   canFallback,
   connectionChain,
   copyConnection,
+  editedConnection,
 } from '../src/connectionDraft.ts'
 import type { Connection } from '../src/types.ts'
 const base = {
@@ -429,4 +430,20 @@ test('fallback follows the selected profile rather than a different list entry',
     { id: 'c', name: 'C', type: 'link', fallback: 'b' },
   ]
   assert.equal(canFallback(list, 'a', 'b'), false)
+})
+test('reimporting a profile keeps its disabled state and fallback', () => {
+  const previous: Connection = {
+    id: 'fi',
+    name: 'Finland',
+    type: 'link',
+    link: 'vless://old',
+    disabled: true,
+    fallback: 'nl',
+  }
+  const rebuilt: Connection = { id: 'fi', name: 'Finland', type: 'link', link: 'vless://new' }
+  const saved = editedConnection(previous, rebuilt)
+  assert.equal(saved.disabled, true)
+  assert.equal(saved.fallback, 'nl')
+  assert.equal(saved.link, 'vless://new')
+  assert.equal(editedConnection(null, rebuilt), rebuilt)
 })

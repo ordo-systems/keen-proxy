@@ -2,9 +2,18 @@ import { catalog, createDemo } from './model.ts'
 import { DEMO_JOURNAL_LIMIT, DEMO_TICK_MS } from './telemetry.ts'
 import { createDemoUpdates, demoRevision } from './updates.ts'
 import type { Config, Connection, JournalKind, LinkPreview, Status, UpdatePreferences, UpdateSelection } from '../types'
+import { activeExit } from '../activation.ts'
 
 const demo = createDemo()
 const updates = createDemoUpdates()
+
+// Configuration-only simulation; no resolver or transport is contacted.
+function dnsExit(config: Config): string {
+  if (config.dns.route !== 'connection') return 'direct'
+  const exit = activeExit(config, config.dns.connection ?? '')
+  if (config.dns.failure !== 'direct') return exit === 'direct' ? 'block' : exit
+  return exit === 'block' ? 'direct' : exit
+}
 
 
 // The demo accepts only metadata previews; it never connects to the supplied endpoint.
@@ -40,10 +49,13 @@ export const api = {
   diagnosticCheck: async (connection: string) => demo.diagnostics(connection),
   diagnosticBundle: async (): Promise<Blob> => { throw new Error('Diagnostics archives are available on the router only') },
   catalog: async () => structuredClone(catalog),
-  features: async () => ({ demo: true, dns: { route: 'direct', checked: new Date().toISOString(), fallbacks: 0, blocked: 18 }, filters: [] }),
+  features: async () => ({ demo: true, dns: { route: dnsExit(demo.config()), checked: new Date().toISOString(), fallbacks: 0, blocked: 18 }, filters: [] }),
   previewPreset: async (config: Config, id: string, target: string, index?: number) => demo.preview(config, id, target, index),
   refreshFilters: async () => ({ demo: true }),
-  checkDNS: async (_config: Config) => ({ demo: true, rcode: 0, latency_ms: 12, route: 'simulated' }),
+  checkDNS: async (config: Config) => {
+    const route = dnsExit(config)
+    return { demo: true, rcode: route === 'block' ? 2 : 0, latency_ms: 0, route: `simulated: ${route}`, error: route === 'block' ? 'Configured DNS path is unavailable' : undefined }
+  },
   geoip: async () => demo.geoip(),
   updateGeo: async (id = '') => demo.updateGeo(id),
   lookupGeo: async (ip: string, id = '') => demo.lookupGeo(ip, id),

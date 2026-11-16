@@ -199,7 +199,7 @@ type obj = map[string]any
 type FailoverChain struct {
 	ID    string   // connection referenced by groups and clients
 	Tag   string   // selector tag
-	Chain []string // IDs in priority order, starting with ID; may end in direct
+	Chain []string // enabled IDs in priority order; may end in direct, or contain only block
 }
 
 // FailoverTagPrefix plus a connection ID names its fallback selector.
@@ -211,10 +211,10 @@ func failover(c *model.Config) ([]FailoverChain, map[string]string) {
 	var chains []FailoverChain
 	tags := map[string]string{}
 	for _, cn := range c.Connections {
-		if cn.Fallback == "" {
+		if cn.Fallback == "" && !cn.Disabled {
 			continue
 		}
-		fc := FailoverChain{ID: cn.ID, Tag: FailoverTagPrefix + cn.ID, Chain: c.Chain(cn.ID)}
+		fc := FailoverChain{ID: cn.ID, Tag: FailoverTagPrefix + cn.ID, Chain: c.ActiveChain(cn.ID)}
 		chains = append(chains, fc)
 		tags[cn.ID] = fc.Tag
 	}
@@ -249,6 +249,15 @@ func singBox(c *model.Config, ruleSetDir string, networks []policy, conns connOu
 	if len(ruleSets) > 0 {
 		route["rule_set"] = ruleSets
 	}
+	// Raw dependencies keep their configured tag without starting its disabled transport.
+	for i := range c.Connections {
+		cn := &c.Connections[i]
+		if cn.Disabled {
+			conns.outbounds = append(conns.outbounds, obj{
+				"type": "selector", "tag": cn.ID, "outbounds": []string{tags[cn.ID]},
+			})
+		}
+	}
 	cfg := obj{
 		"log":       obj{"level": "warn", "timestamp": true},
 		"inbounds":  inbounds,
@@ -265,9 +274,14 @@ func singBox(c *model.Config, ruleSetDir string, networks []policy, conns connOu
 // so applications reconnect through the newly selected outbound.
 func selectors(chains []FailoverChain) []obj {
 	var out []obj
+	blockAdded := false
 	for _, fc := range chains {
+		if fc.Chain[0] == model.TargetBlock && !blockAdded {
+			out = append(out, obj{"type": "block", "tag": model.TargetBlock})
+			blockAdded = true
+		}
 		out = append(out, obj{
-			"type": "selector", "tag": fc.Tag, "outbounds": fc.Chain, "default": fc.ID,
+			"type": "selector", "tag": fc.Tag, "outbounds": fc.Chain, "default": fc.Chain[0],
 			"interrupt_exist_connections": true,
 		})
 	}
@@ -326,11 +340,14 @@ func groupRuleSets(groups []model.Group, dir string) (sets []obj, block, routed 
 					sets = append(sets, obj{"type": "local", "tag": tag, "format": "source", "path": filepath.Join(dir, tag+".json")})
 				}
 			}
-			for _, cc := range g.Countries {
+			for cc := range g.ActiveCountries() {
 				add(CountryTagPrefix, cc, &geo.countries)
 			}
-			for _, cat := range g.Categories {
+			for cat := range g.ActiveCategories() {
 				add(CategoryTagPrefix, cat, &geo.categories)
+			}
+			if len(gs.tags) == 0 {
+				continue
 			}
 			if g.Target == model.TargetBlock {
 				countryBlock = append(countryBlock, gs)
@@ -340,7 +357,7 @@ func groupRuleSets(groups []model.Group, dir string) (sets []obj, block, routed 
 			continue
 		}
 		var domains, cidrs []string
-		for _, raw := range g.Entries {
+		for raw := range g.ActiveEntries() {
 			e, err := model.ParseEntry(raw)
 			if err != nil {
 				continue

@@ -43,6 +43,9 @@ func connections(c *model.Config) (connOut, error) {
 		}
 	}
 	for _, cn := range c.Connections {
+		if cn.Disabled {
+			continue
+		}
 		current = cn.ID
 		switch cn.Type {
 		case model.ConnWireGuard:

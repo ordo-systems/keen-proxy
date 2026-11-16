@@ -31,7 +31,7 @@ func New(groups []model.Group) *Matcher {
 		if g.Disabled {
 			continue
 		}
-		for _, raw := range g.Entries {
+		for raw := range g.ActiveEntries() {
 			e, err := model.ParseEntry(raw)
 			if err != nil {
 				continue // The configuration has already passed Validate.

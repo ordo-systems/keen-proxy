@@ -55,7 +55,7 @@ func acquireDiagnosticSlot(ctx context.Context) (func(), error) {
 func (d *Daemon) DiagnosticChecks(ctx context.Context, id string) (DiagnosticReport, error) {
 	report := DiagnosticReport{Connection: id}
 	cfg := d.Config()
-	if cfg == nil || !slices.ContainsFunc(cfg.Connections, func(c model.Connection) bool { return c.ID == id }) {
+	if cfg == nil || !slices.ContainsFunc(cfg.Connections, func(c model.Connection) bool { return c.ID == id && !c.Disabled }) {
 		return report, ErrDiagnosticConnection
 	}
 	release, err := acquireDiagnosticSlot(ctx)

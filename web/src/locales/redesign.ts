@@ -138,6 +138,7 @@ export const redesignRu = {
   success: 'Успешно',
   configChanged: 'Настройки изменились. Проверьте параметры ещё раз.',
   rawNote: 'Расширенный импорт сохраняет выбранный outbound/endpoint целиком.',
+  disabledCheck: 'Это применённое соединение отключено. Проверки не выполняются.',
 }
 export const redesignEn: Record<keyof typeof redesignRu, string> = {
   domainGroups: 'Domain groups',
@@ -279,4 +280,5 @@ export const redesignEn: Record<keyof typeof redesignRu, string> = {
   success: 'Success',
   configChanged: 'Parameters changed. Validate them again.',
   rawNote: 'Advanced import preserves the selected outbound/endpoint.',
+  disabledCheck: 'This applied connection is disabled. Checks are not run.',
 }

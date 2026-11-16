@@ -19,7 +19,7 @@ import { api } from '../api'
 import { protocolOf } from '../conn'
 import { duration } from '../format'
 import { formatBuild } from '../buildIdentity'
-import { sameAppliedConnection, safeDiagnosticsReport } from '../diagnostics'
+import { diagnosticErrorKey, sameAppliedConnection, safeDiagnosticsReport } from '../diagnostics'
 import type { DiagnosticReport, FeatureStatus } from '../types'
 import ConnectionHealth from '../components/ConnectionHealth.vue'
 import ConnectionChecks from '../components/ConnectionChecks.vue'
@@ -166,9 +166,13 @@ const pending = computed(
       applied.value?.connections?.find((c) => c.id === selected.value),
     ),
 )
+const appliedOff = computed(() => !!applied.value?.connections?.find((c) => c.id === selected.value)?.disabled)
+function appliedConnectionOff(id: string) {
+  return !!applied.value?.connections?.find((item) => item.id === id)?.disabled
+}
 // Retain results only while selection, applied snapshot, and profile definition still match.
 async function check() {
-  if (!conn.value || pending.value) return
+  if (!conn.value || pending.value || appliedOff.value) return
   loading.value = true
   error.value = ''
   const id = selected.value,
@@ -183,8 +187,8 @@ async function check() {
     )
       report.value = value
     await refresh()
-  } catch {
-    error.value = t('ui.unavailable')
+  } catch (cause) {
+    error.value = t(diagnosticErrorKey(cause))
   } finally {
     loading.value = false
   }
@@ -235,7 +239,7 @@ async function downloadBundle() {
         <NButton
           type="primary"
           :loading="loading"
-          :disabled="!conn || pending"
+          :disabled="!conn || pending || appliedOff"
           @click="check"
           ><template #icon><Activity :size="18" /></template
           >{{ t('ui.check') }}</NButton
@@ -313,7 +317,7 @@ async function downloadBundle() {
         >
           <Server :size="22" /><span
             ><b>{{ c.name }}</b
-            ><small>{{ protocolOf(c) }}</small></span
+            ><small>{{ protocolOf(c) }} <span v-if="appliedConnectionOff(c.id)" class="pill dim">{{ t('conn.disabled') }}</span></small></span
           ><ConnectionHealth :id="c.id" compact />
         </button>
         <p v-if="!cfg.connections?.length" class="muted">
@@ -331,6 +335,7 @@ async function downloadBundle() {
           <ConnectionChecks :id="conn.id" :report="report" />
           <p class="muted">{{ t('ui.httpOnly') }}</p>
           <p class="muted">{{ t('ui.checkDisclaimer') }}</p>
+          <NAlert v-if="appliedOff" type="info">{{ t('ui.disabledCheck') }}</NAlert>
           <NAlert v-if="pending" type="warning">{{
             t('ui.pendingConnection')
           }}</NAlert

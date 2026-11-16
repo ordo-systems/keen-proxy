@@ -163,9 +163,12 @@ const (
 
 // Connection defines one outbound protocol and its optional fallback target.
 type Connection struct {
-	ID        string     `yaml:"id" json:"id"`
-	Name      string     `yaml:"name" json:"name"`
-	Type      string     `yaml:"type" json:"type"`
+	ID   string `yaml:"id" json:"id"`
+	Name string `yaml:"name" json:"name"`
+	Type string `yaml:"type" json:"type"`
+	// Disabled retains the profile and incoming references while excluding the
+	// tunnel from runtime use. Configured fallbacks remain available.
+	Disabled  bool       `yaml:"disabled,omitempty" json:"disabled,omitempty"`
 	WireGuard *WireGuard `yaml:"wireguard,omitempty" json:"wireguard,omitempty"`
 	AmneziaWG string     `yaml:"amneziawg,omitempty" json:"amneziawg,omitempty"`
 	Link      string     `yaml:"link,omitempty" json:"link,omitempty"`
@@ -235,6 +238,12 @@ type Group struct {
 	Countries  []string `yaml:"countries,omitempty" json:"countries,omitempty"`   // uppercase ISO country codes
 	Categories []string `yaml:"categories,omitempty" json:"categories,omitempty"` // uppercase category labels
 	Except     bool     `yaml:"except,omitempty" json:"except,omitempty"`
+
+	// Disabled selectors retain their configured values and preset membership.
+	// Sets are value-based, so reordering rules cannot change activation state.
+	DisabledEntries    []string `yaml:"disabled_entries,omitempty" json:"disabled_entries,omitempty"`
+	DisabledCountries  []string `yaml:"disabled_countries,omitempty" json:"disabled_countries,omitempty"`
+	DisabledCategories []string `yaml:"disabled_categories,omitempty" json:"disabled_categories,omitempty"`
 }
 
 // IsGeo reports whether the group matches IP-database selectors rather than entries.
@@ -264,11 +273,11 @@ func (c *Config) Defaults() {
 	}
 	c.GeoIP.defaults()
 	for i := range c.Groups {
-		for j, cc := range c.Groups[i].Countries {
-			c.Groups[i].Countries[j] = strings.ToUpper(strings.TrimSpace(cc))
-		}
-		for j, cat := range c.Groups[i].Categories {
-			c.Groups[i].Categories[j] = strings.ToUpper(strings.TrimSpace(cat))
+		g := &c.Groups[i]
+		for _, labels := range [...][]string{g.Countries, g.Categories, g.DisabledCountries, g.DisabledCategories} {
+			for j, label := range labels {
+				labels[j] = strings.ToUpper(strings.TrimSpace(label))
+			}
 		}
 	}
 	if c.API.Listen == "" {
@@ -424,7 +433,12 @@ func (c *Config) Validate() error {
 				add("%s categories[%d]: %q requires a label of Latin letters, digits and hyphens, such as RU-BLOCKED", where, j, cat)
 			}
 		}
-		if len(g.Categories) > 0 && !g.Disabled && !c.GeoIP.hasCategories() {
+		activeCategories := false
+		for range g.ActiveCategories() {
+			activeCategories = true
+			break
+		}
+		if activeCategories && !c.GeoIP.hasCategories() {
 			add("%s: categories require an enabled category database in geoip.databases", where)
 		}
 		for j, cc := range g.Countries {

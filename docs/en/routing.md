@@ -15,6 +15,8 @@ For diagrams of interception, DNS, and route selection, see [How traffic flows](
 
 Country **Except** selectors describe traffic outside the listed countries. Explicit domain lists and country rules express different levels of policy; inspect the routing journal to confirm which rule actually won for a request.
 
+Connection and rule switches change the shared draft, not live traffic until **Apply**. A disabled group, domain/IP entry, country, or category selector is skipped while its saved value is retained. Later matching rules and the source policy still apply. If every geo selector is off, the group is inactive even with **Except** enabled.
+
 ## Country rules
 
 Country groups match the **destination IP address** against the GeoIP database. They do not inspect the visitor's nationality, the website's language, or its domain suffix. A country selection also does not select an exit server: the **Connection** column chooses the route separately.
@@ -67,6 +69,8 @@ Use **Check an address** to see which country each database reports. A disabled 
 ## Fallback chains { #fallback-chains }
 
 A connection can point to another connection or Direct as its immediate fallback. The interface displays the resulting chain. Edit the selected profile's immediate fallback; downstream inherited edges belong to their own profiles. Avoid cycles. Choosing Direct as a fallback intentionally allows a direct path when the primary connection fails.
+
+Disabling a connection keeps its incoming group, client, network, and DNS references. Disabled chain members are skipped in favor of enabled configured backups, but the referring rule itself is not skipped. If none remain, traffic is blocked. There is no implicit Direct fallback. A disabled tunnel or external client is not started and is not health-probed. Re-enable it and Apply to restore its saved settings. DNS remains subject to its separate strict/direct failure policy.
 
 Periodic health checks measure HTTP requests, not ICMP ping. They are separate from the manual HTTPS and transfer checks in Diagnostics.
 

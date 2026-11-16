@@ -1,9 +1,9 @@
 package journal
 
 import (
+	"iter"
 	"net/netip"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -112,12 +112,23 @@ func countryGroup(cfg *model.Config, tags []string, invert bool) string {
 	}
 	if cfg != nil {
 		for _, g := range cfg.Groups {
-			if g.IsGeo() && g.Except == invert && slices.Equal(g.Countries, codes) && slices.Equal(g.Categories, cats) {
+			if g.IsGeo() && !g.Disabled && g.Except == invert && sameSelectors(g.ActiveCountries(), codes) && sameSelectors(g.ActiveCategories(), cats) {
 				return "group «" + g.Name + "» (" + desc + ")"
 			}
 		}
 	}
 	return desc
+}
+
+func sameSelectors(active iter.Seq[string], expected []string) bool {
+	i := 0
+	for value := range active {
+		if i == len(expected) || value != expected[i] {
+			return false
+		}
+		i++
+	}
+	return i == len(expected)
 }
 
 // networkLabel identifies the network from rule source addresses. withGroup

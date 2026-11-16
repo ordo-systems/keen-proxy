@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NInput, NTooltip, useDialog, useMessage } from 'naive-ui'
+import { NButton, NInput, NSwitch, NTooltip, useDialog, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
   Plug,
@@ -30,6 +30,7 @@ import { ago, bits, bytes, duration, mbit } from '../format'
 import { mask, protocolOf, serverOf } from '../conn'
 import { countryName, flag } from '../countries'
 import type { Connection, HostStat } from '../types'
+import { activeExit, ruleActive } from '../activation'
 import ConnectionHealth from '../components/ConnectionHealth.vue'
 import AreaChart from '../components/AreaChart.vue'
 import ConnectionDialog from '../components/ConnectionDialog.vue'
@@ -82,7 +83,7 @@ const usage = computed(() => {
     groups: (cfg.value.groups ?? []).filter((g) => g.target === id),
     entries: (cfg.value.groups ?? [])
       .filter((g) => g.target === id)
-      .reduce((n, g) => n + g.entries.length, 0),
+      .reduce((n, g) => n + ruleActive(g), 0),
     clients:
       (cfg.value.clients ?? []).filter((c) => c.target === id).length +
       (cfg.value.networks ?? []).filter((n) => n.target === id).length,
@@ -90,10 +91,31 @@ const usage = computed(() => {
   }
 })
 
+function appliedOff(id: string) {
+  return !!store.applied.value?.connections?.find((connection) => connection.id === id)?.disabled
+}
+function pendingActivation(connection: Connection) {
+  return !!connection.disabled !== appliedOff(connection.id)
+}
+function setConnectionEnabled(enabled: boolean) {
+  const current = conn.value
+  if (!current) return
+  if (enabled) delete current.disabled
+  else current.disabled = true
+}
+const appliedExit = computed(() => {
+  const current = conn.value
+  const saved = store.applied.value
+  if (!current || !saved || !appliedOff(current.id)) return ''
+  return activeExit(saved, current.id, store.state.status?.failover?.[current.id]?.active)
+})
+
 const connName = (id: string) =>
   id === 'direct'
     ? t('target.direct')
-    : list.value.find((c) => c.id === id)?.name || id
+    : id === 'block'
+      ? t('target.block')
+      : list.value.find((c) => c.id === id)?.name || id
 
 // Show the currently active exit in the applied fallback chain.
 const failover = computed(() =>
@@ -102,10 +124,10 @@ const failover = computed(() =>
     : undefined,
 )
 const onBackup = computed(
-  () => !!failover.value && failover.value.active !== conn.value?.id,
+  () => !!failover.value && failover.value.active !== conn.value?.id && !appliedOff(conn.value?.id ?? ''),
 )
 const health = computed(() =>
-  conn.value ? store.state.status?.health?.[conn.value.id] : undefined,
+  conn.value && !appliedOff(conn.value.id) ? store.state.status?.health?.[conn.value.id] : undefined,
 )
 const healthText = computed(() => {
   const h = health.value
@@ -160,7 +182,7 @@ const rows = computed<Row[]>(() => {
     {
       icon: Activity,
       label: t('conn.activeNow'),
-      value: String(st.value?.active ?? 0),
+      value: appliedOff(c?.id ?? '') ? '0' : String(st.value?.active ?? 0),
     },
     {
       icon: ArrowDown,
@@ -191,7 +213,7 @@ const rows = computed<Row[]>(() => {
     base.push({
       icon: LifeBuoy,
       label: t('conn.backups'),
-      value: chain.slice(1).map(connName).join(' → '),
+      value: chain.filter((id) => id !== c.id).map(connName).join(' → '),
     })
   }
   if (usage.value.backupFor.length) {
@@ -207,11 +229,11 @@ const rows = computed<Row[]>(() => {
       label: t('conn.check'),
       value: healthText.value,
     })
-  if (store.state.status?.started)
+  if (store.state.status?.started || appliedOff(c?.id ?? ''))
     base.push({
       icon: Clock,
       label: t('conn.uptime'),
-      value: duration(store.state.status.started),
+      value: appliedOff(c?.id ?? '') ? t('conn.notStarted') : duration(store.state.status!.started),
     })
   return base
 })
@@ -391,13 +413,13 @@ function remove() {
           v-for="c in list"
           :key="c.id"
           class="connection-item"
-          :class="{ selected: tab === c.id }"
+          :class="{ selected: tab === c.id, off: appliedOff(c.id) }"
           @click="tab = c.id"
         >
           <Plug :size="22" /><span
             ><b>{{ c.name || c.id }}</b
-            ><small>{{ protocolOf(c) }}</small></span
-          ><ConnectionHealth :id="c.id" compact />
+            ><small>{{ protocolOf(c) }} <span v-if="appliedOff(c.id)" class="pill dim">{{ t('conn.disabled') }}</span><span v-if="pendingActivation(c)" class="pill warn">{{ t('conn.pending') }}</span></small></span
+          ><ConnectionHealth v-if="!appliedOff(c.id)" :id="c.id" compact />
         </button>
         <button
           class="connection-item"
@@ -432,6 +454,8 @@ function remove() {
                       ? t('target.direct')
                       : t('target.block')
                 }}
+                <span v-if="conn && appliedOff(conn.id)" class="pill dim">{{ t('conn.disabled') }}</span>
+                <span v-if="conn && pendingActivation(conn)" class="pill warn">{{ t('conn.pending') }}</span>
               </h2>
               <p class="muted">
                 {{
@@ -444,6 +468,10 @@ function remove() {
               </p>
             </div>
             <div v-if="conn" class="actions">
+              <label class="activation-switch">
+                <NSwitch :value="!conn.disabled" :aria-label="t('conn.toggle', { name: conn.name || conn.id })" @update:value="setConnectionEnabled" />
+                <span>{{ conn.disabled ? t('conn.off') : t('conn.on') }}</span>
+              </label>
               <NButton @click="backupOpen = true"
                 ><template #icon><LifeBuoy :size="16" /></template
                 >{{ t('ui.fallback') }}</NButton
@@ -459,7 +487,13 @@ function remove() {
             </div>
           </div>
           <ConnectionHealth v-if="conn" :id="conn.id" />
-          <div v-if="onBackup" class="backup-note">
+          <div v-if="conn && appliedOff(conn.id)" class="off-note">
+            <strong>{{ t('conn.disabledNote') }}</strong>
+            <span v-if="appliedExit === 'block'">{{ t('conn.disabledBlocked') }}</span>
+            <span v-else-if="appliedExit === 'direct'">{{ t('conn.disabledDirect') }}</span>
+            <span v-else>{{ t('conn.disabledFallback', { name: connName(appliedExit) }) }}</span>
+          </div>
+          <div v-else-if="onBackup" class="backup-note">
             {{ t('ui.activeExit') }}: {{ connName(failover!.active) }}
           </div>
           <div v-for="r in rows" :key="r.label" class="data-row">
@@ -467,26 +501,27 @@ function remove() {
               ><component :is="r.icon" :size="16" /> {{ r.label }}</span
             ><b :class="{ mono: r.mono }">{{ r.value }}</b>
           </div>
-          <NButton
-            v-if="specific.length"
-            text
-            style="margin: 24px 0"
-            @click="showSpecific = !showSpecific"
-            >{{ showSpecific ? t('ui.hide') : t('ui.reveal') }}</NButton
-          >
+          <div v-if="conn || specific.length" class="detail-links">
+            <NButton
+              v-if="specific.length"
+              text
+              @click="showSpecific = !showSpecific"
+              >{{ showSpecific ? t('ui.hide') : t('ui.reveal') }}</NButton
+            >
+            <router-link
+              v-if="conn"
+              :to="{
+                path: '/service/diagnostics',
+                query: { connection: conn.id },
+              }"
+              >{{ t('ui.diagnostics') }} →</router-link
+            >
+          </div>
           <template v-if="showSpecific"
             ><div v-for="r in specific" :key="r.label" class="data-row">
               <span class="muted">{{ r.label }}</span
               ><span :class="{ mono: r.mono }">{{ r.value }}</span>
             </div></template
-          >
-          <router-link
-            v-if="conn"
-            :to="{
-              path: '/service/diagnostics',
-              query: { connection: conn.id },
-            }"
-            >{{ t('ui.diagnostics') }} →</router-link
           >
         </template>
       </section>
@@ -604,9 +639,34 @@ function remove() {
 }
 .actions {
   display: flex;
-  gap: 4px;
+  gap: 8px;
   flex-wrap: wrap;
+  align-items: center;
 }
+.activation-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 8px;
+  min-height: 34px;
+}
+.detail-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin: 24px 0;
+}
+.off-note {
+  margin: 8px 0 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.off-note strong { display: block; }
+.connection-item.off { color: var(--muted); }
+h2 .pill { margin-left: 8px; vertical-align: middle; font-size: 12px; }
 .traffic-section,
 .hosts {
   margin-top: 32px;

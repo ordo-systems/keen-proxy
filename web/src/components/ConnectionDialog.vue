@@ -6,7 +6,7 @@ import { api } from '../api'
 import { store } from '../store'
 import type { Config, Connection, LinkPreview } from '../types'
 import { slugify, wireGuardToConf } from '../wgconf'
-import { connectionErrorKey, DRAFT_CHANGED, importConnections, manualConnection } from '../connectionDraft'
+import { connectionErrorKey, DRAFT_CHANGED, editedConnection, importConnections, manualConnection } from '../connectionDraft'
 
 // Edit a local form copy so cancellation leaves the shared draft unchanged.
 const props = defineProps<{ show: boolean; edit?: Connection | null }>()
@@ -114,7 +114,7 @@ async function save() {
   const nameSnap = name.value
   const tabSnap = tab.value
   try {
-    const conn = build()
+    const conn = editedConnection(edit, build())
     if (tab.value === 'amneziawg' && awgText.value.trim().startsWith('vpn://')) {
       error.value = t('ui.awgWizardOnly')
       return

@@ -72,6 +72,7 @@ func normalized(entries []string) map[string]bool {
 // Update merges a catalog revision while preserving user additions, exclusions, and opt-in state.
 func Update(g model.Group, p Preset) (model.Group, Diff) {
 	current := normalized(g.Entries)
+	off := normalized(g.DisabledEntries)
 	base := map[string]bool{}
 	auto := false
 	if g.Preset != nil {
@@ -83,7 +84,7 @@ func Update(g model.Group, p Preset) (model.Group, Diff) {
 	// in Base even if a later catalog revision temporarily removes the domain.
 	excluded := map[string]bool{}
 	for s := range base {
-		if !current[s] {
+		if !current[s] && !off[s] {
 			excluded[s] = true
 			delete(next, s)
 		}

@@ -25,7 +25,7 @@ func DomainNames(c *model.Config) []string {
 		if g.Disabled {
 			continue
 		}
-		for _, raw := range g.Entries {
+		for raw := range g.ActiveEntries() {
 			e, err := model.ParseEntry(raw)
 			if err == nil && e.Kind == model.EntryDomain && !seen[e.Domain] {
 				seen[e.Domain] = true
@@ -80,7 +80,7 @@ func DNSRuleSets(c *model.Config, records map[string][]string) map[string][]byte
 		}
 		seen := map[string]bool{}
 		cidrs := []string{}
-		for _, raw := range g.Entries {
+		for raw := range g.ActiveEntries() {
 			e, err := model.ParseEntry(raw)
 			if err != nil || e.Kind != model.EntryDomain {
 				continue

@@ -17,7 +17,7 @@ func TestDemoDisabledConnectionIsUnavailable(t *testing.T) {
 	cfg := &model.Config{Connections: []model.Connection{{ID: "off", Type: model.ConnTrustTunnel, Disabled: true, Fallback: "reserve"}, {ID: "reserve", Type: model.ConnLink, Link: "socks5://203.0.113.2:1080"}}}
 	d := &Demo{cfg: cfg, started: time.Now()}
 	st := d.Status(context.Background())
-	if st.Health["off"].OK || st.Health["off"].Error != "connection is disabled" || st.Failover["off"].Active != "reserve" || len(st.TrustTunnel) != 0 {
+	if st.Health["off"].OK || st.Health["off"].Error != "connection is disabled" || st.Failover["off"].Active != "reserve" {
 		t.Fatalf("dishonest demo status: %+v", st)
 	}
 	if report, err := d.DiagnosticChecks(context.Background(), "off"); !errors.Is(err, daemon.ErrDiagnosticConnection) || len(report.Results) != 0 {

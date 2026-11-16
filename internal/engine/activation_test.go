@@ -3,11 +3,12 @@ package engine
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -25,20 +26,16 @@ func TestDisabledRawDetourFollowsFallbackOrBlocks(t *testing.T) {
 		t.Run("fallback="+fallback, func(t *testing.T) {
 			connected := make(chan string, 1)
 			var tunnels sync.WaitGroup
-			proxy := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				tunnels.Add(1)
+			// SOCKS is supported by both registries; HTTP outbounds are full-only.
+			proxy, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = proxy.Close(); tunnels.Wait() })
+			tunnels.Add(1)
+			go func() {
 				defer tunnels.Done()
-				if r.Method != http.MethodConnect {
-					http.Error(w, "CONNECT required", http.StatusMethodNotAllowed)
-					return
-				}
-				select {
-				case connected <- r.Host:
-				default:
-					http.Error(w, "unexpected additional tunnel", http.StatusConflict)
-					return
-				}
-				conn, rw, err := w.(http.Hijacker).Hijack()
+				conn, err := proxy.Accept()
 				if err != nil {
 					return
 				}
@@ -46,13 +43,19 @@ func TestDisabledRawDetourFollowsFallbackOrBlocks(t *testing.T) {
 				if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 					return
 				}
-				if _, err := rw.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
+				var greeting [9]byte
+				if _, err := io.ReadFull(conn, greeting[:]); err != nil || greeting[0] != 4 || greeting[1] != 1 || greeting[8] != 0 {
 					return
 				}
-				if err := rw.Flush(); err != nil {
+				select {
+				case connected <- net.JoinHostPort(net.IP(greeting[4:8]).String(), strconv.Itoa(int(binary.BigEndian.Uint16(greeting[2:4])))):
+				default:
 					return
 				}
-				request, err := http.ReadRequest(rw.Reader)
+				if _, err := conn.Write([]byte{0, 90, 0, 0, 0, 0, 0, 0}); err != nil {
+					return
+				}
+				request, err := http.ReadRequest(bufio.NewReader(conn))
 				if err != nil {
 					return
 				}
@@ -66,13 +69,11 @@ func TestDisabledRawDetourFollowsFallbackOrBlocks(t *testing.T) {
 					ContentLength: int64(len(body)), Body: io.NopCloser(strings.NewReader(body)),
 				}
 				_ = response.Write(conn)
-			}))
-			t.Cleanup(func() { proxy.Close(); tunnels.Wait() })
-			proxy.Start()
+			}()
 			cfg := &model.Config{Connections: []model.Connection{
 				{ID: "primary", Type: model.ConnLink, Link: "socks5://203.0.113.1:1080", Disabled: true, Fallback: fallback},
 				{ID: "dependent", Type: model.ConnSingBox, Outbound: map[string]any{
-					"type": "http", "server": "127.0.0.1", "server_port": proxy.Listener.Addr().(*net.TCPAddr).Port, "detour": "primary",
+					"type": "socks", "version": "4", "server": "127.0.0.1", "server_port": proxy.Addr().(*net.TCPAddr).Port, "detour": "primary",
 				}},
 				{ID: "reserve", Type: model.ConnSingBox, Outbound: map[string]any{"type": "direct"}},
 			}}

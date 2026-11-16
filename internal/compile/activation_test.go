@@ -101,7 +101,22 @@ func TestDisabledProtocolPayloadIsNotCompiled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.TrustTunnel) != 0 || len(out.ServerHosts) != 0 {
+	if len(out.ServerHosts) != 0 {
 		t.Fatal("disabled runtime dependency created")
+	}
+	var emitted struct {
+		Outbounds []map[string]any `json:"outbounds"`
+		Endpoints []map[string]any `json:"endpoints"`
+	}
+	if err := json.Unmarshal(out.SingBox, &emitted); err != nil {
+		t.Fatal(err)
+	}
+	if len(emitted.Endpoints) != 0 {
+		t.Fatalf("disabled endpoint was compiled: %+v", emitted.Endpoints)
+	}
+	for _, outbound := range emitted.Outbounds {
+		if outbound["type"] == "trusttunnel" {
+			t.Fatalf("disabled TrustTunnel outbound was compiled: %+v", outbound)
+		}
 	}
 }

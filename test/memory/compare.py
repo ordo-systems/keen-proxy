@@ -359,13 +359,17 @@ def load_document(path, errors):
 
 def iter_json(directory, role, errors):
     """List JSON entries in one result directory, or None when it cannot be read."""
-    if not directory.exists():
-        errors.append(problem(directory, '', '%s directory is missing' % role))
+    try:
+        if not directory.exists():
+            errors.append(problem(directory, '', '%s directory is missing' % role))
+            return None
+        if not directory.is_dir():
+            errors.append(problem(directory, '', '%s path is not a directory' % role))
+            return None
+        entries = [path for path in directory.iterdir() if path.suffix == '.json']
+    except OSError as exc:
+        errors.append(problem(directory, '', 'cannot read directory: %s' % (exc.strerror or exc)))
         return None
-    if not directory.is_dir():
-        errors.append(problem(directory, '', '%s path is not a directory' % role))
-        return None
-    entries = [path for path in directory.iterdir() if path.suffix == '.json']
     entries.sort(key=lambda path: path.name)
     return entries
 

@@ -1,5 +1,6 @@
 """Exercise the memory comparator through real files and the real CLI."""
 import contextlib
+import errno
 import importlib.util
 import io
 import json
@@ -9,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = Path(__file__).absolute().with_name('compare.py')
 SPEC = importlib.util.spec_from_file_location('memory_compare', SCRIPT)
@@ -583,6 +585,31 @@ class MemoryCompareTest(unittest.TestCase):
         (self.candidate / 'amneziawg-1.json').unlink()
         report = self.assert_malformed('amneziawg-1.json')
         self.assertIsNone(report['amneziawg'])
+
+    def test_directory_io_failure_replaces_previous_passing_report(self):
+        self.write_pair(uniform(20_000_000))
+        original_iterdir = Path.iterdir
+        for directory in (self.baseline, self.candidate):
+            for error in (PermissionError(errno.EACCES, 'Permission denied'),
+                          OSError(errno.EIO, 'Input/output error')):
+                with self.subTest(directory=directory.name, error=type(error).__name__):
+                    self.assertEqual(self.run_main()[0], 0)
+
+                    def entries(path):
+                        if path == directory:
+                            raise error
+                        return original_iterdir(path)
+
+                    with mock.patch.object(Path, 'iterdir', entries):
+                        code, stdout, stderr = self.run_main()
+                    self.assertEqual(code, 2)
+                    self.assertNotIn('memory comparison passed', stdout)
+                    self.assertIn('cannot read directory', stderr)
+                    report = json.loads(self.output.read_text(encoding='utf-8'))
+                    self.assertEqual(report['status'], 'malformed')
+                    self.assertFalse(report['passed'])
+                    self.assertEqual(report['comparisons'], [])
+                    self.assertTrue(any(item['file'] == str(directory) for item in report['errors']))
 
     def test_cli_exit_codes_write_report_without_false_success(self):
         """The real CLI returns 0, 1, or 2 and stores a complete report either way."""

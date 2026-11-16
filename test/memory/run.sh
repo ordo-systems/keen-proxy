@@ -29,6 +29,12 @@ CONTAINER=keenproxy-memory-${OWNER}
 IMAGE_OWNED=0
 CONTAINER_OWNED=0
 IMAGE_ID=
+HOST_UID=$(id -u)
+HOST_GID=$(id -g)
+HANDOFF_CONTAINER=${CONTAINER}-handoff
+HANDOFF_OWNED=0
+EVIDENCE_DIRTY=0
+EVIDENCE_QUIESCENT=1
 
 fail() {
     echo "ERROR: $*" >&2
@@ -49,58 +55,203 @@ confirm_absent() {
     fi
 }
 
+# Walk only the mounted output trees, without following links or changing modes.
+# Descriptor-relative operations keep symlinks from redirecting ownership changes.
+evidence_handoff_script() {
+    cat <<'PY'
+import os
+import signal
+import stat
+import sys
+
+def deadline(signum, frame):
+    raise TimeoutError("evidence ownership handoff exceeded 60 seconds")
+
+signal.signal(signal.SIGALRM, deadline)
+signal.alarm(60)
+uid, gid = map(int, sys.argv[1:3])
+flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+def handoff(directory):
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            info = entry.stat(follow_symlinks=False)
+            if stat.S_ISDIR(info.st_mode):
+                child = os.open(entry.name, flags, dir_fd=directory)
+                try:
+                    handoff(child)
+                finally:
+                    os.close(child)
+            else:
+                if not (stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)):
+                    raise RuntimeError("refusing special-file evidence: " + entry.name)
+                if info.st_nlink != 1:
+                    raise RuntimeError("refusing hard-linked evidence: " + entry.name)
+                os.chown(entry.name, uid, gid, dir_fd=directory, follow_symlinks=False)
+    os.fchown(directory, uid, gid)
+
+for root in sys.argv[3:]:
+    directory = os.open(root, flags)
+    try:
+        handoff(directory)
+    finally:
+        os.close(directory)
+PY
+}
+
+# A helper is necessary after an exited/OOMKilled workload: docker exec cannot run.
+# It has no source/binary mount and is tracked before creation, including failures.
+remove_owned_handoff() {
+    if [ "$HANDOFF_OWNED" != 1 ]; then
+        return 0
+    fi
+    if ! handoff_owner=$(docker container inspect --format '{{ index .Config.Labels "keenproxy.memory.owner" }}' "$HANDOFF_CONTAINER" 2>/dev/null); then
+        confirm_absent "$HANDOFF_CONTAINER" container ls -a --filter "name=^/$HANDOFF_CONTAINER$" || return 1
+    else
+        if [ "$handoff_owner" != "$OWNER" ]; then
+            echo "ERROR: refusing to remove handoff container owned by another run: $HANDOFF_CONTAINER" >&2
+            return 1
+        fi
+        docker rm -f "$HANDOFF_CONTAINER" >>"$OUT/cleanup.log" 2>&1 || return 1
+        confirm_absent "$HANDOFF_CONTAINER" container ls -a --filter "name=^/$HANDOFF_CONTAINER$" || return 1
+    fi
+    HANDOFF_OWNED=0
+}
+
+normalize_evidence() {
+    if [ "$EVIDENCE_DIRTY" != 1 ]; then
+        return 0
+    fi
+    if [ "$EVIDENCE_QUIESCENT" != 1 ]; then
+        echo "ERROR: refusing evidence handoff without proof the workload exited or was removed" >&2
+        return 1
+    fi
+    if [ "$HANDOFF_OWNED" = 1 ]; then
+        echo "ERROR: previous evidence handoff container was not removed" >&2
+        return 1
+    fi
+    if docker container inspect "$HANDOFF_CONTAINER" >/dev/null 2>&1; then
+        echo "ERROR: handoff container name collision: $HANDOFF_CONTAINER" >&2
+        return 1
+    fi
+    set --
+    for tree in results container-tmp; do
+        if [ -L "$OUT/$tree" ]; then
+            echo "ERROR: refusing symlink evidence root: $OUT/$tree" >&2
+            return 1
+        fi
+        if [ -d "$OUT/$tree" ]; then
+            set -- "$@" --mount "type=bind,src=$OUT/$tree,dst=/evidence/$tree"
+        fi
+    done
+    HANDOFF_OWNED=1
+    handoff_status=0
+    docker create --name "$HANDOFF_CONTAINER" --label "keenproxy.memory.owner=$OWNER" \
+        --network none --read-only --user 0:0 --pids-limit 32 --memory 128m --memory-swap 128m \
+        --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE \
+        --security-opt no-new-privileges --entrypoint python3 \
+        "$@" "$IMAGE_ID" -B -c "$(evidence_handoff_script)" "$HOST_UID" "$HOST_GID" \
+        /evidence/results /evidence/container-tmp >>"$OUT/cleanup.log" 2>&1 || handoff_status=$?
+    if [ "$handoff_status" = 0 ]; then
+        docker start -a "$HANDOFF_CONTAINER" >>"$OUT/cleanup.log" 2>&1 || handoff_status=$?
+    fi
+    if [ "$handoff_status" = 0 ]; then
+        docker inspect --format '{{json .State}}' "$HANDOFF_CONTAINER" \
+            >"$OUT/handoff.state.json" 2>>"$OUT/cleanup.log" || handoff_status=$?
+    fi
+    if [ "$handoff_status" = 0 ]; then
+        python3 - "$OUT/handoff.state.json" >>"$OUT/cleanup.log" 2>&1 <<'PY' || handoff_status=$?
+import json
+import sys
+from pathlib import Path
+
+state = json.loads(Path(sys.argv[1]).read_text())
+if (state.get("Status") != "exited" or state.get("OOMKilled") is not False
+        or type(state.get("ExitCode")) is not int or state["ExitCode"] != 0):
+    raise SystemExit("evidence handoff did not exit successfully: " + repr(state))
+PY
+    fi
+    if ! remove_owned_handoff; then
+        handoff_status=1
+    fi
+    if [ "$handoff_status" != 0 ]; then
+        echo "ERROR: evidence ownership handoff failed; see $OUT/cleanup.log" >&2
+        return 1
+    fi
+    EVIDENCE_DIRTY=0
+}
+
 # Register cleanup before creating any Docker resource.
 # Host evidence is kept. An owned container and image are always removed;
 # a failed /tmp copy is reported and does not keep the container alive.
 remove_owned_container() {
+    EVIDENCE_QUIESCENT=0
     if ! owner=$(docker container inspect --format '{{ index .Config.Labels "keenproxy.memory.owner" }}' "$CONTAINER" 2>/dev/null); then
-        confirm_absent "$CONTAINER" container ls -a --filter "name=^/$CONTAINER$" || result=1
+        if confirm_absent "$CONTAINER" container ls -a --filter "name=^/$CONTAINER$"; then
+            CONTAINER_OWNED=0
+            EVIDENCE_QUIESCENT=1
+        else
+            cleanup_status=1
+        fi
         return 0
     fi
     if [ "$owner" != "$OWNER" ]; then
         echo "ERROR: refusing to remove container owned by another run: $CONTAINER" >&2
-        result=1
+        cleanup_status=1
         return 0
     fi
-    docker stop --time 20 "$CONTAINER" >>"$OUT/cleanup.log" 2>&1 || true
+    docker stop --time 20 "$CONTAINER" >>"$OUT/cleanup.log" 2>&1 || cleanup_status=1
+    EVIDENCE_DIRTY=1
+    mkdir -p "$OUT/container-tmp" || cleanup_status=1
     if ! docker cp "$CONTAINER:/tmp/." "$OUT/container-tmp" >>"$OUT/cleanup.log" 2>&1; then
         echo "ERROR: artifact rescue failed for $CONTAINER; in-container /tmp was not copied. Host evidence remains at $OUT. Removing the owned container." >&2
         echo "artifact rescue failed; removing owned container without /tmp copy" >>"$OUT/cleanup.log" || true
-        result=1
+        cleanup_status=1
     fi
-    docker rm -f "$CONTAINER" >>"$OUT/cleanup.log" 2>&1 || result=1
-    confirm_absent "$CONTAINER" container ls -a --filter "name=^/$CONTAINER$" || result=1
+    docker rm -f "$CONTAINER" >>"$OUT/cleanup.log" 2>&1 || cleanup_status=1
+    if confirm_absent "$CONTAINER" container ls -a --filter "name=^/$CONTAINER$"; then
+        CONTAINER_OWNED=0
+        EVIDENCE_QUIESCENT=1
+    else
+        cleanup_status=1
+    fi
 }
 
 remove_owned_image() {
     if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-        confirm_absent "$IMAGE" image ls --filter "reference=$IMAGE:latest" || result=1
+        confirm_absent "$IMAGE" image ls --filter "reference=$IMAGE:latest" || cleanup_status=1
         return 0
     fi
     owner=$(docker image inspect --format '{{ index .Config.Labels "keenproxy.memory.owner" }}' "$IMAGE" 2>/dev/null) || owner=
     id=$(docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null) || id=
     if [ "$owner" != "$OWNER" ]; then
         echo "ERROR: refusing to remove image without our owner label: $IMAGE" >&2
-        result=1
+        cleanup_status=1
         return 0
     fi
     if [ -n "$IMAGE_ID" ] && [ "$id" != "$IMAGE_ID" ]; then
         echo "ERROR: refusing to remove retagged image: $IMAGE" >&2
-        result=1
+        cleanup_status=1
         return 0
     fi
-    docker image rm "$IMAGE" >>"$OUT/cleanup.log" 2>&1 || result=1
-    confirm_absent "$IMAGE" image ls --filter "reference=$IMAGE:latest" || result=1
+    docker image rm "$IMAGE" >>"$OUT/cleanup.log" 2>&1 || cleanup_status=1
+    confirm_absent "$IMAGE" image ls --filter "reference=$IMAGE:latest" || cleanup_status=1
 }
 
 cleanup() {
     result=$?
     trap - EXIT HUP INT TERM
+    cleanup_status=0
     if [ "$CONTAINER_OWNED" = 1 ]; then
         remove_owned_container
     fi
+    remove_owned_handoff || cleanup_status=1
+    normalize_evidence || cleanup_status=1
     if [ "$IMAGE_OWNED" = 1 ]; then
         remove_owned_image
+    fi
+    if [ "$result" = 0 ] && [ "$cleanup_status" != 0 ]; then
+        result=$cleanup_status
     fi
     printf '%s\n' "$result" >"$OUT/exit-code"
     if [ "$MODE" = stress ]; then
@@ -128,6 +279,22 @@ claim_container() {
         fail "container name collision: $CONTAINER"
     fi
     CONTAINER_OWNED=1
+    EVIDENCE_QUIESCENT=0
+}
+
+# Saved success from docker start is insufficient: recheck immediately before handoff.
+# Cleanup instead requires positive removal proof, even if stop or rm failed.
+confirm_workload_exited() {
+    EVIDENCE_QUIESCENT=0
+    if ! workload_state=$(docker container inspect --format '{{.State.Status}} {{.State.Running}}' "$CONTAINER"); then
+        echo "ERROR: cannot confirm workload quiescence: $CONTAINER" >&2
+        return 1
+    fi
+    if [ "$workload_state" != 'exited false' ]; then
+        echo "ERROR: refusing evidence handoff for unconfirmed exited workload: $workload_state" >&2
+        return 1
+    fi
+    EVIDENCE_QUIESCENT=1
 }
 
 release_container() {
@@ -139,6 +306,8 @@ release_container() {
         echo "ERROR: refusing to remove container owned by another run: $CONTAINER" >&2
         exit 1
     fi
+    confirm_workload_exited || fail "cannot release container without workload quiescence proof"
+    normalize_evidence || fail "cannot release container before evidence ownership handoff"
     docker rm "$CONTAINER" >>"$OUT/cleanup.log" 2>&1 || fail "container removal failed: $CONTAINER"
     confirm_absent "$CONTAINER" container ls -a --filter "name=^/$CONTAINER$" || exit 1
     CONTAINER_OWNED=0
@@ -334,6 +503,8 @@ verify_stress_container() {
 
 run_stress() {
     claim_container
+    EVIDENCE_DIRTY=1
+    mkdir -p "$OUT/container-tmp"
     # Image entrypoint is scenario.py; this mode must not run the comparison fixture.
     docker create --name "$CONTAINER" --label "keenproxy.memory.owner=$OWNER" \
         --network none --privileged \
@@ -363,6 +534,8 @@ scenario() {
     run=$3
     filename=$protocol-$run
     claim_container
+    EVIDENCE_DIRTY=1
+    mkdir -p "$OUT/container-tmp"
     docker create --name "$CONTAINER" --label "keenproxy.memory.owner=$OWNER" \
         --network none --privileged --memory 1g --cpus 2 \
         -e GOMAXPROCS=2 -e GOGC=100 -e GOMEMLIMIT=off \

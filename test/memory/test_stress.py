@@ -25,6 +25,12 @@ def live_state(now, verified=1024, seq=1):
         "errors": [],
     }
 
+def counted(now, base, total):
+    state = live_state(now, verified=base)
+    state["verified"] = [base + 1] * stress.STREAMS
+    state["verified"][0] = base + total - (stress.STREAMS - 1)
+    return state
+
 
 def heavy_stats(wg1=32, wg2=0, extra=None):
     rows = [{"tag": "wg1", "active": wg1}, {"tag": "wg2", "active": wg2}]
@@ -265,6 +271,68 @@ class StressTests(unittest.TestCase):
         for args in ((-1, 30), (100, 0), (True, 30), (100, True)):
             with self.subTest(args=args), self.assertRaises(stress.StressError):
                 stress.verified_bps(*args)
+
+    def test_phase_clock_skew_cannot_pass_49_9_megabits(self):
+        phase = {"seconds": 30.0, "cpu_percent_of_quota": 12.5}
+        before = live_state(0.0, verified=0)
+        after = counted(30.09, 0, 187_686_375)
+        result = {"phases": {"loaded": dict(phase)}}
+        with self.assertRaisesRegex(stress.StressError, "50 Mbps"):
+            stress.require_load_rate(result, before, after)
+        self.assertEqual(result["phases"]["loaded"], phase)
+        self.assertEqual(result["traffic"]["elapsed_seconds"], 30.09)
+        self.assertEqual(result["traffic"]["verified_bytes"], 187_686_375)
+        self.assertEqual(result["traffic"]["verified_bps"], 49_900_000)
+        self.assertLess(result["traffic"]["verified_bps"], stress.MIN_BPS)
+
+    def test_sufficient_load_over_a_shorter_counter_interval_passes(self):
+        phase = {"seconds": 30.0, "cpu_percent_of_quota": 12.5}
+        before = live_state(0.0, verified=10)
+        after = counted(29.9, 10, 186_875_000)
+        result = {"phases": {"loaded": dict(phase)}}
+        traffic = stress.require_load_rate(result, before, after)
+        self.assertEqual(result["phases"]["loaded"], phase)
+        self.assertEqual(traffic["elapsed_seconds"], 29.9)
+        self.assertEqual(traffic["verified_bytes"], 186_875_000)
+        self.assertEqual(traffic["verified_bps"], 50_000_000)
+
+    def test_rate_uses_elapsed_time_not_the_monotonic_clock_origin(self):
+        before = live_state(4096.0, verified=10)
+        after = counted(4126.0, 10, 187_500_000)
+        result = {"phases": {"loaded": {"seconds": 30.0}}}
+        traffic = stress.require_load_rate(result, before, after)
+        self.assertEqual(traffic["elapsed_seconds"], 30.0)
+        self.assertEqual(traffic["verified_bps"], 50_000_000)
+
+    def test_counter_interval_rejects_invalid_and_nonincreasing_timestamps(self):
+        before = live_state(10.0, verified=0)
+        advanced = counted(40.0, 0, 32)
+        result = {"phases": {"loaded": {"seconds": 30}}, "traffic": {"kept": True}}
+        for stamp in (None, True, False, "40", float("nan"), float("inf"), float("-inf"), 10.0, 10, 9.0):
+            bad = counted(40.0, 0, 32)
+            bad["published_at"] = stamp
+            with self.subTest(stamp=stamp), self.assertRaisesRegex(stress.StressError, "invalid throughput window"):
+                stress.require_load_rate(result, before, bad)
+        missing = counted(40.0, 0, 32)
+        del missing["published_at"]
+        with self.assertRaisesRegex(stress.StressError, "invalid throughput window"):
+            stress.require_load_rate(result, before, missing)
+        early = live_state(10.0, verified=0)
+        early["published_at"] = float("nan")
+        with self.assertRaisesRegex(stress.StressError, "invalid throughput window"):
+            stress.require_load_rate(result, early, advanced)
+        for broken in (None, [], "snapshot"):
+            with self.subTest(broken=broken):
+                with self.assertRaisesRegex(stress.StressError, "invalid throughput window"):
+                    stress.require_load_rate(result, broken, advanced)
+                with self.assertRaisesRegex(stress.StressError, "invalid throughput window"):
+                    stress.require_load_rate(result, before, broken)
+        flat = live_state(40.0, verified=1)
+        flat["verified"][4] = 0
+        with self.assertRaisesRegex(stress.StressError, "stream 4"):
+            stress.require_load_rate(result, before, flat)
+        self.assertEqual(result["traffic"], {"kept": True})
+        self.assertEqual(result["phases"]["loaded"]["seconds"], 30)
 
     def test_rss_ceiling_uses_the_kernel_high_water_mark(self):
         under = {"rss_bytes": LIMIT - 1, "hwm_bytes": LIMIT - 1}

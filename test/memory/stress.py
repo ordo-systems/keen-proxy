@@ -8,6 +8,7 @@ No diagnostic HTTP, forced GC, or production runtime change is used.
 """
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import select
@@ -236,6 +237,36 @@ def traffic_report(verified_bytes, elapsed, state):
         "per_stream_verified": list(verified_list(state)),
         "progressing": STREAMS,
     }
+
+
+def published_time(state):
+    """Finite instant stamped on this counter snapshot."""
+    if type(state) is not dict:
+        raise StressError("invalid throughput window")
+    value = state.get("published_at")
+    if type(value) not in (int, float) or not math.isfinite(value):
+        raise StressError("invalid throughput window")
+    return value
+
+
+def counter_window(before, after):
+    """Verified-byte delta and the publication interval that owns those counters."""
+    started, ended = published_time(before), published_time(after)
+    if ended <= started:
+        raise StressError("invalid throughput window")
+    return require_advanced(before, after), ended - started
+
+
+def require_load_rate(result, before, after):
+    """Record and gate the load on the publication interval that owns the counters.
+
+    result["phases"]["loaded"]["seconds"] is the memory and CPU sample clock.
+    It is not the counter interval and must not rate these snapshots.
+    """
+    verified, elapsed = counter_window(before, after)
+    result["traffic"] = traffic_report(verified, elapsed, after)
+    require_throughput(verified, elapsed)
+    return result["traffic"]
 
 
 def parse_hwm(text):
@@ -711,10 +742,7 @@ def execute(fixture, result, run_state, monotonic=time.monotonic, sleep=time.sle
 
     run_timed(result, "loaded", LOAD_SECONDS, memory, loaded, cpu, ticks, monotonic, sleep)
     after = read_state(run_state["client"][1])
-    verified = require_advanced(before, after)
-    elapsed = result["phases"]["loaded"]["seconds"]
-    result["traffic"] = traffic_report(verified, elapsed, after)
-    require_throughput(verified, elapsed)
+    require_load_rate(result, before, after)
     release_client(fixture, run_state)
     wait_until_zero(fixture, pid)
 

@@ -56,7 +56,7 @@ jobs:
     needs: version
     if: needs.version.outputs.tag != ''
     runs-on: ubuntu-24.04
-    # Covers the separate AWG stress step plus the baseline gate, cross-builds, and packaging.
+    # Covers separate stress and comparison steps, cross-builds, and packaging.
     timeout-minutes: 60
     permissions:
       contents: write
@@ -155,15 +155,22 @@ jobs:
           npm --prefix web test
           make integration
           make build-router build-router-lite RELEASE_VERSION="$RELEASE_TAG" RELEASE_REVISION="$(git rev-parse HEAD)"
-      # Current sources must provide both gates; target absence is an error.
+      # Current sources must provide both gates; a missing target is an error.
+      # -o below only acknowledges these successful same-job steps. It does not
+      # make a missing gate optional. Public build targets remain so older AWG
+      # tags without the CI-only names still compile.
       - name: AWG 320 stress
         if: steps.contract.outputs.historical == 'false'
         run: make memory-stress
+      - name: Memory regression
+        if: steps.contract.outputs.historical == 'false'
+        run: make memory-regression
       - name: Build router binaries from tagged source
         if: steps.contract.outputs.historical == 'false'
         run: |
-          # -o skips only this job's already successful stress step.
-          make -o memory-stress memory-regression build-router build-router-lite RELEASE_VERSION="$RELEASE_TAG" RELEASE_REVISION="$(git rev-parse HEAD)"
+          # -o only acknowledges both successful gate steps in this job.
+          # Missing targets remain fatal; this is not a bypass.
+          make -o memory-stress -o memory-regression build-router build-router-lite RELEASE_VERSION="$RELEASE_TAG" RELEASE_REVISION="$(git rev-parse HEAD)"
       - name: Preserve release verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

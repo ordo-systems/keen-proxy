@@ -21,7 +21,7 @@ so a partial set cannot look successful. A regression still writes the report.
 
 Threshold, for each of idle, loaded, drained, and reapplied, and for
 rss_bytes, anon_bytes, and peak_rss_bytes:
-    candidate_median <= baseline_median + max(baseline_median // 10, 8 MiB)
+    candidate_median <= baseline_median + max(baseline_median // 10, 12 MiB)
 Equality passes. Integer medians make the floor division the same bound as
 baseline + baseline/10.
 
@@ -57,7 +57,7 @@ WG_NAMES = tuple('wireguard-%d.json' % run for run in WG_RUNS)
 AWG_NAME = 'amneziawg-1.json'
 CANDIDATE_NAMES = WG_NAMES + (AWG_NAME,)
 TOP_KEYS = {'schema_version', 'variant', 'scenario', 'run', 'phases', 'evidence', 'samples'}
-ABSOLUTE_ALLOWANCE_BYTES = 8 * 1024 * 1024
+ABSOLUTE_ALLOWANCE_BYTES = 12 * 1024 * 1024
 RELATIVE_DIVISOR = 10
 EXIT_PASS = 0
 EXIT_REGRESSION = 1

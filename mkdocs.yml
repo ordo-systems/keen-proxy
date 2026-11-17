@@ -44,6 +44,9 @@ nav:
   - How traffic flows: network-flow.md
   - Troubleshooting: troubleshooting.md
   - Browser demo: browser-demo.md
+  - Release history:
+      - Versions: releases/index.md
+      - "0.9.0": releases/0.9.0.md
   - Documentation development: development.md
 markdown_extensions:
   - admonition

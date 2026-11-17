@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Raise the memory comparison's absolute allowance from 8 to 12 MiB after retained identical-binary ARM64 and AMD64 false alarms. Keep the 10% relative allowance and AWG stress limits; this reduces detection sensitivity, not application memory use.
 - Add full and lite Linux release binaries for x86-64 (AMD64 v1) and 32-bit x86 with SSE2, preserving the pinned compiler and embedded protocol features.
 - Support native OpenWrt installation and managed updates through procd on all six release architectures; retain Entware installation and expand its architecture selection. Preserve configuration, checksums, staged validation, and failed-start rollback. Native updates require the new checksummed `keenproxy.openwrt` release asset.
 - Raise the documented minimum to 256 MiB of total router RAM for OpenWrt and Keenetic/Netcraze, including lite builds; retain memory headroom warnings and distinguish this requirement from the soft Go memory recommendation.
@@ -29,6 +30,9 @@
 - Preserve explicit pre-AWG release-asset recovery using the tagged source's verification contract without weakening memory gates for newer source.
 - Wait for historical release logs to finish flushing, propagate logger failures without replacing build failures, and document local memory-gate runtime and conflicting host measurements.
 - Keep memory-gate fixtures aligned with the current full protocol tags and pinned Go compiler after upstream build changes.
+- Report memory comparison, continuous AWG stress, and router compilation as independent CI checks: **Memory regression**, **AWG stress (320 MiB)**, and **Router builds**. CI compiles routers with `build-router-ci` and `build-router-lite-ci`, does not use `make -o`, and does not treat that compilation as a memory certification.
+- Keep public local `build`, `build-router`, and `build-router-lite` gated by both memory checks, including under parallel make. Tagged release assets run stress and comparison as separate steps, then `make -o memory-stress -o memory-regression` with the public router targets only after those steps succeed in the same job. The accepted `e6a1a1d` reference, thresholds, sample counts, 320 MiB soft budget, 384 MiB ceiling, and pre-AWG recovery boundary are unchanged.
+- Document the separate repository-rules change required to preserve **Tests and builds** and **Network integration** and to add the three new check names. The former combined check **Memory regression and builds** was not a required status, and this change does not update branch protection.
 
 ## [0.9.0](https://github.com/ordo-systems/keen-proxy/compare/v0.8.0...v0.9.0) (2026-11-17)
 

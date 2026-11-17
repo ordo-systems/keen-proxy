@@ -30,6 +30,48 @@
 - Wait for historical release logs to finish flushing, propagate logger failures without replacing build failures, and document local memory-gate runtime and conflicting host measurements.
 - Keep memory-gate fixtures aligned with the current full protocol tags and pinned Go compiler after upstream build changes.
 
+## [0.9.0](https://github.com/ordo-systems/keen-proxy/compare/v0.8.0...v0.9.0) (2026-11-17)
+
+
+### Features
+
+* **activation:** disable connections without deleting profiles, credentials or routing references through shared Apply/Discard ([2d14086](https://github.com/ordo-systems/keen-proxy/commit/2d14086848310effe38b7388cb72eb06517fff5e))
+* **amneziawg:** import and edit complete native single-peer AWG 2/3 profiles through the shared draft/Apply workflow ([c5c7a86](https://github.com/ordo-systems/keen-proxy/commit/c5c7a868b95cba5ad354b6b35959382f77b380bc))
+* **amneziawg:** reject junk bursts exceeding 256 packets or 1 MiB of worst-case payload before engine activation ([c5c7a86](https://github.com/ordo-systems/keen-proxy/commit/c5c7a868b95cba5ad354b6b35959382f77b380bc))
+* **api:** remove the obsolete trusttunnel external-process status field; external status consumers must adapt ([a58c9e7](https://github.com/ordo-systems/keen-proxy/commit/a58c9e7b91fe41b5e1fa8947fcef1e414c3666e5))
+* **build:** add full and lite Linux x86-64 and x86/SSE2 release binaries ([e6a1a1d](https://github.com/ordo-systems/keen-proxy/commit/e6a1a1df2730418cf9edc2a71df4cec3e99be255))
+* **build:** require memory regression and 320 MiB AWG stress gates ([ad88975](https://github.com/ordo-systems/keen-proxy/commit/ad889758c933daac06aa085e6dba1af35e5ac8ee))
+* **demo:** align static and local Go demo identities with the planned release without changing published installer metadata ([c5c7a86](https://github.com/ordo-systems/keen-proxy/commit/c5c7a868b95cba5ad354b6b35959382f77b380bc))
+* **engine:** keep lite XHTTP and native TrustTunnel on TCP/TLS and reject HTTP/3-only profiles; QUIC requires the full build ([a58c9e7](https://github.com/ordo-systems/keen-proxy/commit/a58c9e7b91fe41b5e1fa8947fcef1e414c3666e5))
+* **engine:** pin sing-box-lx v1.14.4-lx.35 and matching Go-module forks for native AWG in full and lite builds ([c5c7a86](https://github.com/ordo-systems/keen-proxy/commit/c5c7a868b95cba5ad354b6b35959382f77b380bc))
+* **failover:** route disabled connection references through enabled reserves or block; only use Direct when explicitly configured ([2d14086](https://github.com/ordo-systems/keen-proxy/commit/2d14086848310effe38b7388cb72eb06517fff5e))
+* **import:** bound decompression and profile sizes, reject executable hooks and unsupported exports, and preserve edits during asynchronous validation ([c5c7a86](https://github.com/ordo-systems/keen-proxy/commit/c5c7a868b95cba5ad354b6b35959382f77b380bc))
+* **import:** decode standalone Amnezia vpn:// exports offline without subscription activation, service calls or device registration ([c5c7a86](https://github.com/ordo-systems/keen-proxy/commit/c5c7a868b95cba5ad354b6b35959382f77b380bc))
+* **import:** require explicit selection for multi-profile exports and persist only the selected client configuration ([c5c7a86](https://github.com/ordo-systems/keen-proxy/commit/c5c7a868b95cba5ad354b6b35959382f77b380bc))
+* **installer:** print the panel URL after installation and updates and add read-only --url and --key access commands ([c5c7a86](https://github.com/ordo-systems/keen-proxy/commit/c5c7a868b95cba5ad354b6b35959382f77b380bc))
+* **openwrt:** add native installation and managed updates across six architectures with a 256 MiB router RAM minimum ([e6a1a1d](https://github.com/ordo-systems/keen-proxy/commit/e6a1a1df2730418cf9edc2a71df4cec3e99be255))
+* **presets:** preserve child activation choices across parent toggles and preset updates ([2d14086](https://github.com/ordo-systems/keen-proxy/commit/2d14086848310effe38b7388cb72eb06517fff5e))
+* **routing:** preserve raw detour references and keep all-disabled geo conditions inactive, including Except mode ([2d14086](https://github.com/ordo-systems/keen-proxy/commit/2d14086848310effe38b7388cb72eb06517fff5e))
+* **routing:** toggle groups and individual domain, IP, country and category conditions while retaining their configured values ([2d14086](https://github.com/ordo-systems/keen-proxy/commit/2d14086848310effe38b7388cb72eb06517fff5e))
+* **security:** keep native AWG credentials out of redacted support exports and mask header-protection keys in journal output ([c5c7a86](https://github.com/ordo-systems/keen-proxy/commit/c5c7a868b95cba5ad354b6b35959382f77b380bc))
+* **system:** add a process-wide soft Go memory recommendation in Settings &gt; System with a 768 MiB fallback and CPU/throughput warnings ([a58c9e7](https://github.com/ordo-systems/keen-proxy/commit/a58c9e7b91fe41b5e1fa8947fcef1e414c3666e5))
+* **system:** honor configuration and startup GOMEMLIMIT including off, apply memory-only changes without restart and restore limits on failure or shutdown ([a58c9e7](https://github.com/ordo-systems/keen-proxy/commit/a58c9e7b91fe41b5e1fa8947fcef1e414c3666e5))
+* **trusttunnel:** replace the external client with an embedded outbound and migrate legacy profiles to canonical tt:// links ([a58c9e7](https://github.com/ordo-systems/keen-proxy/commit/a58c9e7b91fe41b5e1fa8947fcef1e414c3666e5))
+* **trusttunnel:** select one exported endpoint without automatic address fallback and retain legacy client files for safe manual cleanup ([a58c9e7](https://github.com/ordo-systems/keen-proxy/commit/a58c9e7b91fe41b5e1fa8947fcef1e414c3666e5))
+* **ui:** show saved and pending activation state, active rule counts and selected fallbacks in responsive panels and demos ([2d14086](https://github.com/ordo-systems/keen-proxy/commit/2d14086848310effe38b7388cb72eb06517fff5e))
+* **vless:** preserve VLESS encryption and REALITY key-share and TLS-fragmentation link parameters ([a58c9e7](https://github.com/ordo-systems/keen-proxy/commit/a58c9e7b91fe41b5e1fa8947fcef1e414c3666e5))
+* **xhttp:** support XHTTP and splithttp links with mode, extra JSON and xmux options in full and lite builds ([a58c9e7](https://github.com/ordo-systems/keen-proxy/commit/a58c9e7b91fe41b5e1fa8947fcef1e414c3666e5))
+
+
+### Bug Fixes
+
+* **build:** select Go 1.27.3 consistently from go.mod for local, CI and release builds ([a58c9e7](https://github.com/ordo-systems/keen-proxy/commit/a58c9e7b91fe41b5e1fa8947fcef1e414c3666e5))
+* **installer:** preserve historical update and rollback compatibility without downloading the obsolete TrustTunnel client ([a58c9e7](https://github.com/ordo-systems/keen-proxy/commit/a58c9e7b91fe41b5e1fa8947fcef1e414c3666e5))
+* **links:** reject conflicting or unsupported options and XHTTP/Vision without VLESS encryption while retaining encrypted profiles ([a58c9e7](https://github.com/ordo-systems/keen-proxy/commit/a58c9e7b91fe41b5e1fa8947fcef1e414c3666e5))
+* **trusttunnel:** reject unrepresentable authentication, transport and TLS-identity options instead of weakening the imported profile ([a58c9e7](https://github.com/ordo-systems/keen-proxy/commit/a58c9e7b91fe41b5e1fa8947fcef1e414c3666e5))
+* **ui:** return an empty hosts array instead of null so Connections remains usable after disabling a profile ([2d14086](https://github.com/ordo-systems/keen-proxy/commit/2d14086848310effe38b7388cb72eb06517fff5e))
+* **wireguard:** accept validated DNS metadata in ordinary WireGuard imports without changing KeenProxy DNS policy ([c5c7a86](https://github.com/ordo-systems/keen-proxy/commit/c5c7a868b95cba5ad354b6b35959382f77b380bc))
+
 ## [0.8.0](https://github.com/ordo-systems/keen-proxy/compare/v0.7.0...v0.8.0) (2026-11-10)
 
 

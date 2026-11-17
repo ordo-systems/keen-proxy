@@ -17,7 +17,7 @@ SPEC = importlib.util.spec_from_file_location('memory_compare', SCRIPT)
 compare = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(compare)
 
-ABSOLUTE = 8 * 1024 * 1024
+ABSOLUTE = 12 * 1024 * 1024
 PHASES = ('idle', 'loaded', 'drained', 'reapplied')
 METRICS = ('rss_bytes', 'anon_bytes', 'peak_rss_bytes')
 REQUIRED_EVIDENCE = (
@@ -189,28 +189,28 @@ class MemoryCompareTest(unittest.TestCase):
         )
 
     def test_threshold_boundary_equality_passes_and_one_byte_fails(self):
-        """Equality at the 8 MiB floor and at 10% passes; the next byte fails."""
-        self.write_pair(uniform(1_000_000), uniform(9_388_608))
+        """Equality at the 12 MiB floor and at 10% passes; the next byte fails."""
+        self.write_pair(uniform(1_000_000), uniform(13_582_912))
         report = self.evaluate()
         self.assertTrue(report['passed'], report['failures'])
         self.assertEqual(len(report['comparisons']), 12)
         self.assertEqual(report['failures'], [])
-        self.assertEqual(report['threshold']['absolute_bytes'], 8_388_608)
+        self.assertEqual(report['threshold']['absolute_bytes'], 12_582_912)
         sample = self.row(report, 'idle', 'rss_bytes')
         self.assertEqual(sample['baseline_median'], 1_000_000)
-        self.assertEqual(sample['candidate_median'], 9_388_608)
-        self.assertEqual(sample['delta_bytes'], 8_388_608)
+        self.assertEqual(sample['candidate_median'], 13_582_912)
+        self.assertEqual(sample['delta_bytes'], 12_582_912)
         self.assertEqual(sample['relative_allowance_bytes'], 100_000)
         self.assertEqual(sample['absolute_allowance_bytes'], ABSOLUTE)
         self.assertEqual(sample['allowance_bytes'], ABSOLUTE)
-        self.assertEqual(sample['limit_bytes'], 9_388_608)
+        self.assertEqual(sample['limit_bytes'], 13_582_912)
         self.assertTrue(sample['passed'])
 
         self.clear()
 
         def one_over(_run):
-            body = uniform(9_388_608)
-            body['loaded'] = metrics(9_388_608, 9_388_608, 9_388_609)
+            body = uniform(13_582_912)
+            body['loaded'] = metrics(13_582_912, 13_582_912, 13_582_913)
             return body
 
         self.write_pair(uniform(1_000_000), candidate_for_run=one_over)
@@ -220,8 +220,8 @@ class MemoryCompareTest(unittest.TestCase):
             [(item['phase'], item['metric']) for item in report['failures']],
             [('loaded', 'peak_rss_bytes')],
         )
-        self.assertEqual(report['failures'][0]['limit_bytes'], 9_388_608)
-        self.assertEqual(report['failures'][0]['candidate_median'], 9_388_609)
+        self.assertEqual(report['failures'][0]['limit_bytes'], 13_582_912)
+        self.assertEqual(report['failures'][0]['candidate_median'], 13_582_913)
 
         self.clear()
 

@@ -36,13 +36,22 @@ Release source archives contain the module manifests and build scripts. Rebuildi
 
 ## Memory regression gate
 
-`make build`, `make build-router`, and `make build-router-lite` require both the comparison gate and the continuous AWG stress gate before producing application binaries. Docker (including permission to run privileged containers), Python 3, Git history, and the Go toolchain from `go.mod` are required. The comparison gate needs the fixed baseline commit. Run the gates independently with:
+The public local targets `make build`, `make build-router`, and `make build-router-lite` require both the comparison gate and the continuous AWG stress gate before producing application binaries, including under parallel make. A public local entry point does not bypass either gate. The CI-only targets `make build-router-ci` and `make build-router-lite-ci` compile the same full and lite router artifacts and do not run or certify either memory gate. Docker (including permission to run privileged containers), Python 3, Git history, and the Go toolchain from `go.mod` are required to run the gates. The comparison gate needs the fixed baseline commit. Run the gates independently with:
 
 ```sh
 make memory-regression-unit
 make memory-regression
 make memory-stress
 ```
+
+CI compiles the router artifacts without either gate:
+
+```sh
+make build-router-ci
+make build-router-lite-ci
+```
+
+Those targets do not certify memory. Do not use them instead of the public local targets when a binary must have passed both gates.
 
 The gate builds the current source and the fixed accepted main checkpoint `e6a1a1df2730418cf9edc2a71df4cec3e99be255`, using the compiler selected by the current Makefile. The reference retains that checkpoint's full-build tags, including AWG, XHTTP and native TrustTunnel; the candidate takes its current full-build tags from `make memory-build-settings`. Both daemons run the same synthetic two-WireGuard configuration and TCP/UDP workload, without a router, production credentials, or external test destinations. Namespace and firewall changes stay inside uniquely owned disposable Linux containers.
 
@@ -54,20 +63,20 @@ Three paired runs measure idle, loaded, TCP-drained, and repeated-Apply phases. 
 
 A separate candidate-only AWG run proves traffic and records its memory. It stays outside the common WireGuard medians even though the accepted reference also supports AWG. This keeps the shared WireGuard workload and AWG smoke scenario separate; it is not the continuous stress gate below.
 
-Reports, raw samples, transfer evidence, logs, and build identities are retained under `.agents-work/memory-regression/`. CI retains the results even when a gate fails. Review the report before changing a threshold or baseline; do not raise a budget merely to make a regression green. A threshold or baseline change requires a separate rationale and before/after measurements.
+Reports, raw samples, transfer evidence, logs, and build identities are retained under `.agents-work/memory-regression/`. **Memory regression** uploads that comparison evidence even when the job fails. **AWG stress (320 MiB)** uploads its own `awg-stress-<run>-<attempt>` artifact with the same evidence coverage, including failures. **Router builds** uploads no memory evidence. Review the report before changing a threshold or baseline; do not raise a budget merely to make a regression green. A threshold or baseline change requires a separate rationale and before/after measurements.
 
-The fixture runs at the Docker server's native Linux architecture. Results are not an ARM64/MIPS hardware certification, a long-duration leak audit, or a DNS-leak/security guarantee. The gates measure the full daemon with production protocol features but without embedded UI assets; router cross-builds still compile the normal UI-enabled binaries. Build entry points do not bypass either gate when Docker is unavailable.
+The fixture runs at the Docker server's native Linux architecture. Results are not an ARM64/MIPS hardware certification, a long-duration leak audit, or a DNS-leak/security guarantee. The gates measure the full daemon with production protocol features but without embedded UI assets; router cross-builds still compile the normal UI-enabled binaries. Public local build entry points do not bypass either gate when Docker is unavailable. The CI-only router targets compile without those gates and are not a local substitute for them.
 
 ### Runtime and conflicting host measurements
 
-Local build gating is deliberate: the three application build targets keep the same fail-closed checks as CI and releases. A successful serial run schedules at least 5 minutes 21 seconds of measurements and Apply pauses: seven comparison scenarios at 38 seconds each, plus 55 seconds of stress phases. Baseline/candidate/server compilation, downloads, image builds, startup, drain waits, evidence handoff, frontend compilation, and router cross-builds add time; cold runs take longer. This is a lower bound for serial execution, not a completion-time guarantee. Avoid parallel make and competing CPU/memory workloads when collecting comparable measurements; prefer a controlled Linux build host.
+Local build gating is deliberate: the public targets `make build`, `make build-router`, and `make build-router-lite` stay fail-closed, including under parallel make. CI no longer couples those gates to router compilation; the independent jobs are described below, next to the stress gate. Tagged release assets still run both gates before the public router targets. A successful serial run schedules at least 5 minutes 21 seconds of measurements and Apply pauses: seven comparison scenarios at 38 seconds each, plus 55 seconds of stress phases. Baseline/candidate/server compilation, downloads, image builds, startup, drain waits, evidence handoff, frontend compilation, and router cross-builds add time; cold runs take longer. This is a lower bound for serial execution, not a completion-time guarantee. Avoid parallel make and competing CPU/memory workloads when collecting comparable measurements; prefer a controlled Linux build host.
 
-If a local comparison fails while CI passes:
+If a local comparison fails while the **Memory regression** job passes:
 
 1. Stop the build and retain that run's `report.json`, raw phase samples, logs, and manifest. The CI pass does not erase or override the local failure.
 2. Compare source/binary identities, Go toolchains, protocol tags, Docker architectures and resource limits. Record host CPU/memory pressure and other workloads; different architectures or environments are separate observations, not interchangeable repetitions.
 3. Investigate the failed phase and distinguish a reproducible increase from an identified environmental cause. If such a cause is corrected, record a separate measurement and retain the original failure and explanation. Do not retry merely until a run passes, force GC, or change thresholds/baseline to hide the result.
-4. If the discrepancy remains unexplained, keep the build blocked and review the evidence. Do not bypass the local gate with `-o`, direct build commands, or a previously successful CI result.
+4. If the discrepancy remains unexplained, keep the local build blocked and review the evidence. Do not bypass the local gate with `-o`, `build-router-ci`, `build-router-lite-ci`, direct build commands, or a previously successful CI result. A passing **Router builds** check does not certify memory.
 
 ### AWG memory stress
 
@@ -79,7 +88,17 @@ The fixture drives 32 continuously progressing TCP streams through the first AWG
 
 Throughput uses the publication timestamps of the same two counter snapshots; memory and CPU phases retain their own wall-clock duration. Exported evidence keeps private file modes and is handed to the invoking host UID/GID only after the workload is confirmed stopped. A constrained, separately tracked helper mounts only this run's evidence trees; ownership handoff failures fail the gate without preventing cleanup.
 
-Local `make build`, `make build-router`, and `make build-router-lite` run this gate and `make memory-regression`. CI and the release asset job run `make memory-stress` as its own step, then `make -o memory-stress build-router build-router-lite`. GNU make `-o` marks that phony target already satisfied so the second make process does not repeat the stress run. GitHub runs the second step only after the first succeeds. `-o` is not an environment bypass, a cache, or a local shortcut. Do not use it unless that separate step has just succeeded in the same job.
+Local `make build`, `make build-router`, and `make build-router-lite` run this gate and `make memory-regression`. CI does not repeat that coupling and does not use `make -o`. Three independent jobs on separate runners report the work separately. A failure in one does not cancel or skip the others:
+
+- **Memory regression** runs `make memory-regression` with full Git history and uploads comparison evidence even when the job fails.
+- **AWG stress (320 MiB)** runs `make memory-stress`. It does not need Node or the comparison reference history. It uploads a separate `awg-stress-<run>-<attempt>` artifact with the same evidence coverage, including failures.
+- **Router builds** runs `make build-router-ci build-router-lite-ci` with Go and Node. It does not run either memory workload, does not upload memory evidence, and does not certify memory.
+
+**Tests and builds** and **Network integration** are unchanged. A green **Router builds** result is not a memory result.
+
+For tagged source outside historical recovery, the release asset job runs `make memory-stress` and `make memory-regression` as separate steps, then `make -o memory-stress -o memory-regression build-router build-router-lite` with the existing release identity arguments. Both `-o` flags are permitted only after the corresponding step has succeeded in that same job. GNU make `-o` marks those phony targets already satisfied so the public targets do not repeat the gates. Public targets are required because older AWG tags do not define the CI-only names. A missing gate target fails and never selects historical recovery. `-o` is not an environment bypass, a cache, or a local shortcut. Do not use it unless both separate steps have just succeeded in the same job.
+
+Release publication waits for the CI checks workflow, so every independent job must succeed before version and asset work, and the asset job must pass both gates before the public router builds. Merge requirements are not set by workflow files. A read-only ruleset inspection found that `main` currently requires only **Tests and builds** and **Network integration**. **Memory regression and builds** was not a required status. Preserve those two checks and add **Memory regression**, **AWG stress (320 MiB)**, and **Router builds**, each from the GitHub Actions integration (`15368`). Those five statuses are what should gate merge. This change does not modify repository rules; until that separate administrative update, GitHub will not block merges on the three new names.
 
 Historical release-asset recovery from `main` is explicitly limited by Git ancestry to commits at or before the fixed pre-AWG boundary `9d398fb3754036cbe35df1cf07098164ff62a9d5`, including `v0.8.0`. Current workflow CI is still required, and the tagged version is checked before expensive work. Recovery leaves tagged source unchanged and runs its original Makefile/protocol flags for Go tests, vet, network integration, frontend tests, and full/lite router builds with the requested release identity. A visible notice and uploaded `.agents-work/release-legacy/<run>-<attempt>/` manifest, command log, and exit code record this separate verification contract, including failures; they are not memory measurements or AWG certification, because that source does not support AWG. Commits outside this ancestry must pass both memory gates; missing targets fail rather than selecting recovery. Existing assets must remain byte-identical before missing assets are published. See [RELEASING](https://github.com/ordo-systems/keen-proxy/blob/main/RELEASING.md#github-setup-and-recovery).
 

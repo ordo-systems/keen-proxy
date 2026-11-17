@@ -29,6 +29,9 @@
 - Preserve explicit pre-AWG release-asset recovery using the tagged source's verification contract without weakening memory gates for newer source.
 - Wait for historical release logs to finish flushing, propagate logger failures without replacing build failures, and document local memory-gate runtime and conflicting host measurements.
 - Keep memory-gate fixtures aligned with the current full protocol tags and pinned Go compiler after upstream build changes.
+- Report memory comparison, continuous AWG stress, and router compilation as independent CI checks: **Memory regression**, **AWG stress (320 MiB)**, and **Router builds**. CI compiles routers with `build-router-ci` and `build-router-lite-ci`, does not use `make -o`, and does not treat that compilation as a memory certification.
+- Keep public local `build`, `build-router`, and `build-router-lite` gated by both memory checks, including under parallel make. Tagged release assets run stress and comparison as separate steps, then `make -o memory-stress -o memory-regression` with the public router targets only after those steps succeed in the same job. The accepted `e6a1a1d` reference, thresholds, sample counts, 320 MiB soft budget, 384 MiB ceiling, and pre-AWG recovery boundary are unchanged.
+- Document the separate repository-rules change required to preserve **Tests and builds** and **Network integration** and to add the three new check names. The former combined check **Memory regression and builds** was not a required status, and this change does not update branch protection.
 
 ## [0.8.0](https://github.com/ordo-systems/keen-proxy/compare/v0.7.0...v0.8.0) (2026-11-10)
 

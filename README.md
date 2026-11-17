@@ -80,7 +80,9 @@ make build-router-lite   # Smaller protocol set for constrained routers
 
 The full build enables QUIC, uTLS, WireGuard/AmneziaWG, gVisor, XHTTP and native TrustTunnel. The lite registry retains XHTTP and TrustTunnel over TCP/TLS but excludes QUIC/HTTP/3 and several other protocols; see `internal/engine/registry_lite.go`. See the [connection guide](docs/en/user-guide.md#sing-box-lx-compatibility) for supported link parameters and migration limits.
 
-These three build targets run both the [memory regression gate](docs/en/development.md#memory-regression-gate) and the continuous AWG stress gate before producing binaries. Run `make memory-regression` or `make memory-stress` to inspect one report, or `make memory-regression-unit` for the contract tests. Docker absence, invalid evidence, a regression, or a stress failure blocks binary production; neither gate is silently skipped. The CI `make -o memory-stress` exception only avoids repeating a stress step that just succeeded; it is not a local bypass.
+These three public local build targets run both the [memory regression gate](docs/en/development.md#memory-regression-gate) and the continuous AWG stress gate before producing binaries. Run `make memory-regression` or `make memory-stress` to inspect one report, or `make memory-regression-unit` for the contract tests. Docker absence, invalid evidence, a regression, or a stress failure blocks binary production; neither gate is silently skipped.
+
+CI exposes independent **Memory regression**, **AWG stress (320 MiB)**, and **Router builds** checks. The router job uses compilation-only `build-router-ci` and `build-router-lite-ci`; it does not certify memory. Tagged release assets run both gates in separate steps before acknowledging those same-job successes with `make -o memory-stress -o memory-regression` and the public router targets. Neither the CI-only targets nor `-o` are local shortcuts around failed checks.
 
 ## Configuration and router installation
 

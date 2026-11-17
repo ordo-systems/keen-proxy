@@ -5,4 +5,4 @@
 - Use English for source, runtime messages, and shared memories. Preserve translations in the localization resources. Use gofmt, slog, %w error wrapping, standard testing, table cases, and dependency interfaces.
 - Vue SFC with TypeScript; shared draft store without Pinia. All screens edit one configuration; Apply submits it whole. Do not bypass this with separate saves.
 - UI RU/EN in web/src/locales; use computed translated option lists and t from i18n.ts outside components.
-- Follow the Superpowers, ub-mode, and quality-tool workflow in AGENTS.md. Preserve existing uncommitted work.
+- Follow the scoped ub-mode and risk-based verification rules in AGENTS.md; quality tools are not mandatory for every change. Preserve existing uncommitted work.

@@ -44,11 +44,15 @@ make memory-regression
 make memory-stress
 ```
 
-The gate builds the current source and `9d398fb3754036cbe35df1cf07098164ff62a9d5`, the parent of PR #25, using the compiler selected by the current Makefile. The baseline retains its historical full-build tags; the candidate takes the current full-build tags from `make memory-build-settings`, including AWG, XHTTP and native TrustTunnel. This measures the actual current registry rather than a stale reduced build. Both daemons run the same synthetic two-WireGuard configuration and TCP/UDP workload, without a router, production credentials, or external test destinations. Namespace and firewall changes stay inside uniquely owned disposable Linux containers.
+The gate builds the current source and the fixed accepted main checkpoint `e6a1a1df2730418cf9edc2a71df4cec3e99be255`, using the compiler selected by the current Makefile. The reference retains that checkpoint's full-build tags, including AWG, XHTTP and native TrustTunnel; the candidate takes its current full-build tags from `make memory-build-settings`. Both daemons run the same synthetic two-WireGuard configuration and TCP/UDP workload, without a router, production credentials, or external test destinations. Namespace and firewall changes stay inside uniquely owned disposable Linux containers.
+
+This reference explicitly accepts the current build's memory footprint as the starting point for future regressions. It is a baseline-policy reset, not a memory fix or a cancellation of the retained failures against the parent of PR #25. Thresholds, sample counts and the separate 320 MiB AWG stress contract are unchanged. The historical release-recovery boundary remains the independent pre-AWG commit documented below.
+
+This main-branch ancestor has the same application sources and full-feature build inputs as the accepted `37d196c` build; byte-for-byte ARM64 binary equivalence was verified with the gate compiler and flags. Keeping the immutable reference in main history preserves it after squash-merging and deleting the PR branch, without an extra tag or network fetch. Full repository history remains required.
 
 Three paired runs measure idle, loaded, TCP-drained, and repeated-Apply phases. The loaded phase carries concurrent TCP streams and verified UDP exchanges on both tunnels. After TCP closes, the same two UDP sockets keep exchanging payloads during the drained measurements. Zero client/server TCP streams, fresh UDP echoes, and exactly one daemon session per tunnel prove the drain; arbitrary residual tracker entries are not classified as UDP. Apply-cycle sampling includes transient RSS peaks, not only the final settled state. The comparison uses the median RSS, anonymous RSS, and sampled RSS peak for each phase. An increase greater than `max(10% of baseline, 8 MiB)` fails the gate; equality passes. Missing samples, failed transfers, incomplete TCP drain, and failed Apply operations are errors, not skipped checks. No forced GC or scavenging changes the measured process.
 
-A separate candidate-only AWG run proves traffic and records its memory. It is not compared with the old binary, which cannot consume AWG profiles. This separates dependency regressions on existing configurations from the cost of a newly added tunnel. It is not the continuous stress gate below.
+A separate candidate-only AWG run proves traffic and records its memory. It stays outside the common WireGuard medians even though the accepted reference also supports AWG. This keeps the shared WireGuard workload and AWG smoke scenario separate; it is not the continuous stress gate below.
 
 Reports, raw samples, transfer evidence, logs, and build identities are retained under `.agents-work/memory-regression/`. CI retains the results even when a gate fails. Review the report before changing a threshold or baseline; do not raise a budget merely to make a regression green. A threshold or baseline change requires a separate rationale and before/after measurements.
 
@@ -67,7 +71,7 @@ If a local comparison fails while CI passes:
 
 ### AWG memory stress
 
-`make memory-stress` (`sh test/memory/run.sh --stress`) is a separate gate. It builds only the current daemon and the test server, copies the fixture, and does not archive, build, or run the pre-PR-#25 baseline. The result is not an input to the comparison report.
+`make memory-stress` (`sh test/memory/run.sh --stress`) is a separate gate. It builds only the current daemon and the test server, copies the fixture, and does not archive, build, or run the comparison reference. The result is not an input to the comparison report.
 
 The container is uniquely owned, uses `--network none`, and is privileged so the fixture can create its own namespaces. Limits are 2 GiB of memory with swap disabled, a 2 CPU quota, and affinity `0-1`. The container parent gets `GOMAXPROCS=2`, `GOGC=100`, and `GOMEMLIMIT=off`. The 320 MiB Go limit applies only to the measured daemon inside the fixture; it is a soft budget, not a production default or an RSS cap. Container memory also includes the synthetic remote peer. If the Docker engine reports fewer than 2 CPUs, the run fails instead of dropping affinity or quota. The runner checks the applied memory, swap, CPU, affinity, network, and parent environment before starting; a mismatch is a failure.
 

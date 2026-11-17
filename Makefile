@@ -39,7 +39,7 @@ memory-build-settings:
 	@printf '%s\n' '$(TAGS)'
 	@$(GO) env GOVERSION
 
-# Compare full daemons against the fixed pre-PR-25 baseline before building.
+# Compare full daemons against the fixed accepted checkpoint before building.
 memory-regression-unit:
 	python3 -B -m unittest discover -s test/memory -p 'test_*.py' -v
 

@@ -16,8 +16,9 @@ if [ "$#" -ne 0 ]; then
 fi
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-BASELINE=9d398fb3754036cbe35df1cf07098164ff62a9d5
-BASE_TAGS=with_quic,with_utls,with_wireguard,with_gvisor
+# Accepted full-feature main checkpoint; matches the accepted 37d196c application.
+BASELINE=e6a1a1df2730418cf9edc2a71df4cec3e99be255
+BASE_TAGS=with_quic,with_utls,with_wireguard,with_awg,with_gvisor,with_xhttp,with_trusttunnel
 # 2 GiB with swap disabled. The 320 MiB Go limit belongs only to the measured daemon.
 STRESS_MEMORY=2147483648
 mkdir -p "$ROOT/.agents-work/memory-regression"

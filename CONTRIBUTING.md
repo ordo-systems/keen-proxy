@@ -49,8 +49,11 @@ Run the relevant tests while developing, then verify the final change:
 ```sh
 CGO_ENABLED=0 make test
 CGO_ENABLED=0 make vet
+make check-secrets
 cd web && npm test && npm run build
 ```
+
+CI scans for leaked credentials with gitleaks. A pull request scans only the commits on that branch, including commits whose change was removed later. A run on `main` scans every commit reachable from `main`. Both include changes that exist only in a merge commit, and a range whose endpoints are not commits fails instead of passing. `make check-secrets` runs that main-style scan locally. A clean scan does not replace a manual review of configuration and Git history. Do not commit a detectable fixture: deleting it in a later commit does not remove it from the scan.
 
 The Entware service tests use a C compiler (`cc`) on Linux to build a small test daemon. Release recovery tests execute the workflow's Bash payloads with GNU tar and coreutils against synthetic release files. These checks run as part of `make test-install` and use temporary paths without accessing a router or publishing assets.
 

@@ -6,7 +6,7 @@ This guide is for maintainers preparing an initial public repository or a later 
 
 Follow the versioning and Conventional Commit rules in [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-pull-request-titles). The selected workflow uses [Release Please](https://github.com/googleapis/release-please) to propose releases, with a maintainer reviewing each release PR.
 
-The repository defines [CI](.github/workflows/ci.yml) and [release](.github/workflows/release.yml) workflows. CI runs on pull requests and can be started manually. Pushes to `main` run the same checks before Release Please. They become active after the workflow files are pushed to GitHub and Actions is enabled.
+The repository defines [CI](.github/workflows/ci.yml) and [release](.github/workflows/release.yml) workflows. CI runs on pull requests and can be started manually. Pushes to `main` run the same checks before Release Please. They become active after the workflow files are pushed to GitHub and Actions is enabled. CI also scans for leaked credentials: a pull request scans the commits introduced by that branch, and a push to `main` scans every commit reachable from `main`. A clean scan does not replace the history review below.
 
 1. Merge reviewed changes into `main` after the relevant checks pass. With squash merges, preserve the Conventional Commit PR title and any breaking-change details in the resulting commit.
 2. Release Please accumulates releasable changes since the previous release and creates or updates a release PR containing the proposed version and changelog. Its pre-1.0 settings match the project's policy.
@@ -33,7 +33,7 @@ Use the Git tag as the release identity and derive build versions from it; any t
 ## Review the material being published
 
 1. Choose a specific, reviewed commit. Inspect the full tracked tree and every intended release artifact.
-2. Check for credentials, production configuration, private device identifiers, personal paths, logs, source maps, and embedded data. Pattern scans are useful but do not replace manual review.
+2. Check for credentials, production configuration, private device identifiers, personal paths, logs, source maps, and embedded data. The CI secret scan is one pattern scan; it does not replace manual review.
 3. Review Git history as well as the current checkout. Ignoring or deleting a file does not remove old versions. If a private development history contains local reports or memories, prepare a separately reviewed public history before publishing; do not push that history blindly or rewrite an existing shared history without coordination.
 4. Confirm that public guides use synthetic examples and link only to files included in the public tree. Keep internal work notes and agent memories excluded.
 

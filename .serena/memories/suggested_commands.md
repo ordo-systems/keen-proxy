@@ -1,5 +1,6 @@
 # Commands from the repository root
-- make test — language checks, installer tests, and tagged Go tests for internal and cmd.
+- make test — language checks, installer tests, secret-scan contract tests, memory-gate unit tests, and tagged Go tests for internal and cmd.
+- make check-secrets — checksum-pinned gitleaks scan of commits reachable from HEAD. CI uses the same script: pull requests scan `base..head`; `main` scans HEAD.
 - make vet — go vet with the same tags, ./...
 - make web — npm ci and npm run build (vue-tsc + Vite).
 - make build — web + bin/keenproxy with ui.

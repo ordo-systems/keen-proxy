@@ -17,7 +17,7 @@ NPM := PATH="$(NODE_BIN):$$PATH" npm
 # Preview identity is separate from the last published installer version.
 DEMO_VERSION = $(shell PATH="$(NODE_BIN):$$PATH" node -p "require('./web/src/demo/release.json').version")
 
-.PHONY: test vet web build ui-demo build-router build-router-lite build-router-ci build-router-lite-ci clean integration test-install check-language docs docs-preview memory-regression memory-regression-unit memory-stress memory-build-settings
+.PHONY: test vet web build ui-demo build-router build-router-lite build-router-ci build-router-lite-ci clean integration test-install check-language check-secrets test-secrets docs docs-preview memory-regression memory-regression-unit memory-stress memory-build-settings
 
 check-language:
 	python3 -B -m unittest discover -s test/language -v
@@ -26,7 +26,14 @@ check-language:
 test-install:
 	python3 -B -m unittest discover -s test/install -v
 
-test: check-language test-install memory-regression-unit
+test-secrets:
+	python3 -B -m unittest discover -s test/secrets -v
+
+# Scan commits reachable from HEAD. CI uses the same script for pull requests.
+check-secrets:
+	tools/scan-secrets.sh history
+
+test: check-language test-install memory-regression-unit test-secrets
 	$(GO) test -tags $(TAGS) ./internal/... ./cmd/...
 	$(GO) test -tags keenproxy_lite,$(PROTO_TAGS) ./internal/engine/ ./internal/links/
 

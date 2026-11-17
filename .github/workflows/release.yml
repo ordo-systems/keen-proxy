@@ -56,7 +56,8 @@ jobs:
     needs: version
     if: needs.version.outputs.tag != ''
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Covers the separate AWG stress step plus the baseline gate, cross-builds, and packaging.
+    timeout-minutes: 60
     permissions:
       contents: write
     env:
@@ -71,7 +72,33 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
           persist-credentials: false
+      - name: Check version and select verification contract
+        id: contract
+        run: |
+          test "$(cat version.txt)" = "${RELEASE_TAG#v}"
+          baseline=9d398fb3754036cbe35df1cf07098164ff62a9d5
+          # Only immutable pre-AWG history qualifies; missing gates never select recovery.
+          git cat-file -e "$baseline^{commit}"
+          if git merge-base --is-ancestor HEAD "$baseline"; then
+            echo 'historical=true' >> "$GITHUB_OUTPUT"
+            evidence=".agents-work/release-legacy/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+            mkdir -p "$evidence"
+            {
+              printf 'Tag: %s\nCommit: %s\nHistorical boundary: %s\n' \
+                "$RELEASE_TAG" "$(git rev-parse HEAD)" "$baseline"
+              printf '%s\n' \
+                'Contract: original tagged Makefile, Go tests/vet, frontend tests, network integration, full/lite cross-builds.' \
+                'AWG unsupported: neither AWG stress nor memory comparison certification applies.' \
+                'This manifest records contract selection, not test success; consult verification.log and exit-code when present.'
+            } > "$evidence/manifest.txt"
+            echo '::notice::Historical pre-AWG recovery: original tagged build/tests, not memory certification.'
+          else
+            status=$?
+            test "$status" -eq 1 || exit "$status"
+            echo 'historical=false' >> "$GITHUB_OUTPUT"
+          fi
       - name: Read pinned Go version
         id: go-version
         run: |
@@ -86,10 +113,74 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Build router binaries from tagged source
+      - name: Verify and build historical source without AWG certification
+        if: steps.contract.outputs.historical == 'true'
+        env:
+          CGO_ENABLED: '0'
         run: |
-          test "$(cat version.txt)" = "${RELEASE_TAG#v}"
+          evidence=".agents-work/release-legacy/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          tee_pid=
+          finish_verification() {
+            status=$?
+            trap - EXIT
+            set +e
+            set +x
+            # Close the pipe before waiting; preserve the build failure if logging fails too.
+            exec >&- 2>&-
+            if [ -n "$tee_pid" ]; then
+              wait "$tee_pid"
+              log_status=$?
+              if [ "$status" -eq 0 ]; then
+                status=$log_status
+              fi
+            fi
+            printf '%s\n' "$status" > "$evidence/exit-code"
+            record_status=$?
+            if [ "$status" -eq 0 ]; then
+              status=$record_status
+            fi
+            exit "$status"
+          }
+          trap finish_verification EXIT
+          # Retain commands, toolchains and failures without changing the tagged Makefile.
+          exec > >(tee "$evidence/verification.log") 2>&1
+          tee_pid=$!
+          set -x
+          go version
+          node --version
+          npm --version
+          make test
+          make vet
+          npm --prefix web ci --no-audit --no-fund
+          npm --prefix web test
+          make integration
           make build-router build-router-lite RELEASE_VERSION="$RELEASE_TAG" RELEASE_REVISION="$(git rev-parse HEAD)"
+      # Current sources must provide both gates; target absence is an error.
+      - name: AWG 320 stress
+        if: steps.contract.outputs.historical == 'false'
+        run: make memory-stress
+      - name: Build router binaries from tagged source
+        if: steps.contract.outputs.historical == 'false'
+        run: |
+          # -o skips only this job's already successful stress step.
+          make -o memory-stress memory-regression build-router build-router-lite RELEASE_VERSION="$RELEASE_TAG" RELEASE_REVISION="$(git rev-parse HEAD)"
+      - name: Preserve release verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-memory-regression-${{ github.run_id }}-${{ github.run_attempt }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            .agents-work/release-legacy/
+            .agents-work/memory-regression/*/results/
+            .agents-work/memory-regression/*/container-tmp/
+            .agents-work/memory-regression/*/manifest.txt
+            .agents-work/memory-regression/*/*-build-info.txt
+            .agents-work/memory-regression/*/*-build.log
+            .agents-work/memory-regression/*/cleanup.log
+            .agents-work/memory-regression/*/exit-code
       - name: Package source, notices, and build identity
         run: |
           source_dir=$(mktemp -d)

@@ -56,6 +56,8 @@ The Entware service tests use a C compiler (`cc`) on Linux to build a small test
 
 For routing, DNS, or firewall behavior, also run `make integration` with Docker. This uses a privileged disposable container; review the Makefile and test script before running it. Changes to separate tools should be tested from their own Go modules as appropriate.
 
+Application builds also require `make memory-regression` and `make memory-stress`. The fixed accepted main checkpoint `e6a1a1d`, application-equivalent to the accepted `37d196c` build, and candidate run identical synthetic WireGuard workloads in disposable Linux containers; a separate short candidate-only AWG scenario records traffic and memory and is not the continuous stress gate. The stress gate builds only the current daemon, gives it a 320 MiB Go soft budget, and fails when RSS or lifetime `VmHWM` reaches 384 MiB or verified load is too low. Run `make memory-regression-unit` for the gate's own contract tests. Preserve phase samples, transfer/Apply evidence, and failed results; never relax a threshold or rebase the baseline solely to pass a change. See the [memory gate contract](docs/en/development.md#memory-regression-gate) for the explicit acceptance rationale. Docker absence is a failure, not a bypass. Do not pass `make -o memory-stress` locally; CI uses it only after a separate successful stress step.
+
 For a comment-only change, executable-token comparison plus normal build/test checks can establish that behavior was preserved. Do not invent tests that only assert comment wording. Report unavailable checks and remaining failures explicitly.
 
 ## Submit a reviewable change

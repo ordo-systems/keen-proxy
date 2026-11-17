@@ -23,6 +23,12 @@
 - Bound standalone export candidates and their cumulative profile size; preserve edits during asynchronous profile validation and accept validated ordinary WireGuard DNS metadata without importing DNS policy.
 - Pause connections, groups, and individual domain/IP/country/category rules without deleting their settings, through the shared draft/Apply workflow; disabled targets use configured fallbacks or block rather than silently route direct.
 - Separate connection parameter and diagnostic actions, and keep activation controls available in desktop/mobile layouts and both demos.
+- Require a reproducible full-daemon memory regression gate for local application builds, CI, and releases, comparing identical WireGuard workloads against the accepted main checkpoint `e6a1a1d`, application-equivalent to the accepted `37d196c` build, and recording AWG separately. This accepts the current memory footprint as a reference, not as a memory fix.
+- Require a separate continuous AWG stress gate before application builds, CI, and releases. The measured daemon uses a 320 MiB Go limit; RSS or lifetime `VmHWM` at or above 384 MiB, stalled streams, or low verified load fail the gate. It never builds the comparison reference.
+- Export private memory-gate evidence with host-readable ownership, measure throughput over matching counter timestamps, and replace stale reports when result directories cannot be read.
+- Preserve explicit pre-AWG release-asset recovery using the tagged source's verification contract without weakening memory gates for newer source.
+- Wait for historical release logs to finish flushing, propagate logger failures without replacing build failures, and document local memory-gate runtime and conflicting host measurements.
+- Keep memory-gate fixtures aligned with the current full protocol tags and pinned Go compiler after upstream build changes.
 
 ## [0.8.0](https://github.com/ordo-systems/keen-proxy/compare/v0.7.0...v0.8.0) (2026-11-10)
 

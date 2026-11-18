@@ -36,7 +36,10 @@ class SecretScanTest(unittest.TestCase):
             cls.scanner = os.environ['GITLEAKS_BIN']
             return
         asset, digest = SCANNER_ASSETS[(platform.system(), platform.machine())]
-        cache = Path(tempfile.mkdtemp(prefix='gitleaks-test-'))
+        tmp = tempfile.TemporaryDirectory(prefix='gitleaks-test-')
+        # Registered before the download so a failed setUpClass still cleans up.
+        cls.addClassCleanup(tmp.cleanup)
+        cache = Path(tmp.name)
         archive = cache / 'gitleaks.tar.gz'
         url = f'https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_{asset}.tar.gz'
         urllib.request.urlretrieve(url, archive)

@@ -173,6 +173,8 @@ jobs:
   # Pull requests scan only their own commits. main scans every commit
   # reachable from main. tools/scan-secrets.sh pins the MIT gitleaks binary;
   # gitleaks-action requires an organization license and stops after 30 commits.
+  # These scans catch accidental leaks. They are not a security gate: a pull
+  # request can change this workflow, the wrapper, and the scanner policy.
   secrets-branch:
     name: Secret scan (pull request)
     if: github.event_name == 'pull_request'

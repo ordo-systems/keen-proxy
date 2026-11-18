@@ -283,8 +283,8 @@ export interface DomainRecord { name: string; addresses: DomainAddress[]; checke
 // DNS cache, routing conflicts, and application status for live or preview data.
 export interface DomainStatus { records: DomainRecord[]; conflicts: Record<string, string[]>; limited: boolean; error?: string; written_at: string; application: string; demo?: boolean }
 
-// Resolver endpoints, routing policy, bootstrap addresses, and blocking options.
-export interface DNSConfig {listen:string;upstreams:string[];fallback:string;route?:''|'direct'|'connection';connection?:string;failure?:''|'strict'|'direct';bootstrap?:Record<string,string>;block_encrypted?:boolean;firefox_canary?:boolean}
+// Resolver endpoints, routing and interception policy, bootstrap addresses, and blocking options.
+export interface DNSConfig {listen:string;upstreams:string[];fallback:string;route?:''|'direct'|'connection';connection?:string;failure?:''|'strict'|'direct';bootstrap?:Record<string,string>;block_encrypted?:boolean;firefox_canary?:boolean;bypass_sources?:string[]}
 // Versioned catalog entry used to preview and maintain a routing group.
 export interface Preset {id:string;name:string;category:string;domains:string[];prefixes:string[];description:string}
 // Catalog resolver endpoints and bootstrap IP for a selectable DNS provider.

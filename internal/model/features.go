@@ -35,6 +35,12 @@ func (c *Config) validateFeatures(add func(string, ...any)) {
 		add("schema_version: version 1 is supported, got %d", c.SchemaVersion)
 	}
 	d := c.DNS
+	for i, source := range d.BypassSources {
+		ip, err := netip.ParseAddr(source)
+		if err != nil || !ip.Is4() || !(ip.IsGlobalUnicast() || ip.IsLinkLocalUnicast()) {
+			add("dns.bypass_sources[%d]: expected a unicast IPv4 address", i)
+		}
+	}
 	if d.Route != "" && d.Route != "direct" && d.Route != "connection" {
 		add("dns.route: expected direct or connection")
 	}

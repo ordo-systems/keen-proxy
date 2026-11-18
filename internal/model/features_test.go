@@ -51,3 +51,22 @@ func TestDNSRejectsHiddenDirect(t *testing.T) {
 		t.Fatal("selector with hidden direct accepted")
 	}
 }
+
+func TestDNSBypassSourcesValidation(t *testing.T) {
+	c, err := Parse([]byte("dns: {bypass_sources: [192.168.31.53, 169.254.7.12, 203.0.113.31]}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []string{
+		"", " 192.168.31.53 ", "192.168.031.53", "192.168.31.0/24", "192.168.31.53/32",
+		"192.168.31.53:53", "resolver.example", "2001:db8::53", "::ffff:192.168.31.53",
+		"0.0.0.0", "127.0.0.1", "224.0.0.53", "255.255.255.255",
+	} {
+		t.Run(invalid, func(t *testing.T) {
+			c.DNS.BypassSources = []string{"192.168.31.53", invalid}
+			if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "dns.bypass_sources[1]: expected a unicast IPv4 address") {
+				t.Fatalf("Validate() = %v", err)
+			}
+		})
+	}
+}

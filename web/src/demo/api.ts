@@ -96,7 +96,11 @@ export const api = {
   journal: async (kind: JournalKind, params: Record<string, string | number | undefined>) => demo.journal(kind, params),
   journalStream,
   journalExportURL: (kind: JournalKind, _since: string) => download(demo.journal(kind, { limit: DEMO_JOURNAL_LIMIT }).entries, 'application/json'),
-  configExportURL: (_redacted = false) => download(demo.config(), 'application/json'),
+  configExportURL: (redacted = false) => {
+    const config = demo.config()
+    if (redacted) delete config.dns.bypass_sources
+    return download(config, 'application/json')
+  },
 } satisfies typeof import('../api').api
 
 // Demo sessions are always local and never request authentication.

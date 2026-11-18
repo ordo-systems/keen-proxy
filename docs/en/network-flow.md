@@ -10,7 +10,7 @@ KeenProxy runs on the router. Devices keep their usual LAN gateway and can use o
 
 | Traffic entering the LAN interface | What the router does |
 | --- | --- |
-| UDP or TCP to port 53 | Redirects it to the KeenProxy DNS frontend, even when the device addresses the router itself or a public DNS server. This rule applies on the configured interface independently of device routing policy. |
+| UDP or TCP to port 53 | Redirects it to the KeenProxy DNS frontend, even when the device addresses the router itself or a public DNS server. This rule applies on the configured interface independently of device routing policy, except for configured [DNS source exclusions](routing.md#dns). |
 | TCP from a participating source to a destination outside the bypass ranges | Uses REDIRECT to hand the connection to sing-box. The engine can recover the original destination and open a separate outbound connection. |
 | Other UDP from a participating source | In TPROXY mode, eligible packets are marked and policy routing delivers them locally without rewriting the destination. In REDIRECT mode, ordinary UDP is outside application interception. |
 | Forwarded UDP to port 443 from a participating source | Rejected in either mode. Browsers commonly retry over TCP, but an application that requires QUIC may fail. |

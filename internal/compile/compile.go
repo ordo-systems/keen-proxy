@@ -89,6 +89,13 @@ func Compile(in Input) (Output, error) {
 	for _, a := range conns.servers {
 		bypass = append(bypass, netip.PrefixFrom(a, a.BitLen()))
 	}
+	var dnsBypass []netip.Addr
+	if len(c.DNS.BypassSources) > 0 {
+		dnsBypass = make([]netip.Addr, len(c.DNS.BypassSources))
+		for i, source := range c.DNS.BypassSources {
+			dnsBypass[i], _ = netip.ParseAddr(source) // validated by model
+		}
+	}
 
 	chains, tags := failover(c)
 	sb, err := json.MarshalIndent(singBox(c, in.RuleSetDir, networks, conns, chains, tags), "", "  ")
@@ -112,6 +119,7 @@ func Compile(in Input) (Output, error) {
 		Failover:    chains,
 		Plan: netfilter.Plan{
 			BlockEncryptedDNS: c.DNS.BlockEncrypted,
+			DNSBypassSources:  dnsBypass,
 			Mode:              c.Intercept.Mode,
 			LAN:               c.LAN.Interface,
 			DNSPort:           mustPort(c.DNS.Listen),

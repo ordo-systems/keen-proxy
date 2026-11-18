@@ -42,6 +42,43 @@ func TestYAMLPreviewAndExport(t *testing.T) {
 	}
 }
 
+func TestDNSBypassSourcesApplyAndExport(t *testing.T) {
+	s, d := newServer()
+	h := s.Handler()
+	const resolver = "192.168.37.53"
+	preview := do(t, h, "POST", "/api/config/import", `{"yaml":"dns: {bypass_sources: [`+resolver+`]}"}`, "secret", lan)
+	if preview.Code != http.StatusOK || d.applied != nil || !strings.Contains(preview.Body.String(), `"bypass_sources":["`+resolver+`"]`) {
+		t.Fatalf("preview: %d %s, applied=%v", preview.Code, preview.Body, d.applied != nil)
+	}
+	applied := do(t, h, "PUT", "/api/config", preview.Body.String(), "secret", lan)
+	if applied.Code != http.StatusOK || !strings.Contains(applied.Body.String(), `"bypass_sources":["`+resolver+`"]`) {
+		t.Fatalf("apply: %d %s", applied.Code, applied.Body)
+	}
+	bad := do(t, h, "PUT", "/api/config", `{"dns":{"bypass_sources":["192.168.37.0/24"]}}`, "secret", lan)
+	if bad.Code != http.StatusUnprocessableEntity || !strings.Contains(bad.Body.String(), "dns.bypass_sources[0]") {
+		t.Fatalf("invalid apply: %d %s", bad.Code, bad.Body)
+	}
+	redacted := do(t, h, "GET", "/api/config/yaml?redacted=1", "", "secret", lan)
+	if redacted.Code != http.StatusOK || strings.Contains(redacted.Body.String(), resolver) {
+		t.Fatalf("redacted export: %d %s", redacted.Code, redacted.Body)
+	}
+	full := do(t, h, "GET", "/api/config/yaml", "", "secret", lan)
+	if full.Code != http.StatusOK {
+		t.Fatalf("backup: %d %s", full.Code, full.Body)
+	}
+	cfg, err := model.Parse(full.Body.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.DNS.BypassSources; len(got) != 1 || got[0] != resolver {
+		t.Fatalf("bypass sources in backup = %v", got)
+	}
+	cleared := do(t, h, "PUT", "/api/config", `{"dns":{"bypass_sources":[]}}`, "secret", lan)
+	if cleared.Code != http.StatusOK || strings.Contains(cleared.Body.String(), "bypass_sources") {
+		t.Fatalf("clear: %d %s", cleared.Code, cleared.Body)
+	}
+}
+
 func TestSupportExportRemovesURLSecrets(t *testing.T) {
 	s, d := newServer()
 	d.cfg.DNS.Upstreams = []string{"https://dns.example/private-token"}

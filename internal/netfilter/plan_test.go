@@ -47,6 +47,27 @@ COMMIT
 	}
 }
 
+func TestRenderDNSBypassIsScopedToLANPort53(t *testing.T) {
+	for _, mode := range []model.InterceptMode{model.InterceptRedirect, model.InterceptTProxy} {
+		t.Run(string(mode), func(t *testing.T) {
+			p := testPlan(mode)
+			p.BlockEncryptedDNS = true
+			baseline := p.Render()
+			p.DNSBypassSources = []netip.Addr{netip.MustParseAddr("192.168.7.104")}
+			dnsReturns := "-A KEENPROXY_DNS -i br0 -s 192.168.7.104/32 -p udp -m udp --dport 53 -j RETURN\n" +
+				"-A KEENPROXY_DNS -i br0 -s 192.168.7.104/32 -p tcp -m tcp --dport 53 -j RETURN\n"
+			tcpReturn := "-A KEENPROXY_TCP -i br0 -s 192.168.7.104/32 -p tcp -m tcp --dport 53 -j RETURN\n"
+			firstDNSRule := "-A KEENPROXY_DNS "
+			tcpRedirect := "-A KEENPROXY_TCP -i br0 -s 192.168.7.104/32 -p tcp -j REDIRECT"
+			want := strings.Replace(baseline, firstDNSRule, dnsReturns+firstDNSRule, 1)
+			want = strings.Replace(want, tcpRedirect, tcpReturn+tcpRedirect, 1)
+			if got := p.Render(); got != want {
+				t.Errorf("Render() =\n%s\nwant\n%s", got, want)
+			}
+		})
+	}
+}
+
 func TestRenderRedirectHasNoMangle(t *testing.T) {
 	p := testPlan(model.InterceptRedirect)
 	got := p.Render()

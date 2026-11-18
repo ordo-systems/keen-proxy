@@ -26,14 +26,16 @@ type watchdogRunner struct {
 	dropAfterInsert bool
 	dropNextCheck   bool
 	applyCalls      int
+	restoreInput    string
 	applyErr        error
 	applyErrAt      int
 	applyDelay      time.Duration
 }
 
-func (r *watchdogRunner) Run(_ context.Context, _ string, name string, args ...string) error {
+func (r *watchdogRunner) Run(_ context.Context, input string, name string, args ...string) error {
 	if name == "iptables-restore" {
 		r.applyCalls++
+		r.restoreInput = input
 		time.Sleep(r.applyDelay)
 		if r.applyErrAt == 0 || r.applyCalls == r.applyErrAt {
 			return r.applyErr
@@ -260,6 +262,10 @@ func TestWatchdogRecoversAfterFailedApplyAndRollback(t *testing.T) {
 			cfg := &model.Config{}
 			cfg.Defaults()
 			cfg.DNS.Listen = "127.0.0.1:0"
+			cfg.DNS.BypassSources = []string{"192.0.2.53"}
+			if trigger == "netfilter_hook" {
+				cfg.Groups = []model.Group{{Name: "Country route", Target: model.TargetDirect, Countries: []string{"RU"}}}
+			}
 			cfg.Intercept.TCPPort = uint16(listener.Addr().(*net.TCPAddr).Port)
 			listener.Close()
 
@@ -274,14 +280,25 @@ func TestWatchdogRecoversAfterFailedApplyAndRollback(t *testing.T) {
 				}
 			})
 
+			listening := d.dns
 			next := d.Config()
+			// Match the panel's normalization of omitted groups or entries.
+			if len(next.Groups) == 0 {
+				next.Groups = []model.Group{}
+			} else {
+				next.Groups[0].Entries = []string{}
+			}
 			next.LAN.Interface = "lan-test"
+			next.DNS.BypassSources = []string{"192.0.2.54"}
 			runner.applyErr = errors.New("synthetic xtables contention")
 			if err := d.Apply(ctx, next); !errors.Is(err, runner.applyErr) {
 				t.Fatalf("failed apply returned %v", err)
 			}
 			if runner.applyCalls != 3 || d.planOn || d.Config().LAN.Interface != cfg.LAN.Interface {
 				t.Fatalf("expected failed rollback to leave the previous plan pending: calls=%d on=%v", runner.applyCalls, d.planOn)
+			}
+			if d.dns != listening {
+				t.Fatal("changing DNS interception exceptions restarted the DNS listener")
 			}
 			runner.applyErr = nil
 			if trigger == "watchdog" {
@@ -298,6 +315,9 @@ func TestWatchdogRecoversAfterFailedApplyAndRollback(t *testing.T) {
 			}
 			if !d.Status(ctx).Firewall || d.restored != 1 || runner.applyCalls != 4 {
 				t.Fatalf("previous plan did not recover: on=%v restorations=%d applies=%d", d.planOn, d.restored, runner.applyCalls)
+			}
+			if !strings.Contains(runner.restoreInput, "-s 192.0.2.53/32") || strings.Contains(runner.restoreInput, "-s 192.0.2.54/32") {
+				t.Fatalf("recovered firewall did not use previous DNS bypass sources:\n%s", runner.restoreInput)
 			}
 			d.shutdown()
 			stopped = true

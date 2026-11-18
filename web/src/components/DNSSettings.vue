@@ -30,6 +30,13 @@ const additional = computed({
   get: () => dns.value.upstreams.slice(2),
   set: (servers: string[]) => { dns.value.upstreams = [...dns.value.upstreams.slice(0, 2), ...servers] },
 })
+const bypassSources = computed({
+  get: () => dns.value.bypass_sources ?? [],
+  set: (sources: string[]) => {
+    if (sources.length) dns.value.bypass_sources = sources
+    else delete dns.value.bypass_sources
+  },
+})
 const choices = computed(() => [
   { label: t('settings.customDNS'), value: customResolver },
   ...resolverOptions.value.map((option) => ({
@@ -200,6 +207,18 @@ onMounted(async () => {
           <NInput v-model:value="bootstrapIP" :input-props="{ 'aria-label': t('features.bootstrap') }" placeholder="8.8.8.8" />
           <NButton @click="addBootstrap">{{ t('common.add') }}</NButton>
         </div>
+        <NFormItem :label="t('settings.dnsBypassSources')">
+          <NDynamicInput
+            v-model:value="bypassSources"
+            :min="0"
+            :aria-label="t('settings.dnsBypassSources')"
+            role="group"
+            placeholder="192.0.2.53"
+          >
+            <template #create-button-default>{{ t('settings.dnsBypassSourcesAdd') }}</template>
+          </NDynamicInput>
+          <template #feedback>{{ t('settings.dnsBypassSourcesHint') }}</template>
+        </NFormItem>
         <NCheckbox v-model:checked="dns.block_encrypted">{{ t('features.block853') }}</NCheckbox>
         <NCheckbox v-model:checked="dns.firefox_canary">{{ t('features.canary') }}</NCheckbox>
         <p class="hint">{{ t('features.leakLimits') }}</p>

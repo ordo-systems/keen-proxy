@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { dnsPairIncomplete, selectDNSResolver } from '../src/dnsSettings.ts'
+import { dnsUpstreamsIncomplete, selectDNSResolver } from '../src/dnsSettings.ts'
 import type { DNSConfig } from '../src/types'
 
 const primary = 'https://one.example/dns-query'
@@ -8,17 +8,17 @@ const secondary = 'tls://two.example:853'
 const extra = '192.0.2.53'
 
 test('an unchanged legacy list does not block an unrelated edit', () => {
-  assert.equal(dnsPairIncomplete([], []), false)
-  assert.equal(dnsPairIncomplete([primary], [primary]), false)
+  assert.equal(dnsUpstreamsIncomplete([], []), false)
+  assert.equal(dnsUpstreamsIncomplete([primary], [primary]), false)
 })
 
-test('a changed list requires a distinct primary and secondary', () => {
-  assert.equal(dnsPairIncomplete([primary], []), true)
-  assert.equal(dnsPairIncomplete([], [primary]), true)
-  assert.equal(dnsPairIncomplete(['', secondary], []), true)
-  assert.equal(dnsPairIncomplete([primary, ' '], []), true)
-  assert.equal(dnsPairIncomplete([primary, primary], []), true)
-  assert.equal(dnsPairIncomplete([primary, secondary], []), false)
+test('a changed list accepts one upstream and rejects a missing or duplicate priority server', () => {
+  assert.equal(dnsUpstreamsIncomplete([extra], [primary, secondary]), false)
+  assert.equal(dnsUpstreamsIncomplete([], [primary]), true)
+  assert.equal(dnsUpstreamsIncomplete(['', secondary], []), true)
+  assert.equal(dnsUpstreamsIncomplete([primary, ' '], []), true)
+  assert.equal(dnsUpstreamsIncomplete([primary, primary], []), true)
+  assert.equal(dnsUpstreamsIncomplete([primary, secondary], []), false)
 })
 
 test('editing a resolver preserves the other slots, route, and bootstrap entries', () => {

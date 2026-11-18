@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue'
 import { api } from './api'
-import { dnsPairIncomplete } from './dnsSettings'
+import { dnsUpstreamsIncomplete } from './dnsSettings'
 import { t } from './i18n'
 import type { Config, Device, Status } from './types'
 
@@ -14,7 +14,7 @@ const state = reactive({
   error: '',
 })
 
-const invalidDNSPair = computed(() => state.config !== null && dnsPairIncomplete(
+const invalidDNSUpstreams = computed(() => state.config !== null && dnsUpstreamsIncomplete(
   state.config.dns.upstreams,
   state.saved ? (JSON.parse(state.saved) as Config).dns.upstreams : [],
 ))
@@ -51,7 +51,7 @@ export const store = {
   state,
   dirty: computed(() => state.config !== null && JSON.stringify(state.config) !== state.saved),
   applied: computed(() => (state.saved ? (JSON.parse(state.saved) as Config) : null)),
-  invalidDNSPair,
+  invalidDNSUpstreams,
 
   // Replace only the draft; the saved snapshot remains the dirty-state baseline.
   setDraft(c:Config){state.config=normalize(c);state.error=''},
@@ -84,7 +84,7 @@ export const store = {
   // Persist the whole draft and advance the baseline only after a successful save.
   async apply() {
     if (!state.config) return
-    if (invalidDNSPair.value) throw new Error(t('settings.dnsPairRequired'))
+    if (invalidDNSUpstreams.value) throw new Error(t('settings.dnsUpstreamsRequired'))
     state.applying = true
     state.error = ''
     try {

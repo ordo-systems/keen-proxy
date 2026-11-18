@@ -1,11 +1,11 @@
 import type { DNSConfig } from './types'
 
 // Keep existing resolver lists usable until the operator changes their order or contents.
-export function dnsPairIncomplete(current: string[], saved: string[]): boolean {
+export function dnsUpstreamsIncomplete(current: string[], saved: string[]): boolean {
   if (JSON.stringify(current) === JSON.stringify(saved)) return false
   const primary = current[0]?.trim()
   const secondary = current[1]?.trim()
-  return !primary || !secondary || primary === secondary
+  return !primary || (current.length > 1 && (!secondary || primary === secondary))
 }
 
 // Replace one priority slot while preserving the route, extra servers, and manual pins.

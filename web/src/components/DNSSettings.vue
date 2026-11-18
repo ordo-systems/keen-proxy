@@ -9,7 +9,7 @@ import type { DNSProfile, DNSCheck, FeatureStatus, DNSConfig } from '../types'
 const { t } = useI18n()
 const cfg = computed(() => store.state.config!)
 const dns = computed(() => cfg.value.dns)
-const invalidPair = store.invalidDNSPair
+const invalidUpstreams = store.invalidDNSUpstreams
 const profiles = ref<DNSProfile[]>([])
 const result = ref<DNSCheck>()
 const status = ref<FeatureStatus>()
@@ -47,12 +47,16 @@ function resolverSelection(slot: 0 | 1) {
   return endpoint || null
 }
 
-function choose(slot: 0 | 1, value: string) {
+function choose(slot: 0 | 1, value: string | null) {
   if (value === customResolver) {
     customSlots.value.add(slot)
     return
   }
   customSlots.value.delete(slot)
+  if (value === null) {
+    if (slot === 1) dns.value.upstreams.splice(1, 1)
+    return
+  }
   selectDNSResolver(dns.value, slot, value, selectedResolversFor(value)?.bootstrapIP)
 }
 
@@ -136,13 +140,14 @@ onMounted(async () => {
         <div v-for="field in slots" :key="field.index" class="resolver-field">
           <div class="resolver-label">
             <span class="resolver-order" aria-hidden="true">0{{ field.index + 1 }}</span>
-            {{ t(field.label) }} <span class="resolver-required" aria-hidden="true">*</span>
+            {{ t(field.label) }} <span v-if="field.index === 0" class="resolver-required" aria-hidden="true">*</span>
           </div>
           <NSelect
             :value="resolverSelection(field.index)"
             :options="choices"
-            :input-props="{ 'aria-label': t(field.label), 'aria-required': true }"
+            :input-props="{ 'aria-label': t(field.label), 'aria-required': field.index === 0 }"
             :placeholder="t('settings.dnsChoose')"
+            :clearable="field.index === 1"
             filterable
             @update:value="choose(field.index, $event)"
           />
@@ -153,12 +158,12 @@ onMounted(async () => {
             :value="dns.upstreams[field.index] ?? ''"
             :input-props="{ 'aria-label': t(field.label) + ' · ' + t('settings.customDNS') }"
             placeholder="https://dns.example.com/dns-query"
-            @update:value="selectDNSResolver(dns, field.index, $event.trim())"
+            @update:value="customSlots.add(field.index); selectDNSResolver(dns, field.index, $event.trim())"
           />
         </div>
       </div>
       <p class="hint">{{ t('settings.dnsCustomHint') }}</p>
-      <NAlert v-if="invalidPair" type="warning" role="alert">{{ t('settings.dnsPairRequired') }}</NAlert>
+      <NAlert v-if="invalidUpstreams" type="warning" role="alert">{{ t('settings.dnsUpstreamsRequired') }}</NAlert>
     </section>
     <section class="dns-section">
       <h2>{{ t('settings.dnsRouteTitle') }}</h2>
@@ -206,7 +211,7 @@ onMounted(async () => {
       </div>
     </details>
     <div class="dns-check actions">
-      <NButton :loading="busy" :disabled="invalidPair" @click="check">{{ t('settings.dnsCheck') }}</NButton>
+      <NButton :loading="busy" :disabled="invalidUpstreams" @click="check">{{ t('settings.dnsCheck') }}</NButton>
       <span v-if="status?.dns.route">{{ t('features.lastRoute') }}: {{ status.dns.route }}</span>
     </div>
     <NAlert v-if="result" :type="result.error ? 'warning' : 'success'">{{ result.demo ? t('features.demo') : `${result.route} · ${result.latency_ms} ms · ${result.error || 'NOERROR'}` }}</NAlert>

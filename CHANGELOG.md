@@ -2,7 +2,6 @@
 
 ## Unreleased
 
-- Allow a single DNS upstream in Settings and imported YAML; the secondary resolver is optional.
 - Raise the memory comparison's absolute allowance from 8 to 12 MiB after retained identical-binary ARM64 and AMD64 false alarms. Keep the 10% relative allowance and AWG stress limits; this reduces detection sensitivity, not application memory use.
 - Add full and lite Linux release binaries for x86-64 (AMD64 v1) and 32-bit x86 with SSE2, preserving the pinned compiler and embedded protocol features.
 - Support native OpenWrt installation and managed updates through procd on all six release architectures; retain Entware installation and expand its architecture selection. Preserve configuration, checksums, staged validation, and failed-start rollback. Native updates require the new checksummed `keenproxy.openwrt` release asset.
@@ -10,6 +9,7 @@
 - Experimental AmneziaWG 2/3 single-peer `.conf` import and editing through the shared draft/Apply workflow, using pinned sing-box-lx 1.14.4-lx.35 and matching dependency forks.
 - Use packet-sized buffers in the WireGuard/AmneziaWG receive queue on routers to reduce memory use under load. Large UDP/GRO read slots remain separate; TX is unchanged.
 - Keep existing DNS ownership and participant UDP/443 rejection; no Amnezia subscription integration.
+- Allow a single DNS upstream in Settings and imported YAML; the secondary resolver is optional.
 - Enable XHTTP, preserve VLESS encryption and expose REALITY key-share/TLS fragmentation options when importing connection links.
 - Reject XHTTP/Vision links without VLESS encryption while preserving compatible encrypted profiles.
 - Replace the external TrustTunnel client with the embedded lx outbound, migrate legacy connection settings on load, and remove external-client installation and process status.

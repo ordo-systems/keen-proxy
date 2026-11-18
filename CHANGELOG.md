@@ -40,6 +40,18 @@
 - Keep public local `build`, `build-router`, and `build-router-lite` gated by both memory checks, including under parallel make. Tagged release assets run stress and comparison as separate steps, then `make -o memory-stress -o memory-regression` with the public router targets only after those steps succeed in the same job. The accepted `e6a1a1d` reference, thresholds, sample counts, 320 MiB soft budget, 384 MiB ceiling, and pre-AWG recovery boundary are unchanged.
 - Document the separate repository-rules change required to preserve **Tests and builds** and **Network integration** and to add the three new check names. The former combined check **Memory regression and builds** was not a required status, and this change does not update branch protection.
 
+## [0.9.1](https://github.com/ordo-systems/keen-proxy/compare/v0.9.0...v0.9.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **dns:** allow a single upstream in Settings and YAML imports ([#42](https://github.com/ordo-systems/keen-proxy/issues/42)) ([e003c02](https://github.com/ordo-systems/keen-proxy/commit/e003c022ee8c6d680a689187abf6321d93641002))
+* **dns:** allow LAN resolvers to bypass DNS interception ([#43](https://github.com/ordo-systems/keen-proxy/issues/43)) ([43ae56e](https://github.com/ordo-systems/keen-proxy/commit/43ae56e3338d6a26bee35fc33d4e8ec55cddcadd))
+* **netfilter:** support legacy iptables-restore ([#44](https://github.com/ordo-systems/keen-proxy/issues/44)) ([b045b7c](https://github.com/ordo-systems/keen-proxy/commit/b045b7c4505546bfb80e45685ef4b58016e613f5))
+* **rules:** import and export resource lists ([#45](https://github.com/ordo-systems/keen-proxy/issues/45)) ([24a100b](https://github.com/ordo-systems/keen-proxy/commit/24a100b49f93d7747d3eb86dd81177d9eeb06b04))
+* **wireguard:** pin packet-sized receive buffers ([e63e7cc](https://github.com/ordo-systems/keen-proxy/commit/e63e7cccca0bd160a9d659f2b8b3821581e7d633))
+* **wireguard:** reduce queued receive buffer memory ([#40](https://github.com/ordo-systems/keen-proxy/issues/40)) ([e63e7cc](https://github.com/ordo-systems/keen-proxy/commit/e63e7cccca0bd160a9d659f2b8b3821581e7d633))
+
 ## [0.9.0](https://github.com/ordo-systems/keen-proxy/compare/v0.8.0...v0.9.0) (2026-11-17)
 
 

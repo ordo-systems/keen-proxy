@@ -76,7 +76,7 @@ const en: Messages = {
   "pasteYAML": "Paste YAML configuration",
   "validate": "Validate import",
   "yamlPreview": "Validated: {connections} connections, {groups} groups. Import replaces the current draft.",
-  "tooLarge": "File is too large (16 MiB maximum)",
+  "tooLarge": "File is too large (3 MiB maximum)",
   "filterKinds": {
     "none": "Unfiltered",
     "security": "Threat blocking",

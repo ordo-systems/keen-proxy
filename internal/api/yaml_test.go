@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/ordo-systems/keen-proxy/internal/daemon"
 	"github.com/ordo-systems/keen-proxy/internal/model"
@@ -251,6 +253,9 @@ func TestLargeLocalPresetConfigEndpoints(t *testing.T) {
 	if backup.Body.Len() <= 2<<20 {
 		t.Fatalf("backup did not exceed the legacy JSON envelope: %d bytes", backup.Body.Len())
 	}
+	if backup.Body.Len() > 3<<20 {
+		t.Fatalf("large supported backup exceeds the panel budget: %d bytes", backup.Body.Len())
+	}
 	restore, untouched := newServer()
 	w = httptest.NewRecorder()
 	restore.Handler().ServeHTTP(w, yamlImportRequest(bytes.NewReader(backup.Body.Bytes()), restore.Token))
@@ -273,12 +278,62 @@ func TestLargeLocalPresetConfigEndpoints(t *testing.T) {
 func TestYAMLRawImportBodyLimit(t *testing.T) {
 	s, _ := newServer()
 	h := s.Handler()
-	r := yamlImportRequest(strings.NewReader(strings.Repeat(" ", maxYAMLImportBytes+1)), s.Token)
+	r := yamlImportRequest(strings.NewReader(strings.Repeat(" ", (3<<20)+1)), s.Token)
 	r.ContentLength = -1 // enforce the reader limit even without a declared length
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized raw YAML: %d %s", w.Code, w.Body)
+	}
+	unread := &resourceUnreadBody{}
+	r = yamlImportRequest(unread, s.Token)
+	r.ContentLength = (3 << 20) + 1
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusRequestEntityTooLarge || unread.read {
+		t.Fatalf("oversized declared YAML: %d read=%t", w.Code, unread.read)
+	}
+}
+
+func TestYAMLImportSerializesWithResourceExchangeBeforeReading(t *testing.T) {
+	s, _ := newServer()
+	h := s.Handler()
+	started, resume := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(resume) })
+	t.Cleanup(unblock)
+	body := &resourcePausedReader{Reader: strings.NewReader("{}"), started: started, resume: resume}
+	done := startResourceRequest(h, yamlImportRequest(body, s.Token))
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("YAML import did not start reading")
+	}
+	for _, tc := range []struct{ path, media string }{
+		{"/api/config/import", "application/yaml"},
+		{"/api/config/import", "application/json"},
+		{resourcePreviewPath + "?format=txt", "application/octet-stream"},
+	} {
+		unread := &resourceUnreadBody{}
+		r := resourceRequest(tc.path, tc.media, unread, s.Token)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusServiceUnavailable || unread.read || w.Header().Get("Connection") != "close" {
+			t.Fatalf("competing %s (%s): %d read=%t %v %s", tc.path, tc.media, w.Code, unread.read, w.Header(), w.Body)
+		}
+	}
+	unblock()
+	select {
+	case w := <-done:
+		if w.Code != http.StatusOK {
+			t.Fatalf("active YAML import: %d %s", w.Code, w.Body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("active YAML import did not finish")
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, yamlImportRequest(strings.NewReader("{}"), s.Token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("YAML import did not release gate: %d %s", w.Code, w.Body)
 	}
 }
 

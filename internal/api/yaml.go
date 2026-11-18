@@ -10,8 +10,9 @@ import (
 	"github.com/ordo-systems/keen-proxy/internal/model"
 )
 
-// A YAML backup may be larger than the JSON draft because of block indentation.
-const maxYAMLImportBytes = 2 * maxConfigJSONBytes
+// Bound input before YAML allocates its document tree. Raw transport still
+// leaves room for a large local preset copied into a routing group.
+const maxYAMLImportBytes = 3 << 20
 
 // decodeFeatureRequest accepts one JSON value up to 2 MiB and rejects unknown fields.
 func decodeFeatureRequest(w http.ResponseWriter, r *http.Request, v any) error {
@@ -100,12 +101,20 @@ func (s *Server) previousConfig(w http.ResponseWriter, r *http.Request) {
 
 // yamlImport parses and validates YAML for preview without applying it.
 func (s *Server) yamlImport(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !s.resourceBusy.CompareAndSwap(false, true) {
+		rejectResourceRequest(w, r, http.StatusServiceUnavailable, "another file conversion is in progress")
+		return
+	}
+	defer s.resourceBusy.Store(false)
+	setFileConversionDeadlines(w)
+
 	var raw []byte
 	contentType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if contentType == "application/yaml" {
-		const tooLarge = "YAML configuration exceeds 16 MiB"
+		const tooLarge = "YAML configuration exceeds 3 MiB"
 		if r.ContentLength > maxYAMLImportBytes {
-			writeError(w, http.StatusRequestEntityTooLarge, tooLarge)
+			rejectResourceRequest(w, r, http.StatusRequestEntityTooLarge, tooLarge)
 			return
 		}
 		var err error

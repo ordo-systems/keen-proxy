@@ -217,7 +217,7 @@ If a LAN DNS forwarder's own queries are being redirected back to it, open **Adv
 
 Open **Settings → YAML configuration** to import, export, or restore a configuration. Importing or restoring prepares a draft. Review it and Apply. Keep unredacted backups private. The browser demo exports synthetic JSON-compatible data and disables YAML import.
 
-The panel accepts YAML backup files up to 16 MiB for preview. Applying the resulting draft still requires it to fit the 8 MiB configuration request limit.
+The panel accepts YAML backup files up to 3 MiB for preview and processes only one file conversion at a time. Applying the resulting draft still requires it to fit the 8 MiB configuration request limit. A larger full backup can exceed the panel's restore limit.
 
 ### Soft memory limit
 

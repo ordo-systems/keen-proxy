@@ -28,7 +28,7 @@ var (
 func (s *Server) resourceExchange(mediaType string, bodyLimit int64, convert func(http.ResponseWriter, resourceexchange.Format, io.Reader)) http.Handler {
 	authorized := s.auth(func(w http.ResponseWriter, r *http.Request) {
 		if !s.resourceBusy.CompareAndSwap(false, true) {
-			rejectResourceRequest(w, r, http.StatusServiceUnavailable, "another resource exchange is in progress")
+			rejectResourceRequest(w, r, http.StatusServiceUnavailable, "another file conversion is in progress")
 			return
 		}
 		defer s.resourceBusy.Store(false)
@@ -56,17 +56,21 @@ func (s *Server) resourceExchange(mediaType string, bodyLimit int64, convert fun
 			return
 		}
 
-		// A stalled upload or download must not hold the gate indefinitely.
-		controller := http.NewResponseController(w)
-		readDeadline := time.Now().Add(time.Minute)
-		_ = controller.SetReadDeadline(readDeadline)
-		_ = controller.SetWriteDeadline(readDeadline.Add(time.Minute))
+		setFileConversionDeadlines(w)
 		convert(w, format, http.MaxBytesReader(w, r.Body, bodyLimit))
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		authorized.ServeHTTP(w, r)
 	})
+}
+
+// A stalled upload or download must not hold the conversion gate indefinitely.
+func setFileConversionDeadlines(w http.ResponseWriter) {
+	controller := http.NewResponseController(w)
+	readDeadline := time.Now().Add(time.Minute)
+	_ = controller.SetReadDeadline(readDeadline)
+	_ = controller.SetWriteDeadline(readDeadline.Add(time.Minute))
 }
 
 func rejectResourceRequest(w http.ResponseWriter, r *http.Request, status int, message string) {

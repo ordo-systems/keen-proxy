@@ -162,7 +162,7 @@ func TestPlanFromModel(t *testing.T) {
 }
 
 func TestPlanFromModelDNSBypassSources(t *testing.T) {
-	cfg, err := model.Parse([]byte("dns: {bypass_sources: [192.168.31.53, 192.168.31.54]}"))
+	cfg, err := model.Parse([]byte("dns: {bypass_sources: [192.168.31.53, 192.168.31.54, 192.168.31.53]}"))
 	if err != nil {
 		t.Fatal(err)
 	}

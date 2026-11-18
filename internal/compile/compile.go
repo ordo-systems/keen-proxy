@@ -91,9 +91,15 @@ func Compile(in Input) (Output, error) {
 	}
 	var dnsBypass []netip.Addr
 	if len(c.DNS.BypassSources) > 0 {
-		dnsBypass = make([]netip.Addr, len(c.DNS.BypassSources))
-		for i, source := range c.DNS.BypassSources {
-			dnsBypass[i], _ = netip.ParseAddr(source) // validated by model
+		dnsBypass = make([]netip.Addr, 0, len(c.DNS.BypassSources))
+		seen := make(map[netip.Addr]struct{}, len(c.DNS.BypassSources))
+		for _, source := range c.DNS.BypassSources {
+			addr, _ := netip.ParseAddr(source) // validated by model
+			if _, exists := seen[addr]; exists {
+				continue
+			}
+			seen[addr] = struct{}{}
+			dnsBypass = append(dnsBypass, addr)
 		}
 	}
 

@@ -44,6 +44,15 @@ function demoCountry(ip: number, table = demoGeo): string {
 // JSON copies accept Vue proxies and isolate saved state from editable drafts.
 function copy<T>(value: T): T { return JSON.parse(JSON.stringify(value)) }
 
+// Match Go's IPv4 ParseAddr and global-or-link-local unicast checks.
+function isDNSBypassSource(value: unknown): boolean {
+  if (typeof value !== 'string') return false
+  const octets = value.split('.')
+  if (octets.length !== 4 || octets.some(octet => !/^(?:0|[1-9]\d{0,2})$/.test(octet) || Number(octet) > 255)) return false
+  const first = Number(octets[0])
+  return first !== 127 && (first < 224 || first >= 240) && value !== '0.0.0.0' && value !== '255.255.255.255'
+}
+
 // This small validation subset protects the demo state; the real daemon is authoritative.
 function validate(config: Config) {
   const ids = (config.connections ?? []).map(c => c.id)
@@ -55,6 +64,11 @@ function validate(config: Config) {
   const limit = config.system?.memory_limit_mib
   if (limit != null && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > maxMemoryLimitMiB)) {
     throw new Error('memory limit must be a positive integer number of MiB')
+  }
+  const sources = config.dns.bypass_sources
+  if (sources != null && !Array.isArray(sources)) throw new Error('dns.bypass_sources: expected a list of unicast IPv4 addresses')
+  for (const [index, source] of sources?.entries() ?? []) {
+    if (!isDNSBypassSource(source)) throw new Error(`dns.bypass_sources[${index}]: expected a unicast IPv4 address`)
   }
 }
 
@@ -69,6 +83,7 @@ export function createDemo(now: () => number = () => Date.now()) {
     telemetry.sync(saved)
     previous = copy(saved)
     saved = copy(config)
+    if (!saved.dns.bypass_sources?.length) delete saved.dns.bypass_sources
     // Null is inherit. Persist omission, never zero.
     if (saved.system == null || saved.system.memory_limit_mib == null) {
       if (saved.system) delete saved.system.memory_limit_mib

@@ -3,6 +3,7 @@ api: {listen: "127.0.0.1:8086", token_file: "bin/demo/token"}
 lan: {interface: br0, wan: eth3}
 dns:
   upstreams: ["https://1.1.1.1/dns-query", "https://77.88.8.8/dns-query"]
+  bypass_sources: ["192.0.2.53"]
 intercept: {mode: tproxy}
 connections:
   - id: fi

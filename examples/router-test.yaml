@@ -13,6 +13,8 @@ dns:
   route: direct
   block_encrypted: false
   firefox_canary: false
+  # Optional: allow only this LAN resolver's UDP/TCP port 53 traffic to bypass interception.
+  # bypass_sources: ["192.168.50.100"]
 intercept:
   mode: redirect
   tcp_port: 7901

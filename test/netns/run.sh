@@ -4,8 +4,8 @@
 #
 #   client (192.168.77.10) --br0-- router (this namespace) --veth-- wan (198.51.100.2)
 #
-# There is no router NAT: successful client HTTP requires the embedded engine
-# to carry the connection and return replies from the synthetic WAN.
+# There is no router NAT. WAN has a return route only for the DNS bypass source;
+# successful client HTTP still requires the embedded engine to carry the connection.
 set -eu
 
 KEENPROXY=/work/keenproxy
@@ -22,6 +22,7 @@ ip link add br0 type bridge && ip addr add 192.168.77.1/24 dev br0 && ip link se
 ip link add veth-c type veth peer name eth0 netns client
 ip link set veth-c master br0 up
 ip -n client addr add 192.168.77.10/24 dev eth0
+ip -n client addr add 192.168.77.11/24 dev eth0 # DNS forwarder source
 ip -n client link set eth0 up && ip -n client link set lo up
 ip -n client route add default via 192.168.77.1
 ip link add veth-w type veth peer name eth0 netns wan
@@ -31,10 +32,11 @@ ip -n wan addr add 198.51.100.3/24 dev eth0 # ordinary site; .2 hosts DNS and tu
 ip -n wan addr add 198.51.100.4/24 dev eth0 # Steam: reachable directly, but mapped to Finland by GeoIP
 ip -n wan addr add 198.51.100.5/24 dev eth0 # DNS fallback: RU, direct without a rule
 ip -n wan link set eth0 up && ip -n wan link set lo up
+ip -n wan route add 192.168.77.11/32 via 198.51.100.1
 
 # --- Synthetic internet: controlled DNS and HTTP targets
-ip netns exec wan dnsmasq -k --no-resolv --no-hosts --listen-address=198.51.100.2 --bind-interfaces \
-	--local-ttl=5 --address=/fallback.test/198.51.100.5 --address=/example.test/198.51.100.2 --address=/ads.test/198.51.100.2 --log-facility=/tmp/dnsmasq.log &
+ip netns exec wan dnsmasq -k --no-resolv --no-hosts --listen-address=198.51.100.2,198.51.100.3 --bind-interfaces \
+	--local-ttl=5 --address=/fallback.test/198.51.100.5 --address=/example.test/198.51.100.2 --address=/ads.test/198.51.100.2 --log-queries --log-facility=/tmp/dnsmasq.log &
 ip netns exec wan python3 -u -m http.server 80 --bind 198.51.100.3 >/tmp/http.log 2>&1 &
 ip netns exec wan python3 -u -m http.server 80 --bind 198.51.100.4 >/tmp/steam.log 2>&1 &
 ip netns exec wan python3 -u -m http.server 80 --bind 198.51.100.5 >/tmp/fallback-http.log 2>&1 &
@@ -76,7 +78,7 @@ SS="ss://$(printf 'aes-128-gcm:test-pass' | base64 | tr -d '=\n')@198.51.100.2:8
 SS_MAIN="ss://$(printf 'aes-128-gcm:test-pass' | base64 | tr -d '=\n')@198.51.100.2:8389"
 cat >/tmp/config.yaml <<YAML
 lan: {interface: br0}
-dns: {listen: "0.0.0.0:5354", upstreams: ["udp://198.51.100.2:53"], fallback: "127.0.0.1:53"}
+dns: {listen: "0.0.0.0:5354", upstreams: ["udp://198.51.100.2:53"], fallback: "127.0.0.1:53", bypass_sources: ["192.168.77.11"]}
 intercept: {mode: redirect}
 geoip: {file: /tmp/geo.mmdb}
 connections:
@@ -112,9 +114,22 @@ ok "UDP DNS intercepted (our frontend answered a query to 8.8.8.8)"
 a=$(ip netns exec client dig +tcp +short +time=2 +tries=1 @8.8.8.8 example.test A)
 [ "$a" = "198.51.100.2" ] || fail "DNS TCP: '$a'"
 ok "TCP DNS intercepted"
-a=$(ip netns exec client dig +short +time=2 +tries=1 @192.168.77.1 x.ads.test A)
+a=$(ip netns exec client dig -b 192.168.77.10 +short +time=2 +tries=1 @192.168.77.1 x.ads.test A)
 [ "$a" = "0.0.0.0" ] || fail "blocking: '$a'"
 ok "blocked domain → 0.0.0.0"
+for transport in +notcp +tcp; do
+	# .3 is not a tunnel endpoint: the generic TCP redirect would capture this without the source exception.
+	name="bypass-${transport#+}.ads.test"
+	a=$(ip netns exec client dig "$transport" -b 192.168.77.11 +short +time=2 +tries=1 @198.51.100.3 "$name" A)
+	[ "$a" = "198.51.100.2" ] || fail "DNS bypass ($transport): '$a'"
+	grep -Fq "query[A] $name from 192.168.77.11" /tmp/dnsmasq.log || fail "DNS bypass ($transport) did not reach WAN directly"
+	a=$(ip netns exec client dig "$transport" -b 192.168.77.10 +short +time=2 +tries=1 @198.51.100.3 "$name" A)
+	[ "$a" = "0.0.0.0" ] || fail "DNS interception for other clients ($transport): '$a'"
+done
+ok "DNS bypass permits UDP/TCP port 53 only for the configured source"
+r=$(ip netns exec client curl --interface 192.168.77.11 -s -m 5 -o /dev/null -w '%{http_code}' http://198.51.100.3/)
+[ "$r" = "200" ] && grep -q '^198.51.100.1 ' /tmp/http.log || fail "DNS bypass must not exempt HTTP"
+ok "DNS bypass source still uses TCP application interception"
 
 # --- Prove TCP forwarding through sing-box
 ip netns exec client curl -s -m 5 -o /dev/null http://198.51.100.3/ || { cat /tmp/keenproxy.log; fail "HTTP through keenProxy"; }
@@ -192,6 +207,17 @@ ok "journal: Steam direct and country routes, startup audit, files and export"
 # --- DNS fallback: preview is isolated; a live rule-set reload changes routing.
 api_get() { curl -fsS -m 5 -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8086/api/$1"; }
 api_post() { curl -fsS -m 10 -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$2" "http://127.0.0.1:8086/api/$1"; }
+
+# Remove the exception through the same configuration endpoint the panel uses.
+api_get config | python3 -c 'import json,sys; c=json.load(sys.stdin); del c["dns"]["bypass_sources"]; print(json.dumps(c))' >/tmp/dns-no-bypass.json
+curl -fsS -m 10 -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+	--data-binary @/tmp/dns-no-bypass.json http://127.0.0.1:8086/api/config >/dev/null || fail "clear DNS bypass"
+for transport in +notcp +tcp; do
+	a=$(ip netns exec client dig "$transport" -b 192.168.77.11 +short +time=2 +tries=1 @198.51.100.3 x.ads.test A)
+	[ "$a" = "0.0.0.0" ] || fail "DNS interception not restored on Apply ($transport): '$a'"
+done
+ok "clearing DNS bypass through Apply restores UDP/TCP interception"
+
 api_post domains/resolve '{"names":["fallback.test"],"preview":true}' >/tmp/dns-preview.json
 api_get domains | python3 -c 'import json,sys; assert not any(r["name"]=="fallback.test" for r in json.load(sys.stdin)["records"])' || fail "preview changed active cache"
 api_get config | python3 -c 'import json,sys; c=json.load(sys.stdin);c["groups"].append({"name":"DNS reserve","target":"vless","entries":["fallback.test"]});print(json.dumps(c))' >/tmp/dns-config.json

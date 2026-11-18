@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { resolveObjectURL } from 'node:buffer'
 import { test } from 'node:test'
 import { api, setUnauthorizedHandler } from '../src/demo/api.ts'
 import release from '../src/demo/release.json' with { type: 'json' }
@@ -70,6 +71,42 @@ test('demo API drives the UI without HTTP or EventSource operations', async () =
       URL.revokeObjectURL(url)
     }
   } finally { globalThis.fetch = original }
+})
+
+test('demo Apply validates explicit DNS source bypasses without changing the saved config on failure', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('Unexpected network request') })
+  const original = await api.config()
+  t.after(async () => { await api.saveConfig(original) })
+  const draft = await api.config()
+  const sources = ['192.168.7.40', '192.0.2.53', '169.254.1.2']
+  draft.dns.bypass_sources = sources
+  assert.deepEqual(await api.config(), original)
+  assert.deepEqual((await api.saveConfig(draft)).dns.bypass_sources, sources)
+  assert.deepEqual(await api.previousConfig(), original)
+  for (const redacted of [false, true]) {
+    const url = api.configExportURL(redacted)
+    try {
+      const exported = JSON.parse(await resolveObjectURL(url)!.text())
+      assert.deepEqual(exported.dns.bypass_sources, redacted ? undefined : sources)
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  }
+
+  for (const invalid of ['', 'resolver.local', '192.0.2.53/32', '::ffff:192.0.2.53',
+    '192.0.2.053', '192.0.2.256', ' 192.0.2.53', '0.0.0.0', '127.0.0.1', '224.0.0.1', '255.255.255.255']) {
+    const error = /dns\.bypass_sources\[3\]: expected a unicast IPv4 address/
+    draft.dns.bypass_sources = [...sources, invalid]
+    await assert.rejects(api.validateConfig(draft), error, invalid)
+    await assert.rejects(api.saveConfig(draft), error, invalid)
+    assert.deepEqual((await api.config()).dns.bypass_sources, sources)
+    assert.deepEqual(await api.previousConfig(), original)
+  }
+
+  draft.dns.bypass_sources = []
+  assert.equal(Object.hasOwn((await api.saveConfig(draft)).dns, 'bypass_sources'), false)
+  assert.equal(Object.hasOwn((await api.config()).dns, 'bypass_sources'), false)
+  assert.deepEqual((await api.previousConfig()).dns.bypass_sources, sources)
 })
 
 test('demo updates, rolls back, and saves a schedule without fetching', async (t) => {

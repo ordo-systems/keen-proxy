@@ -30,6 +30,8 @@ type Plan struct {
 	TCPPort           uint16
 	UDPPort           uint16
 	FWMark            uint32
+	// DNSBypassSources exempts only LAN TCP/UDP destination port 53.
+	DNSBypassSources []netip.Addr
 	// Sources lists participating addresses and networks; other devices bypass
 	// userspace interception entirely.
 	Sources []netip.Prefix
@@ -81,6 +83,12 @@ func (p Plan) Render() string {
 	w("*nat")
 	w(":%s - [0:0]", ChainDNS)
 	w(":%s - [0:0]", ChainTCP)
+	for _, source := range p.DNSBypassSources {
+		src := host(source)
+		for _, proto := range []string{"udp", "tcp"} {
+			w("-A %s %s -s %s -p %s -m %s --dport 53 -j RETURN", ChainDNS, in, src, proto, proto)
+		}
+	}
 	for _, proto := range []string{"udp", "tcp"} {
 		w("-A %s %s -p %s -m %s --dport 53 -j REDIRECT --to-ports %d", ChainDNS, in, proto, proto, p.DNSPort)
 	}
@@ -90,6 +98,10 @@ func (p Plan) Render() string {
 		}
 		for _, e := range p.Excluded {
 			w("-A %s -s %s -j RETURN", ChainTCP, host(e))
+		}
+		// A DNS-chain RETURN alone still reaches the generic TCP redirect.
+		for _, source := range p.DNSBypassSources {
+			w("-A %s %s -s %s -p tcp -m tcp --dport 53 -j RETURN", ChainTCP, in, host(source))
 		}
 		for _, s := range p.Sources {
 			w("-A %s %s -s %s -p tcp -j REDIRECT --to-ports %d", ChainTCP, in, s, p.TCPPort)

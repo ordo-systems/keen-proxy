@@ -78,6 +78,10 @@ Periodic health checks measure HTTP requests, not ICMP ping. They are separate f
 
 DNS settings choose upstream resolvers and whether requests travel directly or through a connection. Bootstrap addresses help resolve encrypted resolver hostnames. Failure policy controls whether a failed selected path may use direct DNS. Filter lists and exceptions change DNS answers, not every possible form of application traffic.
 
+If KeenProxy uses a resolver on the LAN and that resolver forwards requests through this router on port 53, the router can send them back to the same resolver. In **Settings → DNS → Advanced settings**, add the resolver's source IPv4 address to the DNS interception exceptions and choose **Apply**. This is `dns.bypass_sources` in YAML, for example `bypass_sources: ["192.168.1.100"]` under `dns`. Use a fixed address or DHCP reservation for the resolver. An empty list preserves the default interception behavior.
+
+The exception bypasses KeenProxy for all UDP/TCP port 53 queries from those addresses on the configured LAN interface, including DNS filtering for those queries. It does not affect other clients, application routing on other ports, or encrypted DNS rules. Only add trusted resolvers that need this exception; the router's own forwarding rules still apply.
+
 Use your router's actual network test procedure to evaluate UDP/TCP interception and encrypted-DNS handling. Applications can use their own resolvers. The UI and demo do not establish universal DNS-leak protection.
 
 ## DNS filters { #dns-filters }

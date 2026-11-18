@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -290,7 +291,7 @@ func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config) error {
 	d.reselectLocked()
 	d.filters.Configure(cfg.Filters)
 
-	if d.dns == nil || prev == nil || !reflect.DeepEqual(prev.DNS, cfg.DNS) || !reflect.DeepEqual(prev.Groups, cfg.Groups) {
+	if d.dns == nil || prev == nil || dnsFrontendChanged(prev.DNS, cfg.DNS) || dnsGroupsChanged(prev.Groups, cfg.Groups) {
 		if d.dns != nil {
 			d.dns.Close()
 			d.dns = nil
@@ -327,6 +328,26 @@ func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config) error {
 	d.commitMemoryLimit(cfg)
 	committed = true
 	return nil
+}
+
+// dnsFrontendChanged ignores the firewall-only source exemptions.
+func dnsFrontendChanged(prev, next model.DNS) bool {
+	prev.BypassSources, next.BypassSources = nil, nil
+	// The serialized config can contain an empty list for omitted upstreams.
+	if len(prev.Upstreams) == 0 && len(next.Upstreams) == 0 {
+		prev.Upstreams, next.Upstreams = nil, nil
+	}
+	return !reflect.DeepEqual(prev, next)
+}
+
+// dnsGroupsChanged treats the empty lists inserted by the panel as omissions.
+func dnsGroupsChanged(prev, next []model.Group) bool {
+	return !slices.EqualFunc(prev, next, func(a, b model.Group) bool {
+		if len(a.Entries) == 0 && len(b.Entries) == 0 {
+			a.Entries, b.Entries = nil, nil
+		}
+		return reflect.DeepEqual(a, b)
+	})
 }
 
 // shutdown removes interception before stopping the services it depends on

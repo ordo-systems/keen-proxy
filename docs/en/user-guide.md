@@ -196,6 +196,8 @@ Open **Settings → DNS** to choose the primary DNS server. The secondary is opt
 
 If you clear **Secondary DNS** while additional servers are configured, the first additional server moves into that slot. The other servers keep their priority order. To keep only the primary, remove all additional servers before clearing the secondary, then choose **Apply**.
 
+If a LAN DNS forwarder's own queries are being redirected back to it, open **Advanced settings → Bypass DNS interception for source IPs**, add the forwarder's own IPv4 address (not its upstream's address), and choose **Apply**. To restore interception, remove the address and Apply again. See [DNS interception exceptions](routing.md#dns) for the YAML key and scope.
+
 Open **Settings → YAML configuration** to import, export, or restore a configuration. Importing or restoring prepares a draft. Review it and Apply. Keep unredacted backups private. The browser demo exports synthetic JSON-compatible data and disables YAML import.
 
 ### Soft memory limit

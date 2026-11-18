@@ -132,6 +132,8 @@ type DNS struct {
 	Route      string `yaml:"route,omitempty" json:"route,omitempty"`
 	Connection string `yaml:"connection,omitempty" json:"connection,omitempty"`
 	Failure    string `yaml:"failure,omitempty" json:"failure,omitempty"`
+	// BypassSources exempts listed LAN source addresses from IPv4 port 53 interception.
+	BypassSources []string `yaml:"bypass_sources,omitempty" json:"bypass_sources,omitempty"`
 	// Bootstrap pins upstream hostnames to IPs without an initial DNS lookup.
 	Bootstrap      map[string]string `yaml:"bootstrap,omitempty" json:"bootstrap,omitempty"`
 	BlockEncrypted bool              `yaml:"block_encrypted,omitempty" json:"block_encrypted,omitempty"`

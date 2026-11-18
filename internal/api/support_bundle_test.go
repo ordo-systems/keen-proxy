@@ -32,6 +32,7 @@ func TestSupportBundleIncludesRetainedHistoryWithoutPrivateValues(t *testing.T) 
 	s, d := newServer()
 	s.Token = "private-panel-token"
 	d.cfg.API.TokenFile = "/private/router/user/token"
+	d.cfg.DNS.BypassSources = []string{"192.168.37.53"}
 	d.cfg.Clients = []model.Client{{IP: "192.168.7.42", MAC: "aa:bb:cc:dd:ee:ff", Name: "private-device-name"}}
 	d.cfg.Connections = []model.Connection{{ID: "private-connection", Name: "private-tunnel-name", Type: model.ConnLink, Link: "vless://secret@example.net"}}
 	d.cfg.Groups = []model.Group{{Name: "private rule name", Target: "private-connection", Entries: []string{"private-host.example"}}}
@@ -93,7 +94,7 @@ func TestSupportBundleIncludesRetainedHistoryWithoutPrivateValues(t *testing.T) 
 			t.Errorf("archive missing build identity: %s", files["status.json"])
 		}
 		for name, data := range files {
-			for _, secret := range []string{s.Token, "private", "retired-password", "192.168.7.42", "aa:bb:cc:dd:ee:ff", "203.0.113.9", "vless://", "example.net"} {
+			for _, secret := range []string{s.Token, "private", "retired-password", "192.168.7.42", "192.168.37.53", "aa:bb:cc:dd:ee:ff", "203.0.113.9", "vless://", "example.net"} {
 				if strings.Contains(data, secret) {
 					t.Errorf("%s contains raw value %q", name, secret)
 				}

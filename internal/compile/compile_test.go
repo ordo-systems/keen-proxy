@@ -161,6 +161,24 @@ func TestPlanFromModel(t *testing.T) {
 	}
 }
 
+func TestPlanFromModelDNSBypassSources(t *testing.T) {
+	cfg, err := model.Parse([]byte("dns: {bypass_sources: [192.168.31.53, 192.168.31.54, 192.168.31.53]}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Compile(Input{Config: cfg, RuleSetDir: "/var/keenproxy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := out.Plan.DNSBypassSources
+	if len(got) != 2 || got[0] != netip.MustParseAddr("192.168.31.53") || got[1] != netip.MustParseAddr("192.168.31.54") {
+		t.Fatalf("DNSBypassSources = %v", got)
+	}
+	if len(out.Plan.Sources) != 0 || len(out.Plan.Excluded) != 0 {
+		t.Fatal("DNS bypass must not change participation or device exclusion")
+	}
+}
+
 func joinField(v any) string {
 	list, _ := v.([]any)
 	var parts []string

@@ -15,7 +15,8 @@
     ],
     "listen": "127.0.0.1:5353",
     "fallback": "",
-    "route": "direct"
+    "route": "direct",
+    "bypass_sources": ["192.0.2.53"]
   },
   "intercept": {
     "mode": "tproxy",

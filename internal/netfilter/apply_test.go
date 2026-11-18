@@ -3,6 +3,8 @@ package netfilter
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -59,6 +61,67 @@ func TestApplyInsertsOnlyMissingJumps(t *testing.T) {
 	}
 	if len(inserts) != 1 || inserts[0] != "iptables -w -t nat -I PREROUTING 1 -j KEENPROXY_DNS" {
 		t.Errorf("expected insertion of only the DNS jump, got %v", inserts)
+	}
+}
+
+func TestApplyLegacyRestoreCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name, restoreWithWait, restoreWithoutWait, wantError string
+	}{
+		{
+			name:               "legacy option parser",
+			restoreWithWait:    `printf "%s: invalid option -- 'w'\nUsage: iptables-restore\n" "$0" >&2; exit 1`,
+			restoreWithoutWait: `cat > "$RESTORE_INPUT"`,
+		},
+		{
+			name:               "rule error is not an option rejection",
+			restoreWithWait:    `printf "iptables-restore: line 7 failed\nrule text: invalid option -- 'w'\n" >&2; exit 1`,
+			restoreWithoutWait: `cat > "$RESTORE_INPUT"`,
+			wantError:          "line 7 failed",
+		},
+		{
+			name:               "legacy restore still reports rule errors",
+			restoreWithWait:    `printf "%s: invalid option -- 'w'\n" "$0" >&2; exit 1`,
+			restoreWithoutWait: `printf "iptables-restore: line 7 failed\n" >&2; exit 1`,
+			wantError:          "line 7 failed",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			input := filepath.Join(dir, "rules")
+			t.Setenv("RESTORE_INPUT", input)
+			restore := filepath.Join(dir, "iptables-restore")
+			script := `#!/bin/sh
+case "$*" in
+  '-w --noflush') ` + tc.restoreWithWait + ` ;;
+  '--noflush') ` + tc.restoreWithoutWait + ` ;;
+  *) exit 99 ;;
+esac
+`
+			if err := os.WriteFile(restore, []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			iptables := filepath.Join(dir, "iptables")
+			if err := os.WriteFile(iptables, []byte("#!/bin/sh\n[ \"$1\" = -w ] && [ \"$4\" = -C ]\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			f := &Firewall{Run: ExecRunner{}, IPTables: iptables, Restore: restore}
+			p := testPlan(model.InterceptTProxy)
+			err := f.Apply(t.Context(), p)
+			if tc.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+					t.Fatalf("Apply error = %v, want %q", err, tc.wantError)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(input)
+			if err != nil || string(got) != p.Render() {
+				t.Fatalf("legacy restore did not receive the full firewall plan: %v", err)
+			}
+		})
 	}
 }
 

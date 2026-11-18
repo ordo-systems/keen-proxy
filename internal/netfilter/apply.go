@@ -20,12 +20,17 @@ type ExecRunner struct{}
 // Run executes one firewall command, forwarding optional input and preserving stderr on failure.
 func (ExecRunner) Run(ctx context.Context, stdin, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
+	// Keep option-parser diagnostics stable across router locales.
+	cmd.Env = append(cmd.Environ(), "LC_ALL=C")
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if exit, ok := err.(*exec.ExitError); ok {
+			exit.Stderr = stderr.Bytes()
+		}
 		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
@@ -46,7 +51,13 @@ func NewFirewall() *Firewall {
 // Apply loads owned chains and installs jumps idempotently, restoring rules
 // after an NDM firewall rebuild when needed.
 func (f *Firewall) Apply(ctx context.Context, p Plan) error {
-	if err := f.Run.Run(ctx, p.Render(), f.Restore, "-w", "--noflush"); err != nil {
+	rules := p.Render()
+	err := f.Run.Run(ctx, rules, f.Restore, "-w", "--noflush")
+	if restoreRejectsWait(err) {
+		// Legacy restore rejects the option before reading or applying the plan.
+		err = f.Run.Run(ctx, rules, f.Restore, "--noflush")
+	}
+	if err != nil {
 		return err
 	}
 	for _, j := range p.Jumps() {
@@ -58,6 +69,15 @@ func (f *Firewall) Apply(ctx context.Context, p Plan) error {
 		}
 	}
 	return nil
+}
+
+func restoreRejectsWait(err error) bool {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return false
+	}
+	firstLine, _, _ := bytes.Cut(exit.Stderr, []byte("\n"))
+	return bytes.HasSuffix(firstLine, []byte(": invalid option -- 'w'"))
 }
 
 // Remove detaches jumps before flushing and deleting owned chains so client

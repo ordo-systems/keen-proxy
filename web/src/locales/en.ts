@@ -596,6 +596,7 @@ const en: Messages = {
     dnsBypassSources: 'Bypass DNS interception for source IPs',
     dnsBypassSourcesAdd: 'Add a source IPv4 address',
     dnsBypassSourcesHint: 'Enter individual unicast IPv4 addresses of the local resolver, not its upstream servers. These sources skip DNS interception on TCP and UDP port 53 only. Leave empty for no bypass.',
+    dnsBypassDemo: 'The demo saves these exceptions in memory only. It does not change firewall rules or send DNS traffic.',
     bootstrapHost: 'Bootstrap hostname',
     dnsCheck: 'Check DNS',
     intro: 'DNS, interception method, router network and panel access. Changes take effect after “Apply”.',

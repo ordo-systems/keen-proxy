@@ -219,6 +219,7 @@ onMounted(async () => {
           </NDynamicInput>
           <template #feedback>{{ t('settings.dnsBypassSourcesHint') }}</template>
         </NFormItem>
+        <NAlert v-if="status?.demo" type="info">{{ t('settings.dnsBypassDemo') }}</NAlert>
         <NCheckbox v-model:checked="dns.block_encrypted">{{ t('features.block853') }}</NCheckbox>
         <NCheckbox v-model:checked="dns.firefox_canary">{{ t('features.canary') }}</NCheckbox>
         <p class="hint">{{ t('features.leakLimits') }}</p>

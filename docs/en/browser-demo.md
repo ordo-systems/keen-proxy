@@ -10,6 +10,7 @@ Try editing a group, inspecting a connection, previewing a sample preset, select
 
 - Configuration is kept in this page's memory and resets on reload.
 - The demo does not contact a router or proxy server, query DNS, fetch filter lists, or perform connectivity checks.
+- In **Settings → DNS → Advanced settings → Bypass DNS interception for source IPs**, edit or remove the sample `192.0.2.53` and choose **Apply**. Navigate away and reopen DNS settings to verify the change. This only changes the demo configuration; no firewall rules are installed and no DNS packets are sent. See [DNS interception exceptions](routing.md#dns) for the router behavior.
 - Never enter actual credentials. Use the supplied placeholders.
 - The monitor simulates traffic every three seconds. The routing journal receives new synthetic events and supports live pause, filters, and pagination. Apply adds an audit entry. The catalog contains one synthetic preset.
 - **Logs → Audit** includes synthetic recovery from the netfilter hook, recovery from the watchdog timer, failed verification, and a historical record with no source metadata. The Who column keeps the filterable actor and shows the recovery trigger beneath it; expand an entry for the rule, exit code and raw error. Durations are simulated check-and-recovery times, not measured outages. These examples do not invoke real hooks or change firewall rules.

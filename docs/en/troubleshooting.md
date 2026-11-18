@@ -30,7 +30,7 @@ Check whether the group is enabled and applied. Review its DNS route, resolver a
 
 ## Why does the watchdog restore interception rules?
 
-Older Keenetic Entware builds (such as `iptables 1.4.21-6`) can accept `-w` in `iptables` but reject it in `iptables-restore`. KeenProxy retries that specific option error without `-w`, keeping `--noflush` to preserve unrelated firewall rules. This does not bypass missing Netfilter or TPROXY support.
+Older Keenetic Entware builds (such as `iptables 1.4.21-6`) can accept `-w` in `iptables` but reject it in `iptables-restore`. KeenProxy retries once without `-w` only for the known glibc (`invalid option -- 'w'`) or musl (`unrecognized option: w`) diagnostic. It keeps `--noflush` to preserve unrelated firewall rules. Other restore errors are reported as-is. This does not bypass missing Netfilter or TPROXY support.
 
 The watchdog checks the required firewall entry jumps every 30 seconds by default. A failed check triggers a repair attempt. The audit event records the first failed table, built-in chain, target, exit code and command error. Exit code 1 is reported as a failed check, because the code alone cannot establish why the command failed. A value of -1 means no normal process exit code was available.
 

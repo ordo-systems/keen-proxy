@@ -74,6 +74,17 @@ func TestApplyLegacyRestoreCompatibility(t *testing.T) {
 			restoreWithoutWait: `cat > "$RESTORE_INPUT"`,
 		},
 		{
+			name:               "musl option parser",
+			restoreWithWait:    `printf "%s: unrecognized option: w\n" "$0" >&2; exit 1`,
+			restoreWithoutWait: `cat > "$RESTORE_INPUT"`,
+		},
+		{
+			name:               "another unrecognized option is not retried",
+			restoreWithWait:    `printf "%s: unrecognized option: noflush\n" "$0" >&2; exit 1`,
+			restoreWithoutWait: `cat > "$RESTORE_INPUT"`,
+			wantError:          "unrecognized option: noflush",
+		},
+		{
 			name:               "rule error is not an option rejection",
 			restoreWithWait:    `printf "iptables-restore: line 7 failed\nrule text: invalid option -- 'w'\n" >&2; exit 1`,
 			restoreWithoutWait: `cat > "$RESTORE_INPUT"`,

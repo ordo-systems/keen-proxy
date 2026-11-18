@@ -77,7 +77,9 @@ func restoreRejectsWait(err error) bool {
 		return false
 	}
 	firstLine, _, _ := bytes.Cut(exit.Stderr, []byte("\n"))
-	return bytes.HasSuffix(firstLine, []byte(": invalid option -- 'w'"))
+	// Match only the glibc and musl getopt diagnostics for the short -w option.
+	return bytes.HasSuffix(firstLine, []byte(": invalid option -- 'w'")) ||
+		bytes.HasSuffix(firstLine, []byte(": unrecognized option: w"))
 }
 
 // Remove detaches jumps before flushing and deleting owned chains so client

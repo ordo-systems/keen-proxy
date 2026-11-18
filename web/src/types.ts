@@ -58,6 +58,14 @@ export interface Group {
   disabled_categories?: string[]
 }
 
+// A user-owned list that has no routing effect until copied into a group.
+export interface LocalPreset {
+  id: string
+  name: string
+  entries: string[]
+  disabled_entries?: string[]
+}
+
 // Subnet-level default routing policy for matching devices.
 export interface Network {
   name: string
@@ -90,6 +98,7 @@ export interface Config {
   failover?: { url: string; interval: number; down_after: number; up_after: number }
   connections: Connection[] | null
   groups: Group[] | null
+  local_presets?: LocalPreset[]
   networks: Network[] | null
   clients: Client[] | null
   // Omitted or null uses the startup Go limit, or the daemon's 768 MiB default.

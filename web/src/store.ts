@@ -34,6 +34,7 @@ export function normalize(c: Config): Config {
   c.clients ??= []
   c.dns.upstreams ??= []
   for (const g of c.groups) g.entries ??= []
+  for (const preset of c.local_presets ?? []) preset.entries ??= []
   c.filters ??= { sources:[],exceptions:[] }
  c.filters.sources ??= []
  c.filters.exceptions ??= []

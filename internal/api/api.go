@@ -31,12 +31,15 @@ import (
 	"github.com/ordo-systems/keen-proxy/internal/journal"
 	"github.com/ordo-systems/keen-proxy/internal/links"
 	"github.com/ordo-systems/keen-proxy/internal/model"
+	"github.com/ordo-systems/keen-proxy/internal/resourceexchange"
 	"github.com/ordo-systems/keen-proxy/internal/stats"
 	"github.com/ordo-systems/keen-proxy/internal/trusttunnel"
 	"github.com/ordo-systems/keen-proxy/internal/update"
 )
 
 const cookieName = "keenproxy_token"
+
+const maxConfigJSONBytes = 8 << 20
 
 // Daemon defines the daemon capabilities used by the API and its test doubles.
 type Daemon interface {
@@ -63,7 +66,8 @@ type Server struct {
 	Log     *slog.Logger
 	Updates *update.Manager
 
-	supportBusy atomic.Bool
+	supportBusy  atomic.Bool
+	resourceBusy atomic.Bool
 
 	// Track the last audited trusted login per address so opening another page
 	// does not produce a separate login event.
@@ -101,6 +105,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/catalog", s.auth(s.catalog))
 	mux.Handle("GET /api/features", s.auth(s.features))
 	mux.Handle("POST /api/presets/preview", s.auth(s.presetPreview))
+	mux.Handle("POST /api/resources/preview", s.resourceExchange("application/octet-stream", resourceexchange.MaxFileBytes, previewResources))
+	mux.Handle("POST /api/resources/export", s.resourceExchange("application/json", maxResourceExportBytes, exportResources))
 	mux.Handle("POST /api/filters/refresh", s.auth(s.refreshFilters))
 	mux.Handle("POST /api/dns/check", s.auth(s.checkDNS))
 	mux.Handle("GET /api/geoip", s.auth(s.geoDatabases))
@@ -260,7 +266,7 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 // decodeConfig parses a size-bounded JSON configuration and applies model defaults.
 func decodeConfig(r *http.Request) (*model.Config, error) {
 	var cfg model.Config
-	dec := json.NewDecoder(io.LimitReader(r.Body, 8<<20))
+	dec := json.NewDecoder(io.LimitReader(r.Body, maxConfigJSONBytes))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, err

@@ -59,6 +59,8 @@ type Config struct {
 	Groups        []Group      `yaml:"groups" json:"groups"`
 	Networks      []Network    `yaml:"networks" json:"networks"`
 	Clients       []Client     `yaml:"clients" json:"clients"`
+
+	LocalPresets []LocalPreset `yaml:"local_presets,omitempty" json:"local_presets,omitempty"`
 }
 
 // maxMemoryLimitMiB is the largest MiB count whose byte size fits in int64.
@@ -430,6 +432,7 @@ func (c *Config) Validate() error {
 	errs = append(errs, c.normalizeConnections()...)
 	c.validateFeatures(add)
 	c.GeoIP.validate(add)
+	c.validateLocalPresets(add)
 	if mib := c.System.MemoryLimitMiB; mib != nil && (*mib < 1 || *mib > maxMemoryLimitMiB) {
 		add("system.memory_limit_mib: must be a positive integer no greater than %d", maxMemoryLimitMiB)
 	}

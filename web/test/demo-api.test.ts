@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import { api, setUnauthorizedHandler } from '../src/demo/api.ts'
 import release from '../src/demo/release.json' with { type: 'json' }
 import { demoRevision, demoVersion } from '../src/demo/updates.ts'
+import { snapshotBundledPreset, stageBundledPreset } from '../src/presetDraft.ts'
 test('demo API drives the UI without HTTP or EventSource operations', async () => {
   const original = globalThis.fetch
   globalThis.fetch = async () => { throw new Error('Unexpected network request') }
@@ -46,8 +47,19 @@ test('demo API drives the UI without HTTP or EventSource operations', async () =
     const stream = api.journalStream('routes')
     assert.equal(stream.onmessage, null)
     stream.close()
-    const preview = await api.previewPreset(config, 'sample-work', 'nl')
-    await api.saveConfig(preview.config)
+    const snapshot = snapshotBundledPreset(config, 'sample-work')
+    const pending = api.previewPreset(config, 'sample-work', 'nl')
+    config.local_presets = [{ id: 'custom-pending', name: 'Added while previewing', entries: ['new.test'] }]
+    const result = await pending
+    const plan = { snapshot, result }
+    assert.equal(stageBundledPreset(plan, config, false), undefined)
+    assert.equal(config.local_presets[0]!.entries[0], 'new.test')
+    delete config.local_presets
+    assert.equal(stageBundledPreset(plan, config, true), undefined)
+    assert.equal(stageBundledPreset(plan, structuredClone(config), false), undefined)
+    const staged = stageBundledPreset(plan, config, false)
+    assert.ok(staged)
+    await api.saveConfig(staged)
     assert.deepEqual(await api.previousConfig(), config)
     assert.equal((await api.config()).groups!.length, config.groups!.length + 1)
     await api.saveConfig(config)
@@ -107,6 +119,26 @@ test('demo Apply validates explicit DNS source bypasses without changing the sav
   assert.equal(Object.hasOwn((await api.saveConfig(draft)).dns, 'bypass_sources'), false)
   assert.equal(Object.hasOwn((await api.config()).dns, 'bypass_sources'), false)
   assert.deepEqual((await api.previousConfig()).dns.bypass_sources, sources)
+})
+
+test('demo applies local presets without creating routes or exposing them in support exports', async (t) => {
+  const original = await api.config()
+  t.after(async () => { await api.saveConfig(original) })
+  const draft = await api.config()
+  draft.local_presets = [{ id: 'private-list', name: 'Internal list', entries: ['lab.example'], disabled_entries: ['lab.example'] }]
+  assert.deepEqual(await api.config(), original)
+  const applied = await api.saveConfig(draft)
+  assert.deepEqual(applied.local_presets, draft.local_presets)
+  assert.deepEqual(applied.groups, original.groups)
+  for (const redacted of [false, true]) {
+    const url = api.configExportURL(redacted)
+    try {
+      const contents = JSON.parse(await resolveObjectURL(url)!.text())
+      assert.deepEqual(contents.local_presets, redacted ? undefined : draft.local_presets)
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  }
 })
 
 test('demo updates, rolls back, and saves a schedule without fetching', async (t) => {

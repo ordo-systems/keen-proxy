@@ -1,5 +1,6 @@
 import type { Connection, DiagnosticReport, Catalog, FeatureStatus, DNSCheck, Config, GeoLookup, GeoStatus, Device, DomainStatus, Session, HostStat, JournalKind, JournalPage, LinkPreview, StatsSnapshot, Status } from './types'
 import type { UpdatePreferences, UpdateSelection, UpdateStatus } from './types'
+import type { ResourceExport, ResourceFormat, ResourceList, ResourcePreview } from './resourceExchange'
 import { ApiError } from './apiError.ts'
 
 export { ApiError } from './apiError.ts'
@@ -20,12 +21,13 @@ function httpError(status: number, text: string): ApiError {
 }
 
 // Share cookie authentication and the login handler across JSON and file requests.
-async function send(method: string, path: string, body?: unknown): Promise<Response> {
+async function send(method: string, path: string, body?: unknown, fileType = 'application/octet-stream'): Promise<Response> {
+  const file = body instanceof Blob ? body : undefined
   const res = await fetch(path, {
     method,
     credentials: 'same-origin',
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    headers: body === undefined ? undefined : { 'Content-Type': file ? fileType : 'application/json' },
+    body: file ?? (body === undefined ? undefined : JSON.stringify(body)),
   })
   if (!res.ok) {
     if (res.status === 401 && path !== '/api/login') onUnauthorized()
@@ -34,8 +36,8 @@ async function send(method: string, path: string, body?: unknown): Promise<Respo
   return res
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const text = await (await send(method, path, body)).text()
+async function request<T>(method: string, path: string, body?: unknown, fileType?: string): Promise<T> {
+  const text = await (await send(method, path, body, fileType)).text()
   return (text ? JSON.parse(text) : undefined) as T
 }
 
@@ -56,6 +58,9 @@ export const api = {
  catalog:()=>request<Catalog>('GET','/api/catalog'),
  features:()=>request<FeatureStatus>('GET','/api/features'),
  previewPreset:(config:Config,id:string,target:string,index?:number)=>request<{config:Config;diff:{added:string[];removed:string[]}}>('POST','/api/presets/preview',{config,id,target,index}),
+ resourceExchangeAvailable: true,
+ previewResources: (format: ResourceFormat, file: Blob) => request<ResourcePreview>('POST', `/api/resources/preview?format=${format}`, file),
+ exportResources: (format: ResourceFormat, list: ResourceList) => request<ResourceExport>('POST', `/api/resources/export?format=${format}`, list),
  refreshFilters:()=>request<unknown>('POST','/api/filters/refresh'),
  checkDNS:(cfg:Config)=>request<DNSCheck>('POST','/api/dns/check',cfg),
  // Country databases of the applied configuration; an id targets one database, even a disabled one.
@@ -63,7 +68,8 @@ export const api = {
  updateGeo:(id='')=>request<GeoStatus>('POST','/api/geoip/update',{id}),
  lookupGeo:(ip:string,id='')=>request<GeoLookup>('POST','/api/geoip/lookup',{ip,id}),
  previousConfig:()=>request<Config>('GET','/api/config/previous'),
- importYAML:(yaml:string)=>request<Config>('POST','/api/config/import',{yaml}),
+ importYAML: (yaml: string | Blob) => request<Config>('POST', '/api/config/import',
+   typeof yaml === 'string' ? new Blob([yaml]) : yaml, 'application/yaml'),
 
   domains: () => request<DomainStatus>('GET', '/api/domains'),
   resolveDomains: (names: string[], preview = false) => request<DomainStatus>('POST', '/api/domains/resolve', { names, preview }),

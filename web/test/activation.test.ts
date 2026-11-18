@@ -1,12 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { reactive } from 'vue'
 import {
   activeChain,
   activeExit,
   dropRemoved,
+  canonicalEntry,
   entryIdentity,
   entryOff,
   geoInactive,
+  groupDisabledEntryKeys,
   migrateFlag,
   retainPresetActivation,
   ruleActive,
@@ -20,14 +23,58 @@ import {
 import type { Config, Group } from '../src/types.ts'
 
 test('entry identity matches canonical domain and prefix spellings', () => {
-  assert.equal(entryIdentity('*.Example.COM'), 'example.com')
-  assert.equal(entryIdentity('example.com # note'), 'example.com')
-  assert.equal(entryIdentity('192.0.2.1'), '192.0.2.1/32')
-  assert.equal(entryIdentity('192.0.2.9/24'), '192.0.2.0/24')
+  assert.deepEqual(canonicalEntry('*.Example.COM'), { type: 'domain_suffix', value: 'example.com' })
+  assert.equal(entryIdentity('example.com # note'), 'domain_suffix:example.com')
+  assert.equal(entryIdentity('192.0.2.1'), 'ip_cidr:192.0.2.1/32')
+  assert.equal(entryIdentity('192.0.2.9/24'), 'ip_cidr:192.0.2.0/24')
   assert.equal(entryIdentity('*.example.com'), entryIdentity('example.com'))
-  assert.equal(entryIdentity('2001:0DB8:0:0::1'), '2001:db8::1/128')
-  assert.equal(entryIdentity('2001:db8::a/64'), '2001:db8::/64')
-  assert.equal(entryIdentity('b\u00fccher.example.'), 'xn--bcher-kva.example')
+  assert.equal(entryIdentity('2001:0DB8:0:0::1'), 'ip_cidr:2001:db8::1/128')
+  assert.equal(entryIdentity('2001:db8::a/64'), 'ip_cidr:2001:db8::/64')
+  assert.equal(entryIdentity('b\u00fccher.example.'), 'domain_suffix:xn--bcher-kva.example')
+  assert.equal(entryIdentity('010.0.0.1'), 'domain_suffix:010.0.0.1')
+  assert.equal(entryIdentity('10.0.0.1/32'), 'ip_cidr:10.0.0.1/32')
+  assert.equal(entryIdentity('0xA.0.0.1'), 'domain_suffix:0xa.0.0.1')
+  assert.equal(entryIdentity('*.10.0.0.1'), 'domain_suffix:10.0.0.1')
+  assert.equal(entryIdentity('::FFFF:0a00:1'), 'ip_cidr:::ffff:10.0.0.1/128')
+  assert.equal(entryIdentity('::ffff:10.0.0.1'), entryIdentity('::ffff:a00:1/128'))
+  for (const invalid of ['10.0.0.1/032', '10.0.0.1/32/1', '10.0.0.1/ 32', '::ffff:010.0.0.1/128']) {
+    assert.equal(canonicalEntry(invalid).type, 'invalid')
+  }
+})
+
+test('bulk counts and row lookups share a reactive flag set without conflating numeric domains and IPs', () => {
+  const values = Array.from({ length: 19_998 }, (_, index) => `row-${index}.test`)
+  const group = reactive<Group>({
+    name: 'bulk', target: 'direct', entries: [...values, '010.0.0.1', '10.0.0.1/32'],
+    disabled_entries: [...values, '010.0.0.1'],
+  })
+  const initialFlags = groupDisabledEntryKeys(group)
+  assert.equal(ruleActive(group), 1)
+  assert.equal(entryOff(group, '*.010.0.0.1'), true)
+  assert.equal(entryOff(group, '10.0.0.1'), false)
+  assert.equal(groupDisabledEntryKeys(group), initialFlags)
+
+  group.disabled_entries!.push('10.0.0.1')
+  assert.notEqual(groupDisabledEntryKeys(group), initialFlags)
+  assert.equal(ruleActive(group), 0)
+  assert.equal(entryOff(group, '10.0.0.1/32'), true)
+  group.disabled_entries = ['10.0.0.1']
+  assert.equal(ruleActive(group), 19_999)
+  group.entries.pop()
+  assert.equal(ruleActive(group), 19_999)
+  delete group.disabled_entries
+  assert.equal(entryOff(group, '10.0.0.1'), false)
+})
+
+test('simulated routing keeps a numeric suffix distinct from the corresponding Internet address', () => {
+  const suffix: Group = { name: 'numeric suffix', target: 'direct', entries: ['010.0.0.1'] }
+  const prefix: Group = { name: 'network', target: 'direct', entries: ['10.0.0.1/32'] }
+  const config = { connections: [], groups: [suffix, prefix] } as unknown as Config
+  assert.equal(simulatedRoute(config, 'sub.010.0.0.1')?.rule, suffix.name)
+  assert.equal(simulatedRoute(config, '10.0.0.1')?.rule, prefix.name)
+  setEntryEnabled(suffix, '.010.0.0.1.', false)
+  assert.equal(simulatedRoute(config, 'sub.010.0.0.1'), null)
+  assert.equal(simulatedRoute(config, '10.0.0.1')?.rule, prefix.name)
 })
 
 test('explicit entry edits migrate flags and deletes remove only that flag', () => {

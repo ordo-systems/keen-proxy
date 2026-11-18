@@ -323,6 +323,44 @@ trap activation_cleanup 0
 trap 'exit 1' 1 2 15
 ACTIVATION_TMP=$(mktemp -d /tmp/keenproxy-activation.XXXXXX)
 api_get config >"$ACTIVATION_TMP/baseline.json"
+curl -fsS -m 10 -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/octet-stream' \
+	--data-binary '{"version":1,"entries":[{"type":"domain_suffix","value":"resource-list.test"},{"type":"domain_suffix","value":"resource-off.test","disabled":true}]}' \
+	'http://127.0.0.1:8086/api/resources/preview?format=json' >"$ACTIVATION_TMP/resources.json" || fail "resource preview"
+api_get config | cmp -s "$ACTIVATION_TMP/baseline.json" - || fail "resource preview changed applied configuration"
+resource_http() {
+	ip netns exec client curl -fsS -m 3 -H "Host: $1" http://198.51.100.3/ >/dev/null 2>&1
+}
+resource_apply() {
+	curl -fsS -m 10 -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+		--data-binary "@$1" http://127.0.0.1:8086/api/config >/dev/null
+}
+python3 - "$ACTIVATION_TMP/baseline.json" "$ACTIVATION_TMP/resources.json" "$ACTIVATION_TMP" <<'PY'
+import json, pathlib, sys
+config = json.load(open(sys.argv[1]))
+preview = json.load(open(sys.argv[2]))
+assert preview["valid"], preview
+entries = preview["list"]["entries"]
+assert [entry["value"] for entry in entries] == ["resource-list.test", "resource-off.test"], entries
+preset = {
+    "id": "imported-list", "name": "Imported resources",
+    "entries": [entry["value"] for entry in entries],
+    "disabled_entries": [entry["value"] for entry in entries if entry.get("disabled")],
+}
+root = pathlib.Path(sys.argv[3])
+config["local_presets"] = [preset]
+(root / "local.json").write_text(json.dumps(config))
+config["groups"].append({k: v for k, v in preset.items() if k != "id"} | {"target": "block"})
+(root / "group.json").write_text(json.dumps(config))
+PY
+resource_apply "$ACTIVATION_TMP/local.json" || fail "local preset apply"
+resource_http child.resource-list.test || fail "local preset changed routing before group copy"
+resource_apply "$ACTIVATION_TMP/group.json" || fail "imported group apply"
+if resource_http child.resource-list.test; then fail "imported suffix did not block a subdomain"; fi
+resource_http resource-off.test || fail "imported disabled entry was activated"
+resource_apply "$ACTIVATION_TMP/baseline.json" || fail "resource scenario restore"
+resource_http child.resource-list.test || fail "clearing imported group did not restore routing"
+ok "resource preview is read-only; local preset is inert; applied group honors suffix and disabled entry"
+
 activation_apply() {
 	python3 - "$ACTIVATION_TMP/baseline.json" "$1" >"$ACTIVATION_TMP/draft.json" <<'PY'
 import json,sys

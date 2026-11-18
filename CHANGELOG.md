@@ -4,6 +4,7 @@
 
 - Allow LAN DNS forwarders to bypass UDP/TCP port 53 interception by source IPv4 address without changing interception for other clients or ports.
 - Avoid restarting the DNS listener when applying changes that only switch between omitted and empty group lists or group entries.
+- Import and export group and local preset resources in TXT, CSV, KeenProxy JSON, sing-box source JSON, and SRS, with preview and shared draft/Apply.
 - Raise the memory comparison's absolute allowance from 8 to 12 MiB after retained identical-binary ARM64 and AMD64 false alarms. Keep the 10% relative allowance and AWG stress limits; this reduces detection sensitivity, not application memory use.
 - Add full and lite Linux release binaries for x86-64 (AMD64 v1) and 32-bit x86 with SSE2, preserving the pinned compiler and embedded protocol features.
 - Support native OpenWrt installation and managed updates through procd on all six release architectures; retain Entware installation and expand its architecture selection. Preserve configuration, checksums, staged validation, and failed-start rollback. Native updates require the new checksummed `keenproxy.openwrt` release asset.

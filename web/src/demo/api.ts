@@ -2,10 +2,12 @@ import { catalog, createDemo } from './model.ts'
 import { DEMO_JOURNAL_LIMIT, DEMO_TICK_MS } from './telemetry.ts'
 import { createDemoUpdates, demoRevision } from './updates.ts'
 import type { Config, Connection, JournalKind, LinkPreview, Status, UpdatePreferences, UpdateSelection } from '../types'
+import type { ResourceExport, ResourceFormat, ResourceList, ResourcePreview } from '../resourceExchange'
 import { activeExit } from '../activation.ts'
 
 const demo = createDemo()
 const updates = createDemoUpdates()
+const resourceFileUnavailable = 'Resource file conversion requires the Go backend.'
 
 // Configuration-only simulation; no resolver or transport is contacted.
 function dnsExit(config: Config): string {
@@ -51,6 +53,9 @@ export const api = {
   catalog: async () => structuredClone(catalog),
   features: async () => ({ demo: true, dns: { route: dnsExit(demo.config()), checked: new Date().toISOString(), fallbacks: 0, blocked: 18 }, filters: [] }),
   previewPreset: async (config: Config, id: string, target: string, index?: number) => demo.preview(config, id, target, index),
+  resourceExchangeAvailable: false,
+  previewResources: async (_format: ResourceFormat, _file: Blob): Promise<ResourcePreview> => { throw new Error(resourceFileUnavailable) },
+  exportResources: async (_format: ResourceFormat, _list: ResourceList): Promise<ResourceExport> => { throw new Error(resourceFileUnavailable) },
   refreshFilters: async () => ({ demo: true }),
   checkDNS: async (config: Config) => {
     const route = dnsExit(config)
@@ -60,7 +65,7 @@ export const api = {
   updateGeo: async (id = '') => demo.updateGeo(id),
   lookupGeo: async (ip: string, id = '') => demo.lookupGeo(ip, id),
   previousConfig: async () => demo.previous(),
-  importYAML: async (_yaml: string): Promise<Config> => { throw new Error('YAML import is available in the router application. This browser demo does not parse credentials or configuration files.') },
+  importYAML: async (_yaml: string | Blob): Promise<Config> => { throw new Error('YAML import is available in the router application. This browser demo does not parse credentials or configuration files.') },
   domains: async () => demo.domains(),
   resolveDomains: async (names: string[], _preview = false) => demo.domains(names),
   login: async (_token: string) => ({ ok: true }),
@@ -98,7 +103,10 @@ export const api = {
   journalExportURL: (kind: JournalKind, _since: string) => download(demo.journal(kind, { limit: DEMO_JOURNAL_LIMIT }).entries, 'application/json'),
   configExportURL: (redacted = false) => {
     const config = demo.config()
-    if (redacted) delete config.dns.bypass_sources
+    if (redacted) {
+      delete config.dns.bypass_sources
+      delete config.local_presets
+    }
     return download(config, 'application/json')
   },
 } satisfies typeof import('../api').api

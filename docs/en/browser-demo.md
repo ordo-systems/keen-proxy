@@ -18,5 +18,6 @@ Try editing a group, inspecting a connection, previewing a sample preset, select
 - **Diagnostics → Download report** exports synthetic check results. To collect retained journals and applied settings as a ZIP, use the [Diagnostics archive](troubleshooting.md#download-the-diagnostic-zip) on the router.
 - YAML import is unavailable. Synthetic exports are JSON, which is compatible with YAML 1.2, rather than a production backup format.
 - AWG `.conf` editing can be explored with synthetic profiles. Decoding standalone Amnezia `vpn://` exports requires the Go backend and is unavailable in this static demo; the local `make ui-demo` uses the same planned version and provides the real offline decoder.
+- Try creating a local preset, saving a local copy of the sample catalog preset, and copying resources into a draft group. [Resource file conversion](user-guide.md#resource-lists) uses the Go backend and is available in the router panel and `make ui-demo`, not the static demo.
 
 The production build continues using the authenticated HTTP API. [Build instructions](development.md) explain how both outputs are created.

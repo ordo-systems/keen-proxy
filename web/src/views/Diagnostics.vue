@@ -19,6 +19,7 @@ import { api } from '../api'
 import { protocolOf } from '../conn'
 import { duration } from '../format'
 import { formatBuild } from '../buildIdentity'
+import { saveDownload } from '../download'
 import { diagnosticErrorKey, sameAppliedConnection, safeDiagnosticsReport } from '../diagnostics'
 import type { DiagnosticReport, FeatureStatus } from '../types'
 import ConnectionHealth from '../components/ConnectionHealth.vue'
@@ -192,14 +193,6 @@ async function check() {
   } finally {
     loading.value = false
   }
-}
-function saveDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 // Export only the sanitized machine-result allowlist, excluding raw errors and secrets.

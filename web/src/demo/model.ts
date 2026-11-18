@@ -1,7 +1,7 @@
 import dnsProfiles from '../../../internal/catalog/dns.json' with { type: 'json' }
 import initial from './config.json' with { type: 'json' }
 import { createTelemetry } from './telemetry.ts'
-import { activeExit, entryOff, isGeo, retainPresetActivation } from '../activation.ts'
+import { activeExit, entryIdentity, groupDisabledEntryKeys, isGeo, retainPresetActivation } from '../activation.ts'
 import { connectionChain } from '../connectionDraft.ts'
 import { maxMemoryLimitMiB, type Catalog, type Config, type DiagnosticReport, type DomainStatus, type GeoLookup, type GeoStatus, type JournalKind, type Status } from '../types.ts'
 
@@ -170,7 +170,11 @@ function diagnostics(saved: Config, connection: string): DiagnosticReport {
 }
 
 function routingNames(saved: Config): string[] {
-  return (saved.groups ?? []).flatMap(group => group.disabled || isGeo(group) ? [] : group.entries.filter(entry => !entryOff(group, entry)))
+  return (saved.groups ?? []).flatMap(group => {
+    if (group.disabled || isGeo(group)) return []
+    const off = groupDisabledEntryKeys(group)
+    return off.size ? group.entries.filter(entry => !off.has(entryIdentity(entry))) : group.entries
+  })
 }
 
 // Reserved example IPs represent every synthetic DNS answer.

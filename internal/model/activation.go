@@ -31,13 +31,20 @@ func (c *Config) ActiveChain(id string) []string {
 // ActiveEntries yields original entries in order using the canonical entry
 // identity for activation. Parent activation never changes persisted child state.
 func (g Group) ActiveEntries() iter.Seq[string] {
-	return activeValues(g.Entries, g.DisabledEntries, g.Disabled, func(raw string) string {
-		e, err := ParseEntry(raw)
-		if err != nil {
-			return raw
-		}
-		return e.String()
-	})
+	return activeValues(g.Entries, g.DisabledEntries, g.Disabled, entryIdentity)
+}
+
+// ActiveEntries yields reusable entries in order, excluding disabled resources.
+func (p LocalPreset) ActiveEntries() iter.Seq[string] {
+	return activeValues(p.Entries, p.DisabledEntries, false, entryIdentity)
+}
+
+func entryIdentity(raw string) string {
+	e, err := ParseEntry(raw)
+	if err != nil {
+		return raw
+	}
+	return e.String()
 }
 
 // ActiveCountries yields enabled country selectors in configuration order.

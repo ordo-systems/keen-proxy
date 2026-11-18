@@ -62,6 +62,31 @@ func compileWith(t *testing.T, phone string) Output {
 
 func compileTest(t *testing.T) Output { return compileWith(t, "192.168.7.104") }
 
+func TestLocalPresetIsNotARoutingRule(t *testing.T) {
+	cfg, err := model.Parse([]byte(testYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const name = "local-preset-only.example"
+	cfg.LocalPresets = []model.LocalPreset{{ID: "local-list", Name: "Local", Entries: []string{name}}}
+	in := Input{Config: cfg, RuleSetDir: "/var/keenproxy"}
+	local, err := Compile(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(local.SingBox), name) {
+		t.Fatal("an uninstalled local preset changed routing")
+	}
+	cfg.Groups = append(cfg.Groups, model.Group{Name: "Local", Target: model.TargetBlock, Entries: cfg.LocalPresets[0].Entries})
+	applied, err := Compile(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(applied.SingBox), name) {
+		t.Fatal("copying the preset into a group did not produce a routing rule")
+	}
+}
+
 // sing-box must accept the schema, tag references, and WireGuard keys.
 func TestSingBoxAcceptsConfig(t *testing.T) {
 	out := compileTest(t)

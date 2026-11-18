@@ -13,11 +13,14 @@ import (
 	"github.com/ordo-systems/keen-proxy/internal/model"
 )
 
+// Preset preview wraps the draft with the selected preset and routing target.
+const maxPresetPreviewBytes = maxConfigJSONBytes + (64 << 10)
+
 func (s *Server) catalog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"presets": catalog.Presets, "dns": catalog.DNS, "filters": catalog.Filters, "geoip": geoip.Builtins})
 }
 
-// presetPreview updates a copied draft and returns its entry diff without applying it.
+// presetPreview updates the request's draft and returns its entry diff without applying it.
 func (s *Server) presetPreview(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Config          *model.Config `json:"config"`
@@ -26,7 +29,7 @@ func (s *Server) presetPreview(w http.ResponseWriter, r *http.Request) {
 		Index           *int          `json:"index"`
 		IncludePrefixes bool          `json:"include_prefixes"`
 	}
-	if err := decodeFeatureRequest(w, r, &req); err != nil || req.Config == nil {
+	if err := decodeJSONRequest(w, r, maxPresetPreviewBytes, &req); err != nil || req.Config == nil {
 		writeError(w, 400, "config and id required")
 		return
 	}
@@ -38,7 +41,7 @@ func (s *Server) presetPreview(w http.ResponseWriter, r *http.Request) {
 	if req.IncludePrefixes {
 		p.Domains = append(append([]string{}, p.Domains...), p.Prefixes...)
 	}
-	c := req.Config.Clone()
+	c := req.Config
 	g := model.Group{Name: p.Name, Target: req.Target}
 	index := len(c.Groups)
 	if req.Index != nil {
@@ -103,7 +106,7 @@ func (s *Server) refreshFilters(w http.ResponseWriter, r *http.Request) {
 // checkDNS validates draft DNS settings but requires referenced connection profiles to be applied.
 func (s *Server) checkDNS(w http.ResponseWriter, r *http.Request) {
 	var c model.Config
-	if err := decodeFeatureRequest(w, r, &c); err != nil {
+	if err := decodeJSONRequest(w, r, maxConfigJSONBytes, &c); err != nil {
 		writeError(w, 400, err.Error())
 		return
 	}
@@ -121,8 +124,8 @@ func (s *Server) checkDNS(w http.ResponseWriter, r *http.Request) {
 	}
 	// Connection profiles in a draft are not running yet. Avoid testing another
 	// live profile with the same id while presenting the draft as verified.
-	live := s.D.Config()
 	if c.DNS.Route == "connection" {
+		live := s.D.Config()
 		if !reflect.DeepEqual(c.Connections, live.Connections) {
 			writeError(w, 400, "Apply connection changes first")
 			return

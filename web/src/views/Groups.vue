@@ -20,11 +20,11 @@ import type { Group, DomainStatus, GeoBuiltin } from '../types'
 import { countries, flag } from '../countries'
 import { categoryOptions, hasCategoryDatabase } from '../geoip'
 import DomainEntries from '../components/DomainEntries.vue'
+import ResourceExchangePanel from '../components/ResourceExchangePanel.vue'
 import SelectorEntries from '../components/SelectorEntries.vue'
 import { api } from '../api'
-import { domainName } from '../domain'
+import { canonicalEntry, dropRemoved, entryIdentity, geoIdentity, geoInactive, groupDisabledEntryKeys, isGeo, ruleActive, ruleTotal, setGroupEnabled } from '../activation'
 import { groupKey, changeGroupTargets } from '../groups'
-import { dropRemoved, entryOff, geoIdentity, geoInactive, isGeo, ruleActive, ruleTotal, setGroupEnabled } from '../activation'
 const domainStatus = ref<DomainStatus | null>(null)
 const domainError = ref('')
 const previews = reactive(new Map<Group, DomainStatus>())
@@ -65,8 +65,11 @@ async function refresh(g: Group, names?: string[]) {
     domainError.value = t('features.presetApplyFirst')
     return
   }
-  const wanted =
-    names ?? g.entries.filter((entry) => !entryOff(g, entry)).map(domainName).filter((n): n is string => n !== null)
+  const off = groupDisabledEntryKeys(g)
+  const wanted = names ?? g.entries.flatMap(entry => {
+    const canonical = canonicalEntry(entry)
+    return canonical.type === 'domain_suffix' && !off.has(entryIdentity(canonical)) ? [canonical.value] : []
+  })
   if (!wanted.length) return
   refreshing.add(g)
   domainError.value = ''
@@ -501,6 +504,8 @@ const columns = computed<DataTableColumns<{ g: Group; key: string }>>(() => [
         </NButton>
       </div>
     </div>
+
+    <ResourceExchangePanel kind="groups" />
 
     <p v-if="domainStatus?.demo" class="demo-note muted">
       {{ t('domains.demo') }}

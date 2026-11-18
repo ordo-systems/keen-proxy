@@ -158,6 +158,23 @@ The catalog shows domain lists without resolving them. KeenProxy resolves IPs fo
 
 Updating a preset preserves per-entry off states separately from deletions, including entries that disappear from one preset revision and return later. Disabling a rule does not remove it from the preset or discard your saved value.
 
+### Exchange resource lists { #resource-lists }
+
+Import a local file into a new or existing explicit-resource group or local preset. Choose append to keep existing entries or replace to remove entries absent from the file. Inspect duplicates, additions, removals, and diagnostics before staging the result. Invalid or unsupported rules block the whole import. **Apply** saves the draft; **Discard** restores the last saved configuration.
+
+Local presets are reusable resource lists, separate from the bundled catalog. They do not change routing until you copy their entries into a group and apply the draft.
+
+| Format | Representation |
+| --- | --- |
+| TXT | One domain suffix, IP address, or CIDR per line; blank lines and `#` comments are allowed. |
+| CSV | UTF-8 `type,value` columns. Use `domain_suffix,example.com` or `ip_cidr,192.0.2.0/24`. |
+| KeenProxy JSON | `{"version":1,"name":"Example","entries":[{"type":"domain_suffix","value":"example.com","disabled":true}]}`. Only this format preserves resource activation and the optional list name. |
+| sing-box JSON / binary SRS | Import versions 1–5 for supported rules. Export version 2 for compatibility with sing-box 1.10 and later. Example source: `{"version":2,"rules":[{"domain_suffix":["example.com"]},{"ip_cidr":["2001:db8::/32"]}]}`. |
+
+Only equivalent sing-box rules can be imported. An exact domain by itself does not match subdomains, and a leading-dot suffix by itself does not match the apex. Both are rejected unless another imported rule covers the missing part without widening the result. Logical rules, inversion, regex, keywords, and source or port filters are unsupported. An existing SRS file may already have combined adjacent CIDRs; import recovers the encoded address set, not the original source text. KeenProxy's SRS export preserves separate editable prefixes. This is not a configuration backup: connection settings, routing targets, country/category selectors, and catalog provenance are not exported. Review conversion losses before downloading; a format without activation flags omits disabled resources.
+
+Files are limited to 2 MiB and 20,000 input entries; binary validation also bounds decompression and expansion. An export outside these limits is rejected rather than producing a file that KeenProxy cannot reimport. A local preset can hold up to 20,000 entries. The router stores up to 64 local presets and at most 40,000 combined values or 1 MiB of resource text, including disabled markers. Single-label suffixes such as `.cn` and suffixes that would be stored as IP addresses, such as `*.192.0.2.1`, are not representable.
+
 ## 5. Choose devices and networks
 
 Open **Connections → Clients**. Network defaults apply to matching subnets; per-device entries let you select a policy for individual clients. **Split** uses selective rules, **Full** selects a default connection, and **Off** bypasses KeenProxy interception for that policy. Review both the device and network settings before Apply. When available, the device row also shows a discovered hostname and its DHCP/DNS source. A manually assigned name takes priority; searching matches either name. Discovery refreshes in the background and does not write names to configuration.
@@ -199,6 +216,8 @@ If you clear **Secondary DNS** while additional servers are configured, the firs
 If a LAN DNS forwarder's own queries are being redirected back to it, open **Advanced settings → Bypass DNS interception for source IPs**, add the forwarder's own IPv4 address (not its upstream's address), and choose **Apply**. To restore interception, remove the address and Apply again. See [DNS interception exceptions](routing.md#dns) for the YAML key and scope.
 
 Open **Settings → YAML configuration** to import, export, or restore a configuration. Importing or restoring prepares a draft. Review it and Apply. Keep unredacted backups private. The browser demo exports synthetic JSON-compatible data and disables YAML import.
+
+The panel accepts YAML backup files up to 16 MiB for preview. Applying the resulting draft still requires it to fit the 8 MiB configuration request limit.
 
 ### Soft memory limit
 

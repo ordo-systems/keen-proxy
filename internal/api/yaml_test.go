@@ -1,11 +1,17 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/ordo-systems/keen-proxy/internal/daemon"
 	"github.com/ordo-systems/keen-proxy/internal/model"
 )
 
@@ -131,4 +137,155 @@ func TestRedactedYAMLOmitsAmneziaWGSecrets(t *testing.T) {
 	if d.cfg.Connections[0].AmneziaWG != profile {
 		t.Fatal("export mutated the live profile")
 	}
+}
+
+func TestLocalPresetYAMLBackupAndRedaction(t *testing.T) {
+	s, d := newServer()
+	d.cfg.LocalPresets = []model.LocalPreset{{
+		ID: "local-resources", Name: "Private resource list",
+		Entries: []string{"internal-only.example"}, DisabledEntries: []string{"internal-only.example"},
+	}}
+	h := s.Handler()
+	backup := do(t, h, "GET", "/api/config/yaml", "", "secret", lan)
+	if backup.Code != http.StatusOK {
+		t.Fatal(backup.Code, backup.Body.String())
+	}
+	restored, err := model.Parse(backup.Body.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.LocalPresets) != 1 || len(restored.LocalPresets[0].DisabledEntries) != 1 || restored.LocalPresets[0].DisabledEntries[0] != "internal-only.example" {
+		t.Fatalf("backup lost local preset: %+v", restored.LocalPresets)
+	}
+	redacted := do(t, h, "GET", "/api/config/yaml?redacted=1", "", "secret", lan)
+	if redacted.Code != http.StatusOK || strings.Contains(redacted.Body.String(), "local_presets") || strings.Contains(redacted.Body.String(), "internal-only.example") {
+		t.Fatalf("unexpected redacted export: %d %s", redacted.Code, redacted.Body.String())
+	}
+	if len(d.cfg.LocalPresets) != 1 {
+		t.Fatal("redacted export changed applied configuration")
+	}
+}
+
+func TestLargeLocalPresetConfigEndpoints(t *testing.T) {
+	s, d := newServer()
+	h := s.Handler()
+	entries := make([]string, model.MaxLocalPresetEntries)
+	label := strings.Repeat("x", 36)
+	for i := range entries {
+		entries[i] = fmt.Sprintf("%05d.%s.example", i, label)
+	}
+	preset := model.LocalPreset{
+		ID:              "local-large",
+		Name:            "Large local preset",
+		Entries:         entries,
+		DisabledEntries: entries[:500],
+	}
+	draft := *d.cfg
+	draft.LocalPresets = []model.LocalPreset{preset}
+	// Match the panel's copy-to-group action: retain both the values and their switches.
+	draft.Groups = []model.Group{{
+		Name:            preset.Name,
+		Target:          model.TargetDirect,
+		Entries:         slices.Clone(preset.Entries),
+		DisabledEntries: slices.Clone(preset.DisabledEntries),
+	}}
+	encode := func(v any) string {
+		t.Helper()
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	checkCopies := func(c *model.Config) {
+		t.Helper()
+		if c == nil || len(c.LocalPresets) != 1 || len(c.Groups) == 0 {
+			t.Fatal("missing local preset or copied group")
+		}
+		p, g := c.LocalPresets[0], c.Groups[0]
+		if p.ID != preset.ID || p.Name != preset.Name || g.Name != preset.Name || g.Target != model.TargetDirect ||
+			!slices.Equal(p.Entries, entries) || !slices.Equal(g.Entries, entries) ||
+			!slices.Equal(p.DisabledEntries, preset.DisabledEntries) || !slices.Equal(g.DisabledEntries, preset.DisabledEntries) {
+			t.Fatal("local preset or group copy changed")
+		}
+	}
+
+	body := encode(draft)
+	if len(body) <= 2<<20 || len(body) > maxConfigJSONBytes {
+		t.Fatalf("fixture outside large Apply range: %d bytes", len(body))
+	}
+	w := do(t, h, http.MethodPut, "/api/config", body, s.Token, lan)
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	checkCopies(d.applied)
+	applied := d.applied
+
+	w = do(t, h, http.MethodPost, "/api/presets/preview", encode(map[string]any{
+		"config": draft, "id": "steam", "target": model.TargetDirect,
+	}), s.Token, lan)
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var preview struct {
+		Config *model.Config `json:"config"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	checkCopies(preview.Config)
+	if groups := preview.Config.Groups; len(groups) != 2 || groups[1].Preset == nil || groups[1].Preset.ID != "steam" {
+		t.Fatal("bundled preset wasn't previewed")
+	}
+
+	w = do(t, h, http.MethodPost, "/api/dns/check", body, s.Token, lan)
+	var dns daemon.DNSCheck
+	if err := json.Unmarshal(w.Body.Bytes(), &dns); w.Code != http.StatusOK || err != nil || !dns.Demo {
+		t.Fatalf("DNS check: status %d, response %+v, error %v", w.Code, dns, err)
+	}
+
+	backup := do(t, h, http.MethodGet, "/api/config/yaml", "", s.Token, lan)
+	if backup.Code != http.StatusOK {
+		t.Fatal(backup.Code, backup.Body.String())
+	}
+	if backup.Body.Len() <= 2<<20 {
+		t.Fatalf("backup did not exceed the legacy JSON envelope: %d bytes", backup.Body.Len())
+	}
+	restore, untouched := newServer()
+	w = httptest.NewRecorder()
+	restore.Handler().ServeHTTP(w, yamlImportRequest(bytes.NewReader(backup.Body.Bytes()), restore.Token))
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var restored model.Config
+	if err := json.Unmarshal(w.Body.Bytes(), &restored); err != nil {
+		t.Fatal(err)
+	}
+	checkCopies(&restored)
+	if untouched.applied != nil || len(untouched.cfg.LocalPresets) != 0 || len(untouched.cfg.Groups) != 0 {
+		t.Fatal("backup preview changed live config")
+	}
+	if d.applied != applied || len(d.cfg.Groups) != 1 {
+		t.Fatal("feature preview changed live config")
+	}
+}
+
+func TestYAMLRawImportBodyLimit(t *testing.T) {
+	s, _ := newServer()
+	h := s.Handler()
+	r := yamlImportRequest(strings.NewReader(strings.Repeat(" ", maxYAMLImportBytes+1)), s.Token)
+	r.ContentLength = -1 // enforce the reader limit even without a declared length
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized raw YAML: %d %s", w.Code, w.Body)
+	}
+}
+
+func yamlImportRequest(body io.Reader, token string) *http.Request {
+	r := httptest.NewRequest(http.MethodPost, "/api/config/import", body)
+	r.RemoteAddr = lan
+	r.Header.Set("Authorization", "Bearer "+token)
+	r.Header.Set("Content-Type", "application/yaml; charset=utf-8")
+	return r
 }

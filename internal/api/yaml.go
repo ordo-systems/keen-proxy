@@ -2,21 +2,29 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
+	"mime"
 	"net/http"
 
 	"github.com/ordo-systems/keen-proxy/internal/model"
 )
 
+// A YAML backup may be larger than the JSON draft because of block indentation.
+const maxYAMLImportBytes = 2 * maxConfigJSONBytes
+
 // decodeFeatureRequest accepts one JSON value up to 2 MiB and rejects unknown fields.
 func decodeFeatureRequest(w http.ResponseWriter, r *http.Request, v any) error {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20))
+	return decodeJSONRequest(w, r, 2<<20, v)
+}
+
+func decodeJSONRequest(w http.ResponseWriter, r *http.Request, limit int64, v any) error {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		return err
 	}
-	var extra any
-	if err := dec.Decode(&extra); err != io.EOF {
+	if _, err := dec.Token(); err != io.EOF {
 		return io.ErrUnexpectedEOF
 	}
 	return nil
@@ -35,6 +43,7 @@ func (s *Server) yamlExport(w http.ResponseWriter, r *http.Request) {
 		// An intentionally non-restorable support file. Clear entire connection
 		// profiles, including AmneziaWG text, instead of guessing secret field names.
 		cp := c.Clone()
+		cp.LocalPresets = nil
 		cp.DNS.Upstreams = []string{"REDACTED"}
 		cp.DNS.BypassSources = nil
 		for i := range cp.GeoIP.Databases {
@@ -91,14 +100,38 @@ func (s *Server) previousConfig(w http.ResponseWriter, r *http.Request) {
 
 // yamlImport parses and validates YAML for preview without applying it.
 func (s *Server) yamlImport(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		YAML string `json:"yaml"`
+	var raw []byte
+	contentType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if contentType == "application/yaml" {
+		const tooLarge = "YAML configuration exceeds 16 MiB"
+		if r.ContentLength > maxYAMLImportBytes {
+			writeError(w, http.StatusRequestEntityTooLarge, tooLarge)
+			return
+		}
+		var err error
+		raw, err = io.ReadAll(http.MaxBytesReader(w, r.Body, maxYAMLImportBytes))
+		if err != nil {
+			var limit *http.MaxBytesError
+			if errors.As(err, &limit) {
+				writeError(w, http.StatusRequestEntityTooLarge, tooLarge)
+			} else {
+				writeError(w, http.StatusBadRequest, err.Error())
+			}
+			return
+		}
+	} else {
+		// Preserve the small JSON wrapper for existing clients. The panel sends
+		// YAML directly so JSON escape expansion does not consume its budget.
+		var req struct {
+			YAML string `json:"yaml"`
+		}
+		if err := decodeFeatureRequest(w, r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		raw = []byte(req.YAML)
 	}
-	if err := decodeFeatureRequest(w, r, &req); err != nil {
-		writeError(w, 400, err.Error())
-		return
-	}
-	c, err := model.Parse([]byte(req.YAML))
+	c, err := model.Parse(raw)
 	if err != nil {
 		writeError(w, 400, err.Error())
 		return

@@ -1,26 +1,33 @@
 import type { Config, Connection, Group } from './types'
 import { connectionChain } from './connectionDraft.ts'
+import { computed, isReactive, type ComputedRef } from 'vue'
 
-// Entry identity follows model.ParseEntry: comments, wildcards, trailing dots,
-// IDNA and masked prefixes. Country and category identity follows Defaults.
-export function entryIdentity(raw: string): string {
-  let value = raw.trim()
-  const comment = value.indexOf('#')
-  if (comment >= 0) value = value.slice(0, comment).trim()
-  if (!value) return raw.trim().toLowerCase()
+export type CanonicalEntry = { type: 'domain_suffix' | 'ip_cidr' | 'invalid'; value: string }
+
+// Match model.ParseEntry's distinction between a suffix and a masked prefix.
+export function canonicalEntry(raw: string): CanonicalEntry {
+  const comment = raw.indexOf('#')
+  const value = (comment < 0 ? raw : raw.slice(0, comment)).trim()
   const prefix = maskedPrefix(value)
-  if (prefix) return prefix
-  let domain = value
-  if (domain.startsWith('*')) domain = domain.slice(1)
-  if (domain.startsWith('.')) domain = domain.slice(1)
-  if (domain.endsWith('.')) domain = domain.slice(0, -1)
-  try {
-    const ascii = new URL(`http://${domain}`).hostname.toLowerCase()
-    if (ascii.includes('.')) return ascii
-  } catch {
-    /* Keep a lowercase token when the value is not a domain. */
+  if (prefix) return { type: 'ip_cidr', value: prefix }
+  const domain = value.replace(/^\*?\.?/, '').replace(/\.$/, '')
+  if (domain && !/[\s%/\\:@?#\[\]]/.test(domain)) {
+    try {
+      // A nonnumeric tail keeps WHATWG URL from treating numeric suffixes as IPv4.
+      const tail = '.invalid'
+      const host = new URL(`http://${domain}${tail}`).hostname
+      const ascii = host.endsWith(tail) ? host.slice(0, -tail.length) : ''
+      if (ascii.includes('.')) return { type: 'domain_suffix', value: ascii.toLowerCase() }
+    } catch {
+      // Keep an invalid value distinct until the backend validates the draft.
+    }
   }
-  return value.toLowerCase()
+  return { type: 'invalid', value: value.toLowerCase() }
+}
+
+export function entryIdentity(raw: string | CanonicalEntry): string {
+  const entry = typeof raw === 'string' ? canonicalEntry(raw) : raw
+  return `${entry.type}:${entry.value}`
 }
 
 export function geoIdentity(raw: string): string {
@@ -40,8 +47,33 @@ export function valueOff(
   return (flags ?? []).some((flag) => identity(flag) === id)
 }
 
-export function entryOff(group: Group, entry: string): boolean {
-  return valueOff(group.disabled_entries, entry, entryIdentity)
+const noDisabledEntries: ReadonlySet<string> = new Set()
+type EntryActivation = { disabled: ComputedRef<ReadonlySet<string>>; active: ComputedRef<number> }
+const entryActivation = new WeakMap<Group, EntryActivation>()
+
+export function disabledEntryKeys(collection: { disabled_entries?: string[] }): ReadonlySet<string> {
+  const flags = collection.disabled_entries
+  return flags?.length ? new Set(flags.map(entryIdentity)) : noDisabledEntries
+}
+
+function reactiveEntryActivation(group: Group): EntryActivation | undefined {
+  if (!isReactive(group)) return
+  let cached = entryActivation.get(group)
+  if (!cached) {
+    const disabled = computed(() => disabledEntryKeys(group))
+    cached = { disabled, active: computed(() => countActiveEntries(group, disabled.value)) }
+    entryActivation.set(group, cached)
+  }
+  return cached
+}
+
+export function groupDisabledEntryKeys(group: Group): ReadonlySet<string> {
+  return reactiveEntryActivation(group)?.disabled.value ?? disabledEntryKeys(group)
+}
+
+export function entryOff(group: Group, entry: string | CanonicalEntry): boolean {
+  const off = groupDisabledEntryKeys(group)
+  return off.size !== 0 && off.has(entryIdentity(entry))
 }
 
 export function selectorOff(
@@ -162,7 +194,14 @@ export function ruleActive(group: Group): number {
     const categories = (group.categories ?? []).filter((label) => !selectorOff(group, 'categories', label)).length
     return countries + categories
   }
-  return group.entries.filter((entry) => !entryOff(group, entry)).length
+  return reactiveEntryActivation(group)?.active.value ?? countActiveEntries(group, disabledEntryKeys(group))
+}
+
+function countActiveEntries(group: Group, off: ReadonlySet<string>): number {
+  if (!off.size) return group.entries.length
+  let count = 0
+  for (const entry of group.entries) if (!off.has(entryIdentity(entry))) count++
+  return count
 }
 
 // An inverted geo group with no active selectors is inactive, never match-all.
@@ -185,18 +224,18 @@ export function activeExit(config: Config, target: string, observed?: string): s
 }
 
 export function entryMatches(entry: string, host: string): boolean {
-  const rule = entryIdentity(entry)
-  const name = entryIdentity(host)
-  if (!rule || !name) return false
-  if (rule.includes('/')) {
-    const [network, suffix] = rule.split('/')
-    const expected = addressParts(network!)
-    const actual = addressParts(host.split('/')[0]!)
-    if (!expected || !actual || expected.width !== actual.width) return false
-    const shift = BigInt(expected.width - Number(suffix))
-    return expected.value >> shift === actual.value >> shift
-  }
-  return name === rule || name.endsWith(`.${rule}`)
+  return canonicalEntryMatches(canonicalEntry(entry), canonicalEntry(host))
+}
+
+function canonicalEntryMatches(rule: CanonicalEntry, host: CanonicalEntry): boolean {
+  if (rule.type !== host.type || rule.type === 'invalid') return false
+  if (rule.type === 'domain_suffix') return host.value === rule.value || host.value.endsWith(`.${rule.value}`)
+  const [network, suffix] = rule.value.split('/')
+  const expected = addressParts(network!)
+  const actual = addressParts(host.value.split('/')[0]!)
+  if (!expected || !actual || expected.width !== actual.width) return false
+  const shift = BigInt(expected.width - Number(suffix))
+  return expected.value >> shift === actual.value >> shift
 }
 
 function geoHit(group: Group, country: string, categories: string[]): boolean {
@@ -216,7 +255,15 @@ function rulePriority(group: Group): number {
 
 function groupMatches(group: Group, host: string, country: string, categories: string[], address: string): boolean {
   if (group.disabled) return false
-  if (!isGeo(group)) return group.entries.some((entry) => !entryOff(group, entry) && (entryMatches(entry, host) || entryMatches(entry, address)))
+  if (!isGeo(group)) {
+    const off = groupDisabledEntryKeys(group)
+    const name = canonicalEntry(host)
+    const ip = canonicalEntry(address)
+    return group.entries.some(entry => {
+      const rule = canonicalEntry(entry)
+      return !off.has(entryIdentity(rule)) && (canonicalEntryMatches(rule, name) || canonicalEntryMatches(rule, ip))
+    })
+  }
   if (geoInactive(group) || (!country && !categories.length)) return false
   const hit = geoHit(group, country, categories)
   return group.except ? !hit : hit
@@ -239,12 +286,12 @@ export function simulatedRoute(
 }
 
 function addressParts(raw: string): { value: bigint; width: number } | null {
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(raw)) {
+  if (/^(?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}$/.test(raw)) {
     const octets = raw.split('.').map(Number)
     if (octets.some((part) => part > 255)) return null
     return { value: octets.reduce((n, part) => n * 256n + BigInt(part), 0n), width: 32 }
   }
-  if (!raw.includes(':') || raw.includes('%')) return null
+  if (!raw.includes(':') || !/^[\da-f:.]+$/i.test(raw)) return null
   try {
     const host = new URL(`http://[${raw}]/`).hostname.slice(1, -1)
     const halves = host.split('::')
@@ -258,19 +305,27 @@ function addressParts(raw: string): { value: bigint; width: number } | null {
 }
 
 function maskedPrefix(raw: string): string | null {
-  const [host, suffix] = raw.split('/')
-  const address = addressParts(host!)
+  const slash = raw.indexOf('/')
+  const host = slash < 0 ? raw : raw.slice(0, slash)
+  const suffix = slash < 0 ? undefined : raw.slice(slash + 1)
+  if (suffix !== undefined && !/^(?:0|[1-9][0-9]{0,2})$/.test(suffix)) return null
+  const zone = host.indexOf('%')
+  if (zone >= 0 && (suffix !== undefined || zone === host.length - 1 || !host.includes(':'))) return null
+  const address = addressParts(zone < 0 ? host : host.slice(0, zone))
   if (!address) return null
   const bits = suffix === undefined ? address.width : Number(suffix)
   if (!Number.isInteger(bits) || bits < 0 || bits > address.width) return null
   const shift = BigInt(address.width - bits)
   const masked = (address.value >> shift) << shift
-  if (address.width === 32) {
-    const value = Number(masked)
-    return `${value >>> 24}.${(value >>> 16) & 255}.${(value >>> 8) & 255}.${value & 255}/${bits}`
-  }
+  if (address.width === 32) return `${ipv4String(masked)}/${bits}`
+  if ((masked >> 32n) === 0xffffn) return `::ffff:${ipv4String(masked)}/${bits}`
   const words = Array.from({ length: 8 }, (_, index) => ((masked >> BigInt((7 - index) * 16)) & 65535n).toString(16))
   const canonical = new URL(`http://[${words.join(':')}]/`).hostname.slice(1, -1)
   return `${canonical}/${bits}`
+}
+
+function ipv4String(address: bigint): string {
+  const value = Number(address & 0xffffffffn)
+  return `${value >>> 24}.${(value >>> 16) & 255}.${(value >>> 8) & 255}.${value & 255}`
 }
 

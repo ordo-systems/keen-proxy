@@ -129,3 +129,7 @@ integration:
 		-v $(CURDIR)/test/netns/run.sh:/work/run.sh:ro debian:bookworm-slim sh -c '\
 		apt-get -qq update >/dev/null && apt-get -qq install -y --no-install-recommends \
 		iptables iproute2 dnsmasq-base curl dnsutils python3 >/dev/null 2>&1 && sh /work/run.sh'
+
+.PHONY: integration-openwrt
+integration-openwrt:
+	sh test/openwrt/run.sh $(GO) build -tags $(TAGS)

@@ -170,6 +170,25 @@ jobs:
           cache-dependency-path: go.sum
       - run: make integration
 
+  openwrt:
+    name: OpenWrt TPROXY integration
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Read pinned Go version
+        id: go-version
+        run: |
+          version=$(awk '$1 == "go" {print $2}' go.mod)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ steps.go-version.outputs.version }}
+          cache-dependency-path: go.sum
+      - run: make integration-openwrt
+
   # Pull requests scan only their own commits. main scans every commit
   # reachable from main. tools/scan-secrets.sh pins the MIT gitleaks binary;
   # gitleaks-action requires an organization license and stops after 30 commits.

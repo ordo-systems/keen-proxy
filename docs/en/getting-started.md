@@ -58,6 +58,8 @@ Automatic detection preserves an existing managed Entware installation rather th
 
 **Recommended firmware component.** Enable **Kernel modules for Netfilter** alongside OPKG if your model offers it. It supplies kernel support for packet filtering used by `iptables`; the Entware commands are a separate prerequisite. Check the component list for your exact model. [KeeneticOS component reference](https://support.keenetic.com/hopper/kn-3810/en/16327-os-component-description.html)
 
+If Apply fails with UDP interception enabled, see [TPROXY troubleshooting on Keenetic](troubleshooting.md#keenetic-tproxy-apply).
+
 ### Choose where to install Entware
 
 | Method | How it works |

@@ -58,6 +58,8 @@ keenproxy --key -config /etc/keenproxy/config.yaml
 
 **Рекомендуемый компонент прошивки.** Включите **«Модули ядра для Netfilter»** вместе с OPKG, если компонент доступен для вашей модели. Он добавляет поддержку фильтрации пакетов в ядре для работы `iptables`. Утилиты Entware нужны отдельно. Сверьтесь со списком компонентов своей модели. [Описание компонентов KeeneticOS](https://support.keenetic.com/hopper/kn-3810/en/16327-os-component-description.html)
 
+Если настройки не применяются при включённом перехвате UDP, см. [диагностику TPROXY на Keenetic](troubleshooting.md#keenetic-tproxy-apply).
+
 ### Куда установить Entware
 
 | Способ | Как это работает |

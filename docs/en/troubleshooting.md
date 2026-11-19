@@ -42,6 +42,37 @@ After applying the rules, the watchdog checks the entry jumps again. If verifica
 
 For repeated recoveries, record the times of the triggering actions and export the diagnostics ZIP together with the router system log. The ZIP retains structured firewall evidence under the audit entry's `firewall` field, including the optional `trigger` (`netfilter_hook` or `watchdog`) and nonnegative `duration_ms`, any failed `before` and `after` checks, and `outcome` (`restored`, `apply_failed`, or `verify_failed`). Raw command errors remain in the local journals. The ZIP keeps only known rule identities, exit codes, reasons and coarse error categories. Older entries have no `firewall` field.
 
+## Apply fails in TPROXY mode on Keenetic { #keenetic-tproxy-apply }
+
+The error `iptables-restore: line N failed` does not necessarily mean TPROXY is missing. Start with the exact Apply error and the [`firewall_apply.restore` entry in the diagnostic ZIP](#download-the-diagnostic-zip). If the reported operation is `commit`, it identifies the table whose commit failed, not a specific rule.
+
+In the KeeneticOS component list, check **Open Package support (OPKG)** and **Kernel modules for Netfilter**. Entware supplies the `iptables` commands separately. Even with Netfilter and Xtables-addons installed, the TPROXY module may be present on disk but not loaded.
+
+**Check what is available.** Run these commands over the router's Entware SSH session. They do not apply firewall rules or explicitly load a module:
+
+```sh
+uname -rm
+/opt/bin/opkg list-installed | grep '^iptables '
+grep -x TPROXY /proc/net/ip_tables_targets
+grep '^xt_TPROXY ' /proc/modules
+ls -l "/lib/modules/$(uname -r)/xt_TPROXY.ko"
+/opt/sbin/iptables -t mangle -j TPROXY --help
+/opt/sbin/iptables -w -t mangle -S >/dev/null
+echo "mangle read exit=$?"
+```
+
+If the help lists `--on-port`, `--on-ip`, and `--tproxy-mark`, the Entware command recognizes the extension. A successful `mangle` read only confirms that the table is accessible. Neither proves that the kernel will accept a TPROXY rule. `TPROXY` in `/proc/net/ip_tables_targets` confirms that the target is registered; absence from `/proc/modules` alone does not rule out built-in support.
+
+**If the target is missing but the firmware module exists**, the router owner can try loading it temporarily. Keep local recovery access and do this when it is safe to retest Apply. Use only the module shipped with the running firmware; do not download a `.ko` from another router or distribution.
+
+```sh
+insmod "/lib/modules/$(uname -r)/xt_TPROXY.ko"
+echo "insmod exit=$?"
+grep -x TPROXY /proc/net/ip_tables_targets
+```
+
+In [issue #39](https://github.com/ordo-systems/keen-proxy/issues/39), the target appeared after this step. If it appears on your router, retry **Apply** in TPROXY mode. After a successful Apply, check that `/opt/sbin/iptables -w -t mangle -S KEENPROXY_UDP` shows a `-j TPROXY` rule for participating clients, then test UDP traffic from one of those clients. Manual module loading does not persist across reboot. If loading fails, capture its error and relevant lines from `dmesg | tail -30`. If Apply still fails, include the full Apply error and the reviewed diagnostic ZIP in your report. If you do not need transparent UDP interception, use the compatible (`redirect`) mode while investigating. Redact private addresses and kernel pointers before sharing command output.
+
 ## Download the diagnostic ZIP
 
 1. Reproduce the problem and note the approximate time and time zone. Open **Diagnostics** in the web panel on your router.

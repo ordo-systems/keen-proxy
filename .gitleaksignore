@@ -1,0 +1,2 @@
+# Historical OpenWrt smoke fixture: a synthetic token used only on container loopback.
+4bd4fb75fc2b8fbd2f2b9a5f10e3ef290d25929c:test/openwrt/smoke.sh:curl-auth-header:33

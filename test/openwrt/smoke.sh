@@ -14,7 +14,9 @@ intercept: {mode: tproxy}
 networks:
   - {name: LAN, cidr: 192.0.2.0/24, mode: split}
 YAML
-printf '%s\n' synthetic-smoke-token >/tmp/token
+umask 077
+cat /proc/sys/kernel/random/uuid >/tmp/token
+IFS= read -r token </tmp/token
 cleanup() {
     rc=$?
     trap - EXIT
@@ -30,7 +32,7 @@ trap cleanup EXIT
     -iptables "$(command -v iptables)" -iptables-restore "$(command -v iptables-restore)" >/tmp/daemon.log 2>&1 &
 pid=$!
 
-api() { curl -fsS --max-time 5 -H 'Authorization: Bearer synthetic-smoke-token' "$@"; }
+api() { curl -fsS --max-time 5 -H "Authorization: Bearer $token" "$@"; }
 base=http://127.0.0.1:8086/api
 for i in $(seq 1 30); do
     if api "$base/config" >/tmp/tproxy.json 2>/dev/null; then break; fi

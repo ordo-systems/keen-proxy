@@ -179,7 +179,7 @@ func publishStartupState(ctx context.Context, state <-chan string, listening <-c
 		}
 	}
 	if ctx.Err() != nil {
-			return
+		return
 	}
 	if err := writeStartupState(path, mode); err != nil {
 		log.Warn("could not report startup state", "state", mode, "err", err)

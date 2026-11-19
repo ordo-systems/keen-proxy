@@ -17,10 +17,10 @@ type TProxyReadiness struct {
 }
 
 const (
-	TProxyReady        = "ready"
+	TProxyReady       = "ready"
 	TProxyUnavailable = "unavailable"
-	TProxyUnknown      = "unknown"
-	TProxyProbeFailed  = "probe_failed"
+	TProxyUnknown     = "unknown"
+	TProxyProbeFailed = "probe_failed"
 )
 
 const (

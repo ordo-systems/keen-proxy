@@ -48,27 +48,162 @@ cat /opt/etc/keenproxy/token
 
 В списке компонентов KeeneticOS проверьте **«Поддержку открытых пакетов» (OPKG)** и **«Модули ядра для Netfilter»**. Утилиты `iptables` поставляются отдельно через Entware. Даже если Netfilter и Xtables-addons установлены, модуль TPROXY может быть на диске, но не загружен.
 
-**Проверьте, что доступно.** Выполните команды в SSH-сеансе Entware на роутере. Они не применяют правила и не загружают модуль явно:
+**Проверка ядра и iptables.** Сохраните как `test1.sh` и выполните `sh test1.sh` в SSH-сеансе Entware. Скрипт не применяет правила и не загружает модули явно.
 
 ```sh
+#!/bin/sh
+export PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
+section() { printf '\n=== %s ===\n' "$1"; }
+iptables=/opt/sbin/iptables
+restore=/opt/sbin/iptables-restore
+
+section 'Kernel and Entware'
 uname -rm
-/opt/bin/opkg list-installed | grep '^iptables '
-grep -x TPROXY /proc/net/ip_tables_targets
-grep '^xt_TPROXY ' /proc/modules
-ls -l "/lib/modules/$(uname -r)/xt_TPROXY.ko"
-/opt/sbin/iptables -t mangle -j TPROXY --help
-/opt/sbin/iptables -w -t mangle -S >/dev/null
-echo "mangle read exit=$?"
+if command -v opkg >/dev/null 2>&1; then
+    opkg list-installed | grep -E '^(iptables|xtables)([[:space:]]|-)'
+else
+    echo 'opkg not found'
+fi
+
+section 'iptables and iptables-restore'
+ls -l "$iptables" "$restore"
+"$iptables" -w --version 2>&1
+printf 'iptables version exit=%s\n' "$?"
+"$restore" --help </dev/null 2>&1
+
+section 'Kernel targets and modules (before iptables probes)'
+if [ -r /proc/net/ip_tables_targets ]; then
+    if grep -qx TPROXY /proc/net/ip_tables_targets; then
+        echo 'TPROXY target: registered'
+    else
+        echo 'TPROXY target: not listed or unreadable'
+    fi
+else
+    echo '/proc/net/ip_tables_targets unavailable'
+fi
+if [ -r /proc/modules ]; then
+    awk '
+        $1 ~ /^(xt_TPROXY|xt_socket|iptable_mangle)$/ {
+            printf "%s: loaded (size=%s, refs=%s)\n", $1, $2, $3
+            found = 1
+        }
+        END { if (!found) print "No matching loadable modules listed" }
+    ' /proc/modules
+else
+    echo '/proc/modules unavailable'
+fi
+
+section 'TPROXY userspace extension'
+help=$("$iptables" -t mangle -j TPROXY --help 2>&1)
+if ! printf '%s\n' "$help" |
+    grep -Ei 'TPROXY target options|--on-port|--on-ip|--tproxy-mark|error|failed|not found'; then
+    printf '%s\n' "$help" | tail -10
+fi
+
+section 'IPv4 mangle and KeenProxy rules'
+"$iptables" -w -t mangle -S >/dev/null
+printf 'mangle read exit=%s\n' "$?"
+if rules=$("$iptables" -w -t mangle -S KEENPROXY_UDP 2>&1); then
+    printf '%s\n' "$rules" | awk '
+        / -j TPROXY( |$)/ { count++ }
+        END { printf "KEENPROXY_UDP: %d TPROXY rule(s)\n", count }
+    '
+else
+    printf 'KEENPROXY_UDP unavailable: %s\n' "$rules"
+fi
+
+section 'Recent kernel messages'
+if messages=$(dmesg 2>&1); then
+    matches=$(printf '%s\n' "$messages" |
+        grep -Ei 'tproxy|x_tables|ip_tables|unknown symbol|invalid module' |
+        tail -30)
+    printf '%s\n' "${matches:-No matching kernel messages}"
+else
+    printf 'dmesg unavailable: %s\n' "$messages"
+fi
+```
+
+**Файлы модулей и утилиты.** Сохраните как `test2.sh` и выполните `sh test2.sh`, чтобы проверить текущую прошивку без загрузки модулей. Отсутствие `/proc/config.gz` не мешает остальным проверкам.
+
+```sh
+#!/bin/sh
+export PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
+section() { printf '\n=== %s ===\n' "$1"; }
+release=$(uname -r)
+module="/lib/modules/$release/xt_TPROXY.ko"
+
+section 'Module for the running kernel'
+printf 'Kernel release: %s\n' "$release"
+if [ -f "$module" ]; then
+    ls -l "$module"
+else
+    printf 'Not found at the expected path: %s\n' "$module"
+fi
+
+section 'Other TPROXY module files'
+for dir in /lib/modules /opt/lib/modules; do
+    printf '%s:\n' "$dir"
+    if [ -d "$dir" ]; then
+        matches=$(find "$dir" -type f -iname '*tproxy*.ko*' -print)
+        printf '%s\n' "${matches:-  No matching files}"
+    else
+        echo '  Directory unavailable'
+    fi
+done
+
+section 'Module tools (not executed)'
+for tool in modprobe insmod modinfo; do
+    if path=$(command -v "$tool"); then
+        printf '%s: %s\n' "$tool" "$path"
+    else
+        printf '%s: not found\n' "$tool"
+    fi
+done
+
+section 'Kernel build options'
+if [ -r /proc/config.gz ] && command -v zcat >/dev/null 2>&1; then
+    zcat /proc/config.gz |
+        grep -E '^(# )?CONFIG_(NETFILTER_XT_TARGET_TPROXY|NF_TPROXY_IPV4)(=| is not set)' ||
+        echo 'No matching options found or kernel config could not be read'
+else
+    echo '/proc/config.gz or zcat unavailable'
+fi
 ```
 
 Если в справке есть `--on-port`, `--on-ip` и `--tproxy-mark`, утилита Entware распознаёт расширение. Успешное чтение `mangle` подтверждает только доступность таблицы. Ни то ни другое не гарантирует, что ядро примет правило TPROXY. Наличие `TPROXY` в `/proc/net/ip_tables_targets` означает, что цель зарегистрирована; отсутствие строки в `/proc/modules` само по себе не исключает встроенную поддержку.
 
 **Если цель не зарегистрирована, но модуль есть в прошивке**, владелец роутера может попробовать загрузить его временно. Сохраните локальный доступ для восстановления и выберите время, когда безопасно повторить применение настроек. Используйте только модуль из работающей прошивки, не скачивайте `.ko` с другого роутера или из другого дистрибутива.
 
+Сохраните необязательный загрузчик как `load-tproxy.sh` и запустите его отдельно командой `sh load-tproxy.sh`. Он не вызывает `insmod`, если цель уже зарегистрирована, модуль уже загружен или одну из проверок ядра не удалось выполнить.
+
 ```sh
-insmod "/lib/modules/$(uname -r)/xt_TPROXY.ko"
-echo "insmod exit=$?"
-grep -x TPROXY /proc/net/ip_tables_targets
+#!/bin/sh
+export PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+targets=/proc/net/ip_tables_targets
+modules=/proc/modules
+module="/lib/modules/$(uname -r)/xt_TPROXY.ko"
+
+if grep -xq TPROXY "$targets"; then
+    echo 'TPROXY target already registered; skipping insmod'
+    exit 0
+elif [ "$?" -ne 1 ]; then
+    echo 'Cannot check kernel targets; skipping insmod' >&2
+    exit 1
+fi
+if grep -q '^xt_TPROXY ' "$modules"; then
+    echo 'xt_TPROXY already loaded but target not listed; skipping insmod' >&2
+    exit 1
+elif [ "$?" -ne 1 ]; then
+    echo 'Cannot check loaded modules; skipping insmod' >&2
+    exit 1
+fi
+if [ ! -f "$module" ]; then
+    printf 'Firmware module not found: %s\n' "$module" >&2
+    exit 1
+fi
+insmod "$module" || exit "$?"
+grep -x TPROXY "$targets"
 ```
 
 В [задаче #39](https://github.com/ordo-systems/keen-proxy/issues/39) цель появилась после этого шага. Если она появилась и у вас, повторите **Применить** в режиме TPROXY. При успехе проверьте, что `/opt/sbin/iptables -w -t mangle -S KEENPROXY_UDP` показывает правило `-j TPROXY` для участвующих клиентов, затем проверьте UDP-трафик одного из этих клиентов. Ручная загрузка модуля не сохраняется после перезагрузки. Если модуль не загрузился, сохраните текст ошибки и относящиеся к ней строки из `dmesg | tail -30`. Если настройки всё ещё не применяются, приложите полный текст ошибки и проверенный диагностический ZIP. Если прозрачный перехват UDP не нужен, на время диагностики можно использовать совместимый режим (`redirect`). Перед отправкой вывода скройте приватные адреса и указатели ядра.

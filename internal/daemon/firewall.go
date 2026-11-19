@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -70,6 +71,7 @@ func (d *Daemon) applyAndVerifyFirewall(ctx context.Context, event *journal.Fire
 	event.After = nil
 	if err := d.installFirewall(ctx); err != nil {
 		event.Outcome, event.ApplyError = "apply_failed", err.Error()
+		event.Restore = journalRestoreFailure(err)
 		return
 	}
 	event.After = journalFirewallCheck(d.opt.Firewall.Check(ctx, d.plan))
@@ -85,6 +87,17 @@ func journalFirewallCheck(failure *netfilter.CheckFailure) *journal.FirewallChec
 	}
 	check := journal.FirewallCheck(*failure)
 	return &check
+}
+
+func journalRestoreFailure(err error) *journal.RestoreDiagnostic {
+	var f *netfilter.RestoreFailure
+	if !errors.As(err, &f) {
+		return nil
+	}
+	return &journal.RestoreDiagnostic{
+		Wait: f.Wait, ExitCode: f.ExitCode, Line: f.Line, Table: f.Table,
+		Operation: f.Operation, Chain: f.Chain, Target: f.Target,
+	}
 }
 
 func (d *Daemon) recordFirewallRecovery(event *journal.FirewallEvent) {

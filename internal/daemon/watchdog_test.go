@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -290,9 +291,17 @@ func TestWatchdogRecoversAfterFailedApplyAndRollback(t *testing.T) {
 			}
 			next.LAN.Interface = "lan-test"
 			next.DNS.BypassSources = []string{"192.0.2.54"}
-			runner.applyErr = errors.New("synthetic xtables contention")
+			runner.applyErr = &exec.ExitError{Stderr: []byte("iptables-restore: line 4 failed\n")}
 			if err := d.Apply(ctx, next); !errors.Is(err, runner.applyErr) {
 				t.Fatalf("failed apply returned %v", err)
+			}
+			entries := d.Journal(journal.Audit).Find(journal.Query{}, nil).Entries
+			latest := entries[0]
+			diag := latest.FirewallApply
+			if diag == nil || diag.Restore == nil || diag.RollbackRestore == nil ||
+				diag.Restore.Line != 4 || diag.Restore.Table != "nat" || diag.Restore.Chain != netfilter.ChainDNS ||
+				diag.RollbackRestore.Line != 4 {
+				t.Fatalf("apply and rollback diagnostics were not retained: %+v", latest)
 			}
 			if runner.applyCalls != 3 || d.planOn || d.Config().LAN.Interface != cfg.LAN.Interface {
 				t.Fatalf("expected failed rollback to leave the previous plan pending: calls=%d on=%v", runner.applyCalls, d.planOn)

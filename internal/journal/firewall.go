@@ -2,19 +2,38 @@ package journal
 
 import "fmt"
 
-// FirewallEvent records one watchdog repair attempt. After is populated only
-// when verification fails; Outcome distinguishes success from an unrun check.
+// FirewallEvent records a watchdog repair. After is populated only when
+// verification fails; Outcome distinguishes success from an unrun check.
 // Raw errors are local evidence and must be sanitized by diagnostic exporters.
 type FirewallEvent struct {
 	// Trigger identifies the scheduling path, not the cause of the rule change.
 	Trigger string `json:"trigger,omitempty"`
 	// DurationMS measures checking and repair, not the duration of an outage.
 	// A nil value distinguishes historical entries from sub-millisecond work.
-	DurationMS *int64         `json:"duration_ms,omitempty"`
-	Before     *FirewallCheck `json:"before"`
-	After      *FirewallCheck `json:"after,omitempty"`
-	Outcome    string         `json:"outcome"`
-	ApplyError string         `json:"apply_error,omitempty"`
+	DurationMS *int64             `json:"duration_ms,omitempty"`
+	Before     *FirewallCheck     `json:"before"`
+	After      *FirewallCheck     `json:"after,omitempty"`
+	Outcome    string             `json:"outcome"`
+	ApplyError string             `json:"apply_error,omitempty"`
+	Restore    *RestoreDiagnostic `json:"restore,omitempty"`
+}
+
+// FirewallApplyDiagnostic keeps the rejected draft separate from rollback.
+type FirewallApplyDiagnostic struct {
+	Restore         *RestoreDiagnostic `json:"restore,omitempty"`
+	RollbackRestore *RestoreDiagnostic `json:"rollback_restore,omitempty"`
+}
+
+// RestoreDiagnostic identifies the final invocation and the reported location,
+// without storing rule arguments or raw command output.
+type RestoreDiagnostic struct {
+	Wait      bool   `json:"wait"`
+	ExitCode  int    `json:"exit_code"`
+	Line      int    `json:"line,omitempty"`
+	Table     string `json:"table,omitempty"`
+	Operation string `json:"operation,omitempty"`
+	Chain     string `json:"chain,omitempty"`
+	Target    string `json:"target,omitempty"`
 }
 
 // FirewallCheck is the persisted evidence from the first unsuccessful entry-jump probe.

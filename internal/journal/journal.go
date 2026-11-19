@@ -51,6 +51,8 @@ type Entry struct {
 	Details  string         `json:"details,omitempty"`
 	Firewall *FirewallEvent `json:"firewall,omitempty"`
 
+	FirewallApply *FirewallApplyDiagnostic `json:"firewall_apply,omitempty"`
+
 	// System.
 	Level   string `json:"level,omitempty"`  // INFO, WARN, ERROR
 	Source  string `json:"source,omitempty"` // keenproxy or sing-box.

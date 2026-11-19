@@ -56,6 +56,8 @@ For repeated recoveries, record the times of the triggering actions and export t
 
 The ZIP includes records still in memory and on disk, regardless of the filters, grouping, or time range selected in **Logs**. Older records may have rotated out. Draft changes are outside the archive.
 
+When `iptables-restore` fails during Apply, look for **Configuration apply failed** in `journals/audit.jsonl`. `firewall_apply.restore` describes the failed attempt; `rollback_restore` describes a separate restore failure during rollback, if any. The ZIP records the exit code, whether `-w` was used, and, when reported, the input line number and known table, operation, chain, and jump target. A `commit` failure identifies a table, not a particular rule. Watchdog failures use `firewall.restore`. Raw errors remain in the local journal; the ZIP does not include rule arguments or raw stderr.
+
 The export omits credentials, raw connection profiles, and free-form log messages. Names and addresses are removed or replaced with aliases that are consistent within one ZIP. Event times, ports, protocols, policies, and counts can still identify activity. Review the files before attaching them to an issue or sharing them privately.
 
 For one journal as plain text on the router, open **Logs**, select **Routing**, **Audit**, or **System**, then choose **Download log** and a time range. The text export masks known secrets but can include readable domains, addresses, and log details. Use the ZIP for a support report covering all three journals.

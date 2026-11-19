@@ -219,13 +219,20 @@ func (d *Daemon) Apply(ctx context.Context, cfg *model.Config) error {
 	if err := d.applyLocked(ctx, cfg); err != nil {
 		d.log.Error("new configuration failed to apply, restoring previous configuration", "err", err)
 		details := err.Error() + "; previous configuration restored"
+		restore := journalRestoreFailure(err)
+		var rollbackRestore *journal.RestoreDiagnostic
 		if prev != nil {
 			if rbErr := d.applyLocked(ctx, prev); rbErr != nil {
 				d.log.Error("rollback also failed", "err", rbErr)
 				details = err.Error() + "; rollback also failed: " + rbErr.Error()
+				rollbackRestore = journalRestoreFailure(rbErr)
 			}
 		}
-		d.audit(by, "Configuration apply failed", "config", "error", details+from)
+		entry := journal.Entry{Actor: by, Action: "Configuration apply failed", Target: "config", Result: "error", Details: details + from}
+		if restore != nil || rollbackRestore != nil {
+			entry.FirewallApply = &journal.FirewallApplyDiagnostic{Restore: restore, RollbackRestore: rollbackRestore}
+		}
+		d.auditEntry(entry)
 		return err
 	}
 	raw, err := cfg.Marshal()

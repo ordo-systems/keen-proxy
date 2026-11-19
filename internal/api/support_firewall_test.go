@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"strings"
 	"testing"
 
@@ -77,6 +78,50 @@ func TestSupportBundleFirewallDiagnostics(t *testing.T) {
 		return
 	}
 	t.Fatal("audit journal missing")
+}
+
+func TestSupportBundleRetainsRestoreFailureWithoutRawEvidence(t *testing.T) {
+	s, d := newServer()
+	j := journal.New(journal.Options{File: t.TempDir() + "/audit.jsonl"})
+	defer j.Close()
+	d.journals[journal.Audit] = j
+	j.Add(journal.Entry{
+		Actor: "user", Action: "Configuration apply failed", Target: "config", Result: "error",
+		Details: "iptables-restore: line 33 failed: private-address",
+		FirewallApply: &journal.FirewallApplyDiagnostic{
+			Restore: &journal.RestoreDiagnostic{
+				ExitCode: 1, Line: 33, Table: "mangle", Operation: "append_rule", Chain: "KEENPROXY_UDP", Target: "TPROXY",
+			},
+			RollbackRestore: &journal.RestoreDiagnostic{
+				Wait: true, ExitCode: 999, Line: 12, Table: "private-table", Operation: "private-op", Chain: "private-chain", Target: "private-target",
+			},
+		},
+	})
+	w := do(t, s.Handler(), "GET", bundlePath, "", s.Token, lan)
+	if w.Code != 200 {
+		t.Fatalf("bundle status = %d", w.Code)
+	}
+	z, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := fs.ReadFile(z, "journals/audit.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("private")) {
+		t.Fatalf("private restore evidence leaked: %s", data)
+	}
+	var got journal.Entry
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	f := got.FirewallApply
+	want := journal.RestoreDiagnostic{ExitCode: 1, Line: 33, Table: "mangle", Operation: "append_rule", Chain: "KEENPROXY_UDP", Target: "TPROXY"}
+	wantRollback := journal.RestoreDiagnostic{Wait: true, ExitCode: -1, Line: 12}
+	if f == nil || f.Restore == nil || *f.Restore != want || f.RollbackRestore == nil || *f.RollbackRestore != wantRollback {
+		t.Fatalf("restore diagnostics missing or changed: %s", data)
+	}
 }
 
 // Old or tampered journal files must never bypass support-bundle redaction.

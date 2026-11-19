@@ -43,6 +43,7 @@ func supportEntry(kind journal.Kind, e journal.Entry, alias supportAlias) journa
 		safe.Target = supportAuditTarget(e.Target, alias)
 		safe.Details = failureClass(e.Details)
 		safe.Firewall = supportFirewall(e)
+		safe.FirewallApply = supportFirewallApply(e)
 	case journal.System:
 		safe.Level = known(e.Level, "INFO", "WARN", "ERROR")
 		safe.Source = known(e.Source, "keenproxy", "sing-box")

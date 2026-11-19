@@ -52,13 +52,15 @@ func NewFirewall() *Firewall {
 // after an NDM firewall rebuild when needed.
 func (f *Firewall) Apply(ctx context.Context, p Plan) error {
 	rules := p.Render()
+	wait := true
 	err := f.Run.Run(ctx, rules, f.Restore, "-w", "--noflush")
 	if restoreRejectsWait(err) {
+		wait = false
 		// Legacy restore rejects the option before reading or applying the plan.
 		err = f.Run.Run(ctx, rules, f.Restore, "--noflush")
 	}
 	if err != nil {
-		return err
+		return describeRestoreFailure(err, rules, wait)
 	}
 	for _, j := range p.Jumps() {
 		if f.Run.Run(ctx, "", f.IPTables, "-w", "-t", j.Table, "-C", j.From, "-j", j.To) == nil {

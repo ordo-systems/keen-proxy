@@ -9,7 +9,7 @@ import (
 // supportFirewall retains only known probe metadata. Historical journal
 // payloads are untrusted, even when they claim to originate from the watchdog.
 func supportFirewall(e journal.Entry) *journal.FirewallEvent {
-	if e.Actor != "watchdog" || e.Target != "firewall" || e.Firewall == nil {
+	if e.Firewall == nil || e.Actor != "watchdog" || e.Target != "firewall" {
 		return nil
 	}
 	outcome := known(e.Firewall.Outcome, "restored", "apply_failed", "verify_failed")
@@ -23,7 +23,38 @@ func supportFirewall(e journal.Entry) *journal.FirewallEvent {
 		Before:     supportFirewallCheck(e.Firewall.Before),
 		After:      supportFirewallCheck(e.Firewall.After),
 		ApplyError: failureClass(e.Firewall.ApplyError),
+		Restore:    supportRestoreDiagnostic(e.Firewall.Restore),
 	}
+}
+
+func supportFirewallApply(e journal.Entry) *journal.FirewallApplyDiagnostic {
+	if e.FirewallApply == nil || e.Action != "Configuration apply failed" || e.Target != "config" || e.Result != "error" {
+		return nil
+	}
+	restore := supportRestoreDiagnostic(e.FirewallApply.Restore)
+	rollback := supportRestoreDiagnostic(e.FirewallApply.RollbackRestore)
+	if restore == nil && rollback == nil {
+		return nil
+	}
+	return &journal.FirewallApplyDiagnostic{Restore: restore, RollbackRestore: rollback}
+}
+
+func supportRestoreDiagnostic(f *journal.RestoreDiagnostic) *journal.RestoreDiagnostic {
+	if f == nil {
+		return nil
+	}
+	safe := &journal.RestoreDiagnostic{Wait: f.Wait, ExitCode: f.ExitCode}
+	if safe.ExitCode < 0 || safe.ExitCode > 255 {
+		safe.ExitCode = -1
+	}
+	if f.Line > 0 {
+		safe.Line = f.Line
+		safe.Table = known(f.Table, "nat", "mangle", "filter")
+		safe.Operation = known(f.Operation, "table", "declare_chain", "append_rule", "commit")
+		safe.Chain = known(f.Chain, netfilter.ChainDNS, netfilter.ChainDNSGuard, netfilter.ChainTCP, netfilter.ChainUDP, netfilter.ChainQUIC)
+		safe.Target = known(f.Target, "RETURN", "REDIRECT", "TPROXY", "REJECT")
+	}
+	return safe
 }
 
 func supportFirewallDuration(ms *int64) *int64 {

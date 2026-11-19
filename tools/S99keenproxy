@@ -11,6 +11,7 @@ binary="$prefix/bin/keenproxy"
 state="$prefix/var/run/keenproxy"
 if [ "$prefix" = /opt ]; then state=/var/run/keenproxy; fi
 pidfile="$state/pid"
+startup_state="$state/startup-state"
 
 owns_pid() {
     [ -f "$pidfile" ] || return 1
@@ -21,18 +22,43 @@ owns_pid() {
     [ "$running" = "$expected" ]
 }
 
+startup_reported() {
+    [ -f "$startup_state" ] && [ ! -L "$startup_state" ] || return 1
+    case "$(cat "$startup_state")" in
+        "active $1"|"management-only $1") return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 start() {
-    if owns_pid; then return 0; fi
-    if pidof keenproxy >/dev/null 2>&1; then
+    existing=
+    if owns_pid; then
+        if startup_reported "$pid"; then return 0; fi
+        existing=$pid
+    elif pidof keenproxy >/dev/null 2>&1; then
         echo 'KeenProxy: an unmanaged process is already running' >&2
         return 1
     fi
+    # Only a binary that rejects the read-only probe may use the legacy jump check.
+    probe_status=0
+    protocol=$("$binary" -startup-state-protocol 2>&1) || probe_status=$?
+    case "$probe_status:$protocol" in
+        0:1) ;;
+        '2:flag provided but not defined: -startup-state-protocol'*) protocol=legacy ;;
+        *) echo 'KeenProxy: could not determine the startup protocol' >&2; return 1 ;;
+    esac
+    if [ -n "$existing" ]; then
+        await_startup "$existing" "$protocol"
+        return $?
+    fi
+    rm -f "$startup_state" || return 1
     if [ -r "$prefix/etc/ssl/certs/ca-certificates.crt" ]; then
         export SSL_CERT_FILE="$prefix/etc/ssl/certs/ca-certificates.crt"
     fi
     # The daemon writes a bounded system journal beside its rule sets.
     (
         trap '' HUP
+        export KEENPROXY_STARTUP_STATE_FILE="$startup_state"
         exec "$binary" -config "$prefix/etc/keenproxy/config.yaml" \
             -rule-sets "$prefix/var/lib/keenproxy/rule-sets" \
             -iptables "$prefix/sbin/iptables" -iptables-restore "$prefix/sbin/iptables-restore"
@@ -42,17 +68,24 @@ start() {
         kill -TERM "$child" 2>/dev/null || :
         return 1
     fi
+    if await_startup "$child" "$protocol"; then return 0; fi
+    stop || :
+    return 1
+}
+
+await_startup() {
     remaining=20
     while [ "$remaining" -gt 0 ]; do
         sleep 1
-        if ! owns_pid; then break; fi
-        if "$prefix/sbin/iptables" -t nat -C PREROUTING -j KEENPROXY_DNS >/dev/null 2>&1; then
+        if ! owns_pid || [ "$pid" != "$1" ]; then break; fi
+        if startup_reported "$1"; then return 0; fi
+        if [ "$2" = legacy ] &&
+            "$prefix/sbin/iptables" -t nat -C PREROUTING -j KEENPROXY_DNS >/dev/null 2>&1; then
             return 0
         fi
         remaining=$((remaining - 1))
     done
     echo 'KeenProxy: startup failed; inspect the system journal' >&2
-    stop || :
     return 1
 }
 
@@ -69,7 +102,7 @@ stop() {
             return 1
         fi
     fi
-    rm -f "$pidfile"
+    rm -f "$pidfile" "$startup_state"
 }
 
 case "${1:-}" in

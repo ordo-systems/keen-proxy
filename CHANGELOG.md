@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Record sanitized iptables-restore failure locations in diagnostic archives, distinguishing a rejected Apply from a failed rollback.
+- Check TPROXY readiness before startup and Apply, explain unavailable mode in Network settings, and keep the panel available for recovery without switching modes automatically.
 - Allow LAN DNS forwarders to bypass UDP/TCP port 53 interception by source IPv4 address without changing interception for other clients or ports.
 - Avoid restarting the DNS listener when applying changes that only switch between omitted and empty group lists or group entries.
 - Import and export group and local preset resources in TXT, CSV, KeenProxy JSON, sing-box source JSON, and SRS, with preview and shared draft/Apply.

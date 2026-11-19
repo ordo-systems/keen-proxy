@@ -50,6 +50,12 @@ type Options struct {
 	Journals      journal.Set                                                          // nil creates in-memory journals
 	SingBoxLog    string                                                               // sing-box log destination (see engine.LogOutput)
 	DeviceNames   func(context.Context, map[string]netip.Addr) map[string]devices.Name // optional local name source
+	// OnStartupBlocked runs under the daemon lock once management-only startup
+	// is initialized. It must return promptly without calling daemon methods.
+	OnStartupBlocked func()
+	// OnStartupActive runs under the daemon lock after the initial apply in Run,
+	// not after a later Apply or recovery. It must return promptly without calling daemon methods.
+	OnStartupActive func()
 }
 
 // Daemon owns runtime components and coordinates serialized configuration changes.
@@ -66,22 +72,29 @@ type Daemon struct {
 	domainFingerprint []byte
 	opt               Options
 	log               *slog.Logger
+	tproxyProbe       func(context.Context) netfilter.TProxyReadiness
 
-	mu          sync.Mutex // serializes apply and protects runtime state below, except atomic live
-	cfg         *model.Config
-	eng         engine.Engine
-	dns         *dnsfront.Server
-	route       netfilter.TProxyRoute
-	routeOn     bool
-	plan        netfilter.Plan
-	planOn      bool
-	planPending bool // installation failed after the plan and its dependencies were prepared
-	neighbors   map[string]netip.Addr
-	deviceNames map[string]cachedDeviceName
-	started     time.Time
-	restored    int // number of watchdog firewall restorations
-	stats       *stats.Tracker
-	geo         geoState
+	// startupBlocked is protected by mu and closed on first successful activation.
+	startupBlocked chan struct{}
+
+	mu           sync.Mutex // serializes apply and protects runtime state below, except atomic live
+	runCtx       context.Context
+	closed       bool
+	cfg          *model.Config
+	eng          engine.Engine
+	dns          *dnsfront.Server
+	route        netfilter.TProxyRoute
+	routeOn      bool
+	routeRelease func() error // ownership-aware cleanup for a recovered TPROXY route
+	plan         netfilter.Plan
+	planOn       bool
+	planPending  bool // installation failed after the plan and its dependencies were prepared
+	neighbors    map[string]netip.Addr
+	deviceNames  map[string]cachedDeviceName
+	started      time.Time
+	restored     int // number of watchdog firewall restorations
+	stats        *stats.Tracker
+	geo          geoState
 	// geoStore owns downloaded IP databases; geoWake triggers a check.
 	geoStore *geoip.Store
 	geoWake  chan struct{}
@@ -136,6 +149,7 @@ func New(opt Options) *Daemon {
 		domains: domaincache.New(time.Now), domainSlots: make(chan struct{}, 4), opt: opt, log: opt.Log, stats: stats.NewTracker(), journals: opt.Journals,
 		active: map[string]string{}, health: map[string]*health{}, allDown: map[string]bool{},
 	}
+	d.tproxyProbe = opt.Firewall.TProxyReadiness
 	d.memoryBaseline = baseline
 	d.memoryDefault = memoryDefault
 	d.memoryActive = baseline
@@ -153,54 +167,104 @@ func New(opt Options) *Daemon {
 // Run serves until ctx is canceled. Interception starts last and stops first
 // so clients retain access to a DNS resolver during lifecycle transitions.
 func (d *Daemon) Run(ctx context.Context) error {
-	cfg, err := model.Load(d.opt.ConfigPath)
-	if err != nil {
-		return err
-	}
-	catalog.AutoUpdate(cfg)
-	go d.stats.Run(ctx)
 	d.mu.Lock()
-	d.started = time.Now()
-	// Apply the saved recommendation before geo databases and the embedded core start.
-	if err := d.stageMemoryLimit(cfg); err != nil {
+	if d.runCtx != nil || d.closed {
 		d.mu.Unlock()
-		return err
+		return errors.New("daemon cannot run more than once")
 	}
-	d.adoptLegacyGeo(cfg)
-	d.reloadGeoLocked(cfg)
-	d.neighbors = d.readNeighbors(cfg)
-	err = d.applyLocked(ctx, cfg)
-	d.mu.Unlock()
+	d.runCtx = ctx
 	defer d.shutdown()
+	activated, err := func() (<-chan struct{}, error) {
+		defer d.mu.Unlock()
+		activated, err := d.startLocked(ctx)
+		if err != nil {
+			d.closed = true
+		}
+		return activated, err
+	}()
 	if err != nil {
 		d.audit("system", "Start keenProxy", "core", "error", err.Error())
 		return err
 	}
-	d.log.Info("keenProxy started", "mode", cfg.Intercept.Mode, "sources", len(d.plan.Sources), "dns", d.dns.Addr())
-	d.audit("system", "Start keenProxy", "core", "ok",
-		fmt.Sprintf("interception %s, sources %d, DNS %s", cfg.Intercept.Mode, len(d.plan.Sources), d.dns.Addr()))
-	go d.runGeoUpdates(ctx)
-	go d.runFailover(ctx)
-	go d.runDomains(ctx)
-	go d.runFilterUpdates(ctx)
-	go d.runDeviceNames(ctx)
-
-	d.runWatchdog(ctx)
+	go d.stats.Run(ctx)
+	if activated != nil {
+		// The API can activate interception by applying a configuration while Run waits.
+		select {
+		case <-activated:
+		case <-ctx.Done():
+		}
+	}
+	if ctx.Err() == nil {
+		go d.runGeoUpdates(ctx)
+		go d.runFailover(ctx)
+		go d.runDomains(ctx)
+		go d.runFilterUpdates(ctx)
+		go d.runDeviceNames(ctx)
+		d.runWatchdog(ctx)
+	}
 	d.log.Info("stopping keenProxy")
 	d.audit("system", "Stop keenProxy", "core", "info", "interception rules removed, network uses direct routing")
 	return nil
 }
 
-// Apply validates, applies, and persists configuration. Application failures
-// trigger rollback attempts; persistence failures may leave changes active
-// without saving them.
-func (d *Daemon) Apply(ctx context.Context, cfg *model.Config) error {
-	who := actorOf(ctx)
-	by := who.Who
-	from := ""
-	if who.From != "" {
-		from = " (from " + who.From + ")"
+func (d *Daemon) startLocked(ctx context.Context) (<-chan struct{}, error) {
+	if ctx.Err() != nil {
+		return nil, nil
 	}
+	cfg, err := model.Load(d.opt.ConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	catalog.AutoUpdate(cfg)
+	d.started = time.Now()
+	blocked := d.tproxyPreflight(ctx, cfg)
+	if ctx.Err() != nil {
+		return nil, nil
+	}
+	// Apply the saved recommendation before geo databases and the embedded core start.
+	if blocked == nil {
+		if err := d.stageMemoryLimit(cfg); err != nil {
+			return nil, err
+		}
+	}
+	d.adoptLegacyGeo(cfg)
+	d.reloadGeoLocked(cfg)
+	d.neighbors = d.readNeighbors(cfg)
+	if blocked != nil {
+		d.stopInterceptionLocked()
+		if err := d.detachStartupJumps(); err != nil {
+			return nil, fmt.Errorf("detach residual interception rules: %w", err)
+		}
+		if ctx.Err() != nil {
+			return nil, nil
+		}
+		d.startupBlocked = make(chan struct{})
+		d.cfg = cfg
+		d.live.Store(cfg)
+		d.log.Warn("keenProxy started without interception", "err", blocked)
+		d.audit("system", "Start keenProxy without interception", "core", "warn", blocked.Error())
+		if d.opt.OnStartupBlocked != nil {
+			d.opt.OnStartupBlocked()
+		}
+		return d.startupBlocked, nil
+	}
+	if err := d.applyLocked(ctx, cfg); err != nil {
+		return nil, err
+	}
+	d.log.Info("keenProxy started", "mode", cfg.Intercept.Mode, "sources", len(d.plan.Sources), "dns", d.dns.Addr())
+	d.audit("system", "Start keenProxy", "core", "ok",
+		fmt.Sprintf("interception %s, sources %d, DNS %s", cfg.Intercept.Mode, len(d.plan.Sources), d.dns.Addr()))
+	if ctx.Err() == nil && d.opt.OnStartupActive != nil {
+		d.opt.OnStartupActive()
+	}
+	return nil, nil
+}
+
+// Apply validates, applies, and persists configuration. Recovery from blocked
+// startup commits only after saving; an already-active daemon can report an
+// applied-but-unsaved change.
+func (d *Daemon) Apply(ctx context.Context, cfg *model.Config) error {
+	by, from := applyActor(ctx)
 	cfg.Defaults()
 	catalog.AutoUpdate(cfg)
 	if err := cfg.Validate(); err != nil {
@@ -214,18 +278,58 @@ func (d *Daemon) Apply(ctx context.Context, cfg *model.Config) error {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	return d.applyConfigLocked(ctx, cfg, true)
+}
+
+func applyActor(ctx context.Context) (by, from string) {
+	who := actorOf(ctx)
+	if who.From != "" {
+		from = " (from " + who.From + ")"
+	}
+	return who.Who, from
+}
+
+func (d *Daemon) applyAdmissionLocked(ctx context.Context) error {
+	if d.closed || (d.runCtx != nil && d.runCtx.Err() != nil) {
+		return errors.New("daemon is stopping")
+	}
+	return ctx.Err()
+}
+
+// applyConfigLocked is shared by draft Apply and saved recovery.
+func (d *Daemon) applyConfigLocked(ctx context.Context, cfg *model.Config, save bool) error {
+	if err := d.applyAdmissionLocked(ctx); err != nil {
+		return err
+	}
+	by, from := applyActor(ctx)
+	if err := d.tproxyPreflight(ctx, cfg); err != nil {
+		d.audit(by, "Configuration rejected", "config", "error", err.Error()+from)
+		return err
+	}
+	if err := d.applyAdmissionLocked(ctx); err != nil {
+		return err
+	}
 	prev := d.cfg
 	changes := configChanges(prev, cfg)
+	activation := d.startupBlocked
+	neighbors := d.neighbors
 	if err := d.applyLocked(ctx, cfg); err != nil {
-		d.log.Error("new configuration failed to apply, restoring previous configuration", "err", err)
-		details := err.Error() + "; previous configuration restored"
+		details := err.Error()
 		restore := journalRestoreFailure(err)
 		var rollbackRestore *journal.RestoreDiagnostic
-		if prev != nil {
+		if activation != nil {
+			d.log.Error("configuration failed to activate, interception remains inactive", "err", err)
+			d.restoreInactiveLocked(prev)
+			d.neighbors = neighbors
+			details += "; interception remains inactive"
+		} else if prev != nil {
+			d.log.Error("new configuration failed to apply, restoring previous configuration", "err", err)
 			if rbErr := d.applyLocked(ctx, prev); rbErr != nil {
 				d.log.Error("rollback also failed", "err", rbErr)
-				details = err.Error() + "; rollback also failed: " + rbErr.Error()
+				details += "; rollback also failed: " + rbErr.Error()
 				rollbackRestore = journalRestoreFailure(rbErr)
+			} else {
+				details += "; previous configuration restored"
 			}
 		}
 		entry := journal.Entry{Actor: by, Action: "Configuration apply failed", Target: "config", Result: "error", Details: details + from}
@@ -235,25 +339,39 @@ func (d *Daemon) Apply(ctx context.Context, cfg *model.Config) error {
 		d.auditEntry(entry)
 		return err
 	}
-	raw, err := cfg.Marshal()
-	if err != nil {
-		return err
-	}
-	if previous, readErr := os.ReadFile(d.opt.ConfigPath); readErr == nil {
-		if err := writeFile(d.opt.ConfigPath+".previous", previous, 0o600); err != nil {
-			return fmt.Errorf("previous configuration was not saved: %w", err)
+	if activation != nil {
+		err := d.applyAdmissionLocked(ctx)
+		if err == nil && save {
+			err = d.persistConfig(cfg, true)
+		}
+		if err != nil {
+			d.restoreInactiveLocked(prev)
+			d.neighbors = neighbors
+			d.audit(by, "Configuration apply failed", "config", "error", err.Error()+"; interception remains inactive"+from)
+			return err
+		}
+		d.commitMemoryLimit(cfg)
+		d.live.Store(cfg)
+		d.startupBlocked = nil
+		close(activation)
+	} else if save {
+		if err := d.persistConfig(cfg, false); err != nil {
+			d.audit(by, "Configuration applied but not saved", "config", "warn", err.Error()+from)
+			return fmt.Errorf("configuration applied but not saved: %w", err)
 		}
 	}
-	if err := writeFile(d.opt.ConfigPath, raw, 0o600); err != nil {
-		d.audit(by, "Configuration applied but not saved", "config", "warn", err.Error()+from)
-		return fmt.Errorf("configuration applied but not saved: %w", err)
+	action := "Apply configuration"
+	if save {
+		d.log.Info("configuration applied and saved")
+	} else {
+		action = "Activate saved configuration"
+		d.log.Info("saved configuration activated")
 	}
-	d.log.Info("configuration applied and saved")
 	core := "core not restarted"
 	if d.coreRestarted {
 		core = "core restarted"
 	}
-	d.audit(by, "Apply configuration", "config", "ok", changes+"; "+core+from)
+	d.audit(by, action, "config", "ok", changes+"; "+core+from)
 	if prev == nil || !reflect.DeepEqual(prev.GeoIP, cfg.GeoIP) {
 		// New or re-enabled databases download without waiting for the next check.
 		d.wakeGeo()
@@ -262,17 +380,121 @@ func (d *Daemon) Apply(ctx context.Context, cfg *model.Config) error {
 	return nil
 }
 
+func (d *Daemon) persistConfig(cfg *model.Config, recovery bool) error {
+	raw, err := cfg.Marshal()
+	if err != nil {
+		return err
+	}
+	if previous, err := os.ReadFile(d.opt.ConfigPath); err == nil {
+		if recovery {
+			return persistRecoveryConfig(d.opt.ConfigPath, previous, raw)
+		}
+		if err := writeFile(d.opt.ConfigPath+".previous", previous, 0o600); err != nil {
+			return fmt.Errorf("previous configuration was not saved: %w", err)
+		}
+	} else if recovery {
+		return fmt.Errorf("previous configuration could not be read: %w", err)
+	}
+	if err := writeFile(d.opt.ConfigPath, raw, 0o600); err != nil {
+		return fmt.Errorf("configuration was not saved: %w", err)
+	}
+	return nil
+}
+
+// persistRecoveryConfig stages the main YAML before publishing its backup.
+// If the final rename fails, the original rollback snapshot can be restored
+// without allocating disk space. Ordinary active applies keep their best-effort
+// persistence behavior.
+func persistRecoveryConfig(path string, original, next []byte) error {
+	mainChanged := !bytes.Equal(original, next)
+	var mainTemp string
+	if mainChanged {
+		var err error
+		mainTemp, err = stageRecoveryFile(path, next)
+		if err != nil {
+			return fmt.Errorf("configuration was not saved: %w", err)
+		}
+		defer os.Remove(mainTemp)
+	}
+
+	previousPath := path + ".previous"
+	previous, err := os.ReadFile(previousPath)
+	missing := errors.Is(err, os.ErrNotExist)
+	if err != nil && !missing {
+		return fmt.Errorf("rollback snapshot could not be read: %w", err)
+	}
+	previousChanged := missing || !bytes.Equal(previous, original)
+	var rollbackTemp string
+	if previousChanged {
+		if mainChanged && !missing {
+			rollbackTemp, err = stageRecoveryFile(previousPath+".recovery", previous)
+			if err != nil {
+				return fmt.Errorf("rollback snapshot was not saved: %w", err)
+			}
+			defer func() {
+				if rollbackTemp != "" {
+					os.Remove(rollbackTemp)
+				}
+			}()
+		}
+		previousTemp, err := stageRecoveryFile(previousPath, original)
+		if err != nil {
+			return fmt.Errorf("previous configuration was not saved: %w", err)
+		}
+		defer os.Remove(previousTemp)
+		if err := os.Rename(previousTemp, previousPath); err != nil {
+			return fmt.Errorf("previous configuration was not saved: %w", err)
+		}
+	}
+
+	if !mainChanged {
+		return nil
+	}
+	if err := os.Rename(mainTemp, path); err != nil {
+		saveErr := fmt.Errorf("configuration was not saved: %w", err)
+		if previousChanged {
+			if missing {
+				if err := os.Remove(previousPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return errors.Join(saveErr, fmt.Errorf("rollback snapshot could not be removed: %w", err))
+				}
+			} else if err := os.Rename(rollbackTemp, previousPath); err != nil {
+				preserved := rollbackTemp
+				rollbackTemp = "" // Keep the distinct snapshot available for manual recovery.
+				return errors.Join(saveErr, fmt.Errorf("could not restore rollback snapshot from %s: %w", preserved, err))
+			}
+		}
+		return saveErr
+	}
+	return nil
+}
+
+func stageRecoveryFile(path string, data []byte) (string, error) {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return "", err
+	}
+	_, writeErr := f.Write(data)
+	if err := errors.Join(writeErr, f.Close()); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
+}
+
 // applyLocked reconciles runtime state with cfg while d.mu is held.
 func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config) error {
 	prev := d.cfg
+	if d.startupBlocked != nil {
+		d.neighbors = d.readNeighbors(cfg)
+	}
 	// A new attempt may change the old plan's dependencies before it reaches iptables.
 	d.planPending = false
 	if err := d.stageMemoryLimit(cfg); err != nil {
 		return err
 	}
-	committed := false
+	applied := false
 	defer func() {
-		if !committed {
+		if !applied {
 			debug.SetMemoryLimit(d.memoryActive)
 		}
 	}()
@@ -281,17 +503,17 @@ func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config) error {
 		d.reloadGeoLocked(cfg)
 	}
 	d.cfg = cfg
-	d.live.Store(cfg)
+	if d.startupBlocked == nil {
+		d.live.Store(cfg)
+	}
 	d.coreRestarted = false
 	out, err := d.compileLocked()
 	if err != nil {
 		return err
 	}
-
-
 	if restarted, err := d.eng.Apply(out.SingBox); err != nil {
 		return err
-	} else if restarted && prev != nil {
+	} else if restarted && prev != nil && d.startupBlocked == nil {
 		d.coreRestarted = true
 		d.log.Info("sing-box core restarted with new configuration")
 	}
@@ -311,11 +533,16 @@ func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config) error {
 	newRoute := netfilter.TProxyRoute{Mark: cfg.Intercept.FWMark, Table: cfg.Intercept.RouteTable}
 	wantRoute := cfg.Intercept.Mode == model.InterceptTProxy
 	if d.routeOn && (!wantRoute || newRoute != d.route) {
-		d.route.Remove()
-		d.routeOn = false
+		d.removeRouteLocked()
 	}
 	if wantRoute && !d.routeOn {
-		if err := newRoute.Apply(); err != nil {
+		var err error
+		if d.startupBlocked != nil {
+			d.routeRelease, err = newRoute.Acquire()
+		} else {
+			err = newRoute.Apply()
+		}
+		if err != nil {
 			return err
 		}
 		d.routeOn = true
@@ -328,12 +555,16 @@ func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config) error {
 	}
 	d.plan = out.Plan
 	if err := d.installFirewall(ctx); err != nil {
-		d.removeFirewall()
-		d.planPending = true
+		if d.startupBlocked == nil {
+			d.removeFirewall()
+			d.planPending = true
+		}
 		return fmt.Errorf("interception rules: %w", err)
 	}
-	d.commitMemoryLimit(cfg)
-	committed = true
+	if d.startupBlocked == nil {
+		d.commitMemoryLimit(cfg)
+	}
+	applied = true
 	return nil
 }
 
@@ -360,27 +591,61 @@ func dnsGroupsChanged(prev, next []model.Group) bool {
 // shutdown removes interception before stopping the services it depends on
 // and restores the process memory limit captured at initialization.
 func (d *Daemon) shutdown() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.closed = true
 	if g := d.domainGeneration.Load(); g != nil {
 		g.cancel()
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.planOn || d.planPending {
-		d.removeFirewall()
-	}
-	if d.routeOn {
-		d.route.Remove()
-		d.routeOn = false
-	}
-	if d.dns != nil {
-		d.dns.Close()
-	}
-	d.eng.Close()
+	d.stopInterceptionLocked()
 	d.geo.set.Close()
 	d.geo.cats.Close()
 	d.geo.set, d.geo.cats = nil, nil
 	debug.SetMemoryLimit(d.memoryBaseline)
 	d.memoryActive = d.memoryBaseline
+}
+
+// stopInterceptionLocked detaches firewall and routing state before closing listeners.
+func (d *Daemon) stopInterceptionLocked() {
+	if d.planOn || d.planPending {
+		d.removeFirewall()
+	}
+	d.removeRouteLocked()
+	if d.dns != nil {
+		d.dns.Close()
+		d.dns = nil
+	}
+	d.eng.Close()
+}
+
+func (d *Daemon) removeRouteLocked() {
+	if !d.routeOn {
+		return
+	}
+	release := d.routeRelease
+	if release == nil {
+		release = d.route.Remove
+	}
+	if err := release(); err != nil {
+		d.log.Warn("remove TPROXY route", "err", err)
+	}
+	d.routeOn, d.routeRelease = false, nil
+}
+
+// restoreInactiveLocked tears down a failed first activation without activating
+// the saved configuration that was intentionally skipped at startup.
+func (d *Daemon) restoreInactiveLocked(cfg *model.Config) {
+	d.stopInterceptionLocked()
+	debug.SetMemoryLimit(d.memoryActive)
+	d.plan = netfilter.Plan{}
+	if !reflect.DeepEqual(d.cfg.GeoIP, cfg.GeoIP) {
+		d.reloadGeoLocked(cfg)
+	}
+	d.cfg = cfg
+	d.chains, d.serverHosts = nil, nil
+	d.reselectLocked()
+	d.filters.Configure(cfg.Filters)
+	d.resetDomainGeneration()
 }
 
 // stageMemoryLimit applies cfg's recommendation, or the selected startup/default budget when unset.
@@ -507,7 +772,6 @@ func writeFile(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmp, path)
 }
 
-
 // readNeighbors builds the MAC-to-IP snapshot for the configured LAN interface.
 func (d *Daemon) readNeighbors(cfg *model.Config) map[string]netip.Addr {
 	n, err := devices.ReadARP(d.opt.ARPPath, cfg.LAN.Interface)
@@ -550,18 +814,18 @@ func (d *Daemon) Config() *model.Config {
 
 // Status summarizes daemon, engine, interception, and connection health for the API.
 type Status struct {
-	Started       time.Time         `json:"started"`
-	Mode          string            `json:"mode"`
-	Sources       int               `json:"sources"`
-	Connections   int               `json:"connections"`
-	Groups        int               `json:"groups"`
-	Entries       int               `json:"entries"`
-	Clients       int               `json:"clients"`
-	OnlineDevices int               `json:"online_devices"`
-	DNS           string            `json:"dns"`
-	Firewall      bool              `json:"firewall"`
-	Restored      int               `json:"restored"`
-	GeoIP         GeoInfo           `json:"geoip"`
+	Started       time.Time `json:"started"`
+	Mode          string    `json:"mode"`
+	Sources       int       `json:"sources"`
+	Connections   int       `json:"connections"`
+	Groups        int       `json:"groups"`
+	Entries       int       `json:"entries"`
+	Clients       int       `json:"clients"`
+	OnlineDevices int       `json:"online_devices"`
+	DNS           string    `json:"dns"`
+	Firewall      bool      `json:"firewall"`
+	Restored      int       `json:"restored"`
+	GeoIP         GeoInfo   `json:"geoip"`
 	// ConnCountries maps connection IDs to server country codes for flags.
 	ConnCountries map[string]string `json:"conn_countries"`
 	// Failover maps fallback-enabled connection IDs to their selected members.

@@ -316,6 +316,14 @@ export interface DiagnosticResult {kind:'http'|'https'|'transfer';ok:boolean;che
 // Connectivity results for a selected profile, separate from failover health.
 export interface DiagnosticReport {connection:string;results:DiagnosticResult[];demo?:boolean}
 
+// Preliminary interception capability, not proof that Apply or traffic will succeed.
+export interface TProxyReadiness {
+  state: 'ready' | 'unavailable' | 'unknown'
+  reason?: 'target_not_registered' | 'module_not_loaded' | 'mangle_unavailable' | 'probe_failed'
+  // The saved settings have not started routing because of the initial TPROXY check.
+  startup_blocked?: boolean
+}
+
 // Country database entry: a built-in referenced by ID, or a custom HTTPS URL or local MMDB.
 // List order is lookup priority; the first enabled database that knows an address wins.
 // kind 'category' marks a custom database of labels used by group categories.

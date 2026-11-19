@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ordo-systems/keen-proxy/internal/journal"
+	"github.com/ordo-systems/keen-proxy/internal/model"
 	"github.com/ordo-systems/keen-proxy/internal/netfilter"
 )
 
@@ -21,6 +22,14 @@ func (d *Daemon) installFirewall(ctx context.Context) error {
 	}
 	d.planOn, d.planPending = true, false
 	return nil
+}
+
+func (d *Daemon) detachStartupJumps() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// After a crash the old mode is unknown. TPROXY's plan includes the entry
+	// jumps shared with REDIRECT, and Detach leaves all chains and routes alone.
+	return d.opt.Firewall.Detach(ctx, netfilter.Plan{Mode: model.InterceptTProxy})
 }
 
 // checkFirewall runs under d.mu. An installed or pending plan can be repaired;

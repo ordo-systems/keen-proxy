@@ -16,5 +16,8 @@ var errNotLinux = errors.New("ip rule/route are only available on Linux")
 // Apply rejects policy-route installation outside Linux.
 func (TProxyRoute) Apply() error { return errNotLinux }
 
+// Acquire rejects policy-route acquisition outside Linux.
+func (TProxyRoute) Acquire() (func() error, error) { return nil, errNotLinux }
+
 // Remove reports that Linux policy-route cleanup is unavailable on this platform.
 func (TProxyRoute) Remove() error { return errNotLinux }

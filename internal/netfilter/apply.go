@@ -84,17 +84,44 @@ func restoreRejectsWait(err error) bool {
 		bytes.HasSuffix(firstLine, []byte(": unrecognized option: w"))
 }
 
-// Remove detaches jumps before flushing and deleting owned chains so client
-// DNS immediately returns to the router resolver (fail-open).
-func (f *Firewall) Remove(ctx context.Context, p Plan) error {
+// Detach removes only the exact owned entry jumps, leaving their chains and
+// unrelated rules untouched. A missing jump is already detached.
+func (f *Firewall) Detach(ctx context.Context, p Plan) error {
 	var errs []error
 	jumps := p.Jumps()
 	for i := len(jumps) - 1; i >= 0; i-- {
 		j := jumps[i]
-		// Remove every duplicate jump.
-		for f.Run.Run(ctx, "", f.IPTables, "-w", "-t", j.Table, "-D", j.From, "-j", j.To) == nil {
+		for {
+			err := f.Run.Run(ctx, "", f.IPTables, "-w", "-t", j.Table, "-D", j.From, "-j", j.To)
+			if err == nil {
+				continue // Remove duplicate jumps as well.
+			}
+			if !jumpAbsent(err, j) {
+				errs = append(errs, err)
+			}
+			break
 		}
 	}
+	return errors.Join(errs...)
+}
+
+func jumpAbsent(err error, j Jump) bool {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return false
+	}
+	return bytes.Contains(exit.Stderr, []byte("Bad rule (does a matching rule exist in that chain?)")) ||
+		bytes.Contains(exit.Stderr, []byte("No chain/target/match by that name.")) ||
+		bytes.Contains(exit.Stderr, []byte("Couldn't load target `"+j.To+"':No such file or directory")) ||
+		bytes.Contains(exit.Stderr, []byte("can't initialize iptables table `"+j.Table+"': Table does not exist"))
+}
+
+// Remove detaches jumps before flushing and deleting owned chains so client
+// DNS immediately returns to the router resolver (fail-open).
+func (f *Firewall) Remove(ctx context.Context, p Plan) error {
+	_ = f.Detach(ctx, p)
+	var errs []error
+	jumps := p.Jumps()
 	seen := map[string]bool{}
 	for _, j := range jumps {
 		key := j.Table + "/" + j.To

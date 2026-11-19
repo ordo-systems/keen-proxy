@@ -8,6 +8,7 @@ keenproxy_root=${KEENPROXY_PREFIX:-/}
 keenproxy_root=${keenproxy_root%/}
 keenproxy_binary="$keenproxy_root/usr/bin/keenproxy"
 keenproxy_state="$keenproxy_root/var/run/keenproxy"
+keenproxy_startup_state="$keenproxy_state/startup-state"
 
 keenproxy_lock() {
     mkdir -p "$keenproxy_state" || return 1
@@ -43,16 +44,47 @@ keenproxy_running() {
     return 1
 }
 
+keenproxy_startup_reported() {
+    local pid target
+    [ -f "$keenproxy_startup_state" ] && [ ! -L "$keenproxy_startup_state" ] || return 1
+    # Match the marker to procd's exact instance, not an arbitrary process name.
+    pid=$(ubus call service list '{"name":"keenproxy"}' |
+        jsonfilter -e '@.keenproxy.instances.instance1.pid') || return 1
+    case "$pid" in ''|*[!0-9]*|0|1) return 1 ;; esac
+    case "$(cat "$keenproxy_startup_state")" in
+        "active $pid"|"management-only $pid") ;;
+        *) return 1 ;;
+    esac
+    target=$(readlink "/proc/$pid/exe" 2>/dev/null) || return 1
+    [ "$target" = "$keenproxy_binary" ]
+}
+
 start_service() {
-    procd_open_instance
+    local probe_status=0 protocol
+    keenproxy_startup_protocol=
+    # Probe before starting the daemon. A failed probe other than an unknown
+    # flag must not let an existing firewall jump stand in for readiness.
+    protocol=$("$keenproxy_binary" -startup-state-protocol 2>&1) || probe_status=$?
+    case "$probe_status:$protocol" in
+        0:1) keenproxy_startup_protocol=1 ;;
+        '2:flag provided but not defined: -startup-state-protocol'*) keenproxy_startup_protocol=legacy ;;
+        *) echo 'KeenProxy: could not determine the startup protocol' >&2; return 1 ;;
+    esac
+    # Repeated starts can keep the same instance; preserve its startup marker.
+    if ! (procd_running keenproxy instance1); then
+        rm -f "$keenproxy_startup_state" || return 1
+    fi
+    procd_open_instance instance1
     procd_set_param command "$keenproxy_binary" \
         -config "$keenproxy_root/etc/keenproxy/config.yaml" \
         -rule-sets "$keenproxy_root/var/lib/keenproxy/rule-sets" \
         -iptables "$keenproxy_root/usr/sbin/iptables" \
         -iptables-restore "$keenproxy_root/usr/sbin/iptables-restore"
+    set -- "KEENPROXY_STARTUP_STATE_FILE=$keenproxy_startup_state"
     if [ -r "$keenproxy_root/etc/ssl/certs/ca-certificates.crt" ]; then
-        procd_set_param env "SSL_CERT_FILE=$keenproxy_root/etc/ssl/certs/ca-certificates.crt"
+        set -- "$@" "SSL_CERT_FILE=$keenproxy_root/etc/ssl/certs/ca-certificates.crt"
     fi
+    procd_set_param env "$@"
     procd_set_param term_timeout 30
     procd_set_param stdout 1
     procd_set_param stderr 1
@@ -63,10 +95,15 @@ start_service() {
 # rc.common recursively here: its per-service procd flock is still held.
 service_started() {
     local remaining=20
+    # rc.common does not propagate a start_service error to its caller.
+    [ -n "${keenproxy_startup_protocol:-}" ] || return 1
     while [ "$remaining" -gt 0 ]; do
-        if procd_running keenproxy &&
-            "$keenproxy_root/usr/sbin/iptables" -t nat -C PREROUTING -j KEENPROXY_DNS >/dev/null 2>&1; then
-            return 0
+        if procd_running keenproxy instance1; then
+            if keenproxy_startup_reported; then return 0; fi
+            if [ "$keenproxy_startup_protocol" = legacy ] &&
+                "$keenproxy_root/usr/sbin/iptables" -t nat -C PREROUTING -j KEENPROXY_DNS >/dev/null 2>&1; then
+                return 0
+            fi
         fi
         sleep 1
         remaining=$((remaining - 1))
@@ -93,7 +130,7 @@ service_stopped() {
         echo 'KeenProxy: process did not stop cleanly' >&2
         return 1
     fi
-    return 0
+    rm -f "$keenproxy_startup_state"
 }
 
 # Lock before rc.common loads procd.sh and takes its flock. Taking this lock

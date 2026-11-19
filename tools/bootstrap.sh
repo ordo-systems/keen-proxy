@@ -167,14 +167,14 @@ lock_service() {
     printf '%s\n' "$work" > "$service_lock/owner"
 }
 
-# Entware can run its staged controller; rc.common requires the installed name.
+# Each installed binary is controlled by the script installed alongside it.
 service_action() {
     if [ "$platform" = openwrt ]; then
         action=$1
         if [ "$action" = check ]; then action=running; fi
         KEENPROXY_SERVICE_LOCK_TOKEN="$work" sh "$prefix/etc/rc.common" "$service" "$action"
     else
-        KEENPROXY_SERVICE_LOCK_TOKEN="$work" sh "$work/S99keenproxy" "$1"
+        KEENPROXY_SERVICE_LOCK_TOKEN="$work" sh "$service" "$1"
     fi
 }
 
@@ -284,7 +284,7 @@ finish() {
         if [ "$platform" = openwrt ] && [ "$autostart_saved" = 0 ] && [ -f "$service" ]; then
             service_action disable || { keep_work=1; result=1; }
         fi
-        if { [ "$uninstall" = 0 ] && [ -f "$service" ] && ! service_action stop; } || ! restore_payload; then
+        if { [ "$start_attempted" = 1 ] && ! service_action stop; } || ! restore_payload; then
             echo "KeenProxy: rollback failed; recovery files retained at $work" >&2
             keep_work=1
             result=1
@@ -332,7 +332,6 @@ uninstall_release() {
         grep -Fq 'KEENPROXY_SERVICE_LOCK_TOKEN' "$service" || fail 'init script does not support installer locking; no files removed'
     fi
     for path in $payload; do backup_file "$path"; done
-    if [ "$platform" = entware ]; then cp -p "$work/previous/$service_path" "$work/S99keenproxy"; fi
     save_autostart
     if service_action check; then
         restart_previous=1
@@ -373,6 +372,7 @@ mkdir "$lock" 2>/dev/null || fail 'another installer is active or an interrupted
 work=
 service_lock=
 replacing=0
+start_attempted=0
 was_running=0
 restart_previous=0
 autostart_saved=0
@@ -480,6 +480,7 @@ if [ "$changed" = 1 ]; then
     fi
     replacing=1
     install_payload || fail 'could not install staged files'
+    start_attempted=1
     service_action start || fail 'new service failed to start'
     if [ "$platform" = openwrt ] && [ "$autostart_saved" = 0 ]; then
         service_action enable || fail 'could not enable service autostart'

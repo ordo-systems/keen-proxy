@@ -102,6 +102,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("POST /api/diagnostics/check", s.auth(s.diagnosticCheck))
 	mux.Handle("GET /api/diagnostics/bundle", s.auth(s.supportBundle))
+	mux.Handle("GET /api/diagnostics/tproxy", s.auth(s.tproxyReadiness))
+	mux.Handle("POST /api/diagnostics/tproxy/retry", s.auth(s.retryTProxy))
 	mux.Handle("GET /api/catalog", s.auth(s.catalog))
 	mux.Handle("GET /api/features", s.auth(s.features))
 	mux.Handle("POST /api/presets/preview", s.auth(s.presetPreview))

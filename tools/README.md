@@ -51,6 +51,16 @@ On the router, compare all available workers with a single worker:
 
 AEAD throughput excludes packet copying, syscalls, firewall processing and network overhead; it is not a VPN speed guarantee. The netlink probe uses reserved temporary names and attempts cleanup after partial failure, but it still performs privileged kernel operations.
 
+## Service startup
+
+The bootstrap runs the controller installed alongside the daemon, including
+after rollback. Current controllers probe `keenproxy -startup-state-protocol`
+before launch. Protocol `1` requires a startup marker matching the daemon PID:
+`active` means the initial interception apply completed; `management-only`
+means startup is parked and the management API bound successfully. An active
+daemon does not require the API. Only an older binary that does not recognize
+the probe can use the DNS firewall jump as a readiness check.
+
 ## Historical recovery scripts
 
 `router-test/guard.sh` and `router-test/rollback.sh` are local-trial recovery helpers, not a general installer or service manager. They assume a particular deployment directory and previous service layout. Inspect and adapt them before use; do not run them against an unrelated router.

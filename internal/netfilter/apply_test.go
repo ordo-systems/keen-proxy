@@ -159,3 +159,15 @@ func TestRemoveDeletesJumpsBeforeChains(t *testing.T) {
 		t.Errorf("all duplicate jumps must be removed: %v", r.deleted)
 	}
 }
+
+func TestDetachLegacyMissingChain(t *testing.T) {
+	iptables := filepath.Join(t.TempDir(), "iptables")
+	script := "#!/bin/sh\nprintf \"iptables v1.8.9 (legacy): Couldn't load target \\140%s':No such file or directory\\n\" \"$7\" >&2\nexit 2\n"
+	if err := os.WriteFile(iptables, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	f := &Firewall{Run: ExecRunner{}, IPTables: iptables}
+	if err := f.Detach(t.Context(), testPlan(model.InterceptTProxy)); err != nil {
+		t.Fatalf("absent owned chains should already be detached: %v", err)
+	}
+}

@@ -46,6 +46,10 @@ For repeated recoveries, record the times of the triggering actions and export t
 
 The error `iptables-restore: line N failed` does not necessarily mean TPROXY is missing. Start with the exact Apply error and the [`firewall_apply.restore` entry in the diagnostic ZIP](#download-the-diagnostic-zip). If the reported operation is `commit`, it identifies the table whose commit failed, not a specific rule.
 
+In **Settings → Network → Interception mode**, KeenProxy reports whether TPROXY passed the preliminary check, was found unavailable, or could not be verified. Select **Check again** after correcting the reported problem. An unknown result does not block Apply. On OpenWrt with `iptables-nft`, the absence of a target from the legacy iptables list does not prove that TPROXY is unavailable.
+
+If the saved TPROXY mode is found unavailable at startup, the panel stays accessible without starting interception. KeenProxy neither loads the module explicitly nor switches to compatible mode automatically. To recover, correct the reported problem, select **Check again**, then **Apply again**. This retry uses the saved settings without rewriting the configuration or its backup. To change modes instead, select **Compatible** and apply the draft. A successful preliminary check is not a traffic test.
+
 In the KeeneticOS component list, check **Open Package support (OPKG)** and **Kernel modules for Netfilter**. Entware supplies the `iptables` commands separately. Even with Netfilter and Xtables-addons installed, the TPROXY module may be present on disk but not loaded.
 
 **Kernel and iptables checks.** Save as `test1.sh` and run `sh test1.sh` in an Entware SSH session. This does not apply rules or explicitly load modules.

@@ -1,5 +1,5 @@
 import type { Connection, DiagnosticReport, Catalog, FeatureStatus, DNSCheck, Config, GeoLookup, GeoStatus, Device, DomainStatus, Session, HostStat, JournalKind, JournalPage, LinkPreview, StatsSnapshot, Status } from './types'
-import type { UpdatePreferences, UpdateSelection, UpdateStatus } from './types'
+import type { TProxyReadiness, UpdatePreferences, UpdateSelection, UpdateStatus } from './types'
 import type { ResourceExport, ResourceFormat, ResourceList, ResourcePreview } from './resourceExchange'
 import { ApiError } from './apiError.ts'
 
@@ -55,6 +55,8 @@ async function diagnosticBundle(): Promise<Blob> {
 export const api = {
  diagnosticCheck:(connection:string)=>request<DiagnosticReport>('POST','/api/diagnostics/check',{connection}),
  diagnosticBundle,
+ tproxyReadiness:()=>request<TProxyReadiness>('GET','/api/diagnostics/tproxy'),
+ retryTProxy: async (): Promise<void> => { await send('POST', '/api/diagnostics/tproxy/retry') },
  catalog:()=>request<Catalog>('GET','/api/catalog'),
  features:()=>request<FeatureStatus>('GET','/api/features'),
  previewPreset:(config:Config,id:string,target:string,index?:number)=>request<{config:Config;diff:{added:string[];removed:string[]}}>('POST','/api/presets/preview',{config,id,target,index}),

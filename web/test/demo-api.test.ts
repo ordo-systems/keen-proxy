@@ -41,6 +41,8 @@ test('demo API drives the UI without HTTP or EventSource operations', async () =
     assert.equal((await api.hosts('fi', 'video', 1)).hosts.length, 1)
     assert.equal((await api.hosts('unknown')).total, 0)
     assert.equal((await api.diagnosticCheck('fi')).demo, true)
+    assert.deepEqual(await api.tproxyReadiness(), { state: 'ready' })
+    await assert.rejects(api.retryTProxy(), /router only/)
     assert.equal((await api.domains()).demo, true)
     assert.equal((await api.resolveDomains(['example.com'])).records.length, 1)
     assert.ok((await api.journal('routes', {})).entries.length > 1)

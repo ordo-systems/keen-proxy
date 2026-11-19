@@ -358,6 +358,20 @@ class ArchitectureTest(NativeFixture):
 
 
 class ProcdControllerTest(NativeFixture):
+    def setUp(self):
+        super().setUp()
+        self.executable(self.binary, '''
+[ "$*" = -startup-state-protocol ] || exit 1
+case "$FIXTURE_PROTOCOL" in
+    legacy) echo 'flag provided but not defined: -startup-state-protocol' >&2; exit 2 ;;
+    *) echo 1 ;;
+esac
+''')
+        self.env['FIXTURE_PROTOCOL'] = 'current'
+        self.command('sleep', 'exit 0')
+        self.executable(self.prefix / 'usr/sbin/iptables',
+                        '[ "$FIXTURE_RESIDUAL_JUMP" = yes ]')
+        self.env['FIXTURE_RESIDUAL_JUMP'] = 'no'
 
     def test_controller_startup_failure_cleans_up_without_recursive_rc_common(self):
         controller = ROOT / 'tools/keenproxy.openwrt'
@@ -368,7 +382,11 @@ class ProcdControllerTest(NativeFixture):
 action=start
 . "$1"
 procd_running() { return 1; }
+procd_open_instance() { :; }
+procd_set_param() { :; }
+procd_close_instance() { :; }
 procd_kill() { echo "killed $1"; }
+start_service || exit 94
 service_started
 ''', 'fixture', str(controller)],
             env=self.env, text=True, capture_output=True, timeout=5)
@@ -376,3 +394,61 @@ service_started
         self.assertIn('startup failed', result.stderr)
         self.assertIn('killed keenproxy', result.stdout)
         self.assertFalse((self.prefix / 'var/run/keenproxy/action.lock').exists())
+
+    def test_controller_only_accepts_pid_markers_or_the_legacy_firewall_check(self):
+        controller = ROOT / 'tools/keenproxy.openwrt'
+        marker = self.prefix / 'var/run/keenproxy/startup-state'
+        for mode, pid, jump, legacy, ready in (
+            ('management-only', 42, False, False, True),
+            ('active', 42, False, False, True),
+            ('active', 43, True, False, False),
+            ('', 42, True, False, False),
+            ('', 42, True, True, True),
+        ):
+            with self.subTest(mode=mode, marker_pid=pid, jump=jump, legacy=legacy):
+                self.env['FIXTURE_RESIDUAL_JUMP'] = 'yes' if jump else 'no'
+                self.env['FIXTURE_PROTOCOL'] = 'legacy' if legacy else 'current'
+                result = subprocess.run(
+                    ['sh', '-c', '''
+action=start
+. "$1"
+started=no
+procd_running() { [ "$*" = 'keenproxy instance1' ] && [ "$started" = yes ]; }
+procd_kill() { echo "killed $1"; }
+procd_open_instance() { [ "$1" = instance1 ] || exit 92; }
+procd_close_instance() { :; }
+procd_set_param() {
+    if [ "$1" = env ]; then
+        [ "$2" = "KEENPROXY_STARTUP_STATE_FILE=$keenproxy_startup_state" ] || exit 93
+    fi
+}
+ubus() {
+    [ "$*" = 'call service list {"name":"keenproxy"}' ] || return 1
+    printf '%s\\n' '{"keenproxy":{"instances":{"instance1":{"running":true,"pid":42}}}}'
+}
+jsonfilter() {
+    [ "$*" = '-e @.keenproxy.instances.instance1.pid' ] || return 1
+    IFS= read -r input || return 1
+    printf '%s\\n' 42
+}
+readlink() {
+    case "$1" in /proc/42/exe|/proc/43/exe) printf '%s\\n' "$keenproxy_binary" ;; esac
+}
+printf '%s\\n' 'management-only 42' > "$keenproxy_startup_state"
+start_service || exit 94
+[ ! -e "$keenproxy_startup_state" ] || exit 95
+if [ -n "$2" ]; then printf '%s %s\\n' "$2" "$3" > "$keenproxy_startup_state"; fi
+started=yes
+service_started || exit $?
+start_service && service_started && service_stopped
+''', 'fixture', str(controller), mode, str(pid)],
+                    env=self.env, text=True, capture_output=True, timeout=5)
+                if ready:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertNotIn('killed keenproxy', result.stdout)
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('startup failed', result.stderr)
+                    self.assertIn('killed keenproxy', result.stdout)
+                self.assertFalse(marker.exists())
+                self.assertFalse(marker.with_name('action.lock').exists())

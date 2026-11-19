@@ -10,7 +10,7 @@ import (
 	"github.com/ordo-systems/keen-proxy/internal/update"
 )
 
-var updateOrigin = http.NewCrossOriginProtection()
+var browserOrigin = http.NewCrossOriginProtection()
 
 // updateRoutes separates release discovery from operations that can replace the binary.
 func (s *Server) updateRoutes(mux *http.ServeMux) {
@@ -26,7 +26,7 @@ func (s *Server) updateAuthorization(h http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusForbidden, "panel token required to manage updates")
 			return
 		}
-		if err := updateOrigin.Check(r); err != nil {
+		if err := browserOrigin.Check(r); err != nil {
 			writeError(w, http.StatusForbidden, "cross-origin update request denied")
 			return
 		}

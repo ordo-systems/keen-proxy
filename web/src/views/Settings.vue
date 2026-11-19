@@ -6,13 +6,16 @@ import UpdateSettings from '../components/UpdateSettings.vue'
 import SystemSettings from '../components/SystemSettings.vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NCard, NForm, NFormItem, NInput, NInputNumber, NRadioGroup, NRadio, NDynamicInput, NAlert, NSelect } from 'naive-ui'
+import { NButton, NCard, NForm, NFormItem, NInput, NInputNumber, NRadioGroup, NRadio, NDynamicInput, NAlert, NSelect, useMessage } from 'naive-ui'
 import { Shield, Network, MapPin, Unlock } from '@lucide/vue'
+import { api } from '../api'
 import { session, store } from '../store'
 import { LOCALES, locale, setLocale, type Locale } from '../i18n'
 import { themePreference, type ThemePreference } from '../theme'
+import { useTProxyReadiness } from '../useTProxyReadiness'
 
 const { t } = useI18n()
+const message = useMessage()
 const route = useRoute()
 const router = useRouter()
 const sectionOptions = computed(() => [
@@ -35,6 +38,49 @@ function selectSection(value: string) {
 const geo = computed(() => store.state.status?.geoip)
 
 const cfg = computed(() => store.state.config!)
+
+const {
+  result: tproxyResult,
+  startupBlocked,
+  checking: tproxyChecking,
+  unavailable: tproxyUnavailable,
+  check: checkTProxy,
+} = useTProxyReadiness(() => section.value === 'network', api.tproxyReadiness)
+const tproxyNotice = computed(() => {
+  if (tproxyChecking.value) return { type: 'info', title: 'checking' } as const
+  const result = tproxyResult.value
+  if (result?.state === 'ready') return { type: 'success', title: 'ready', detail: 'preliminary' } as const
+  if (result?.state === 'unavailable') {
+    return { type: 'error', title: 'unavailable', detail: result.reason ?? 'notAvailable' } as const
+  }
+  const detail = result?.state === 'failed' ? 'requestFailed' : result?.reason ?? 'unverified'
+  return { type: 'warning', title: 'unknown', detail } as const
+})
+const docsRoot = import.meta.env.MODE === 'demo' ? '../' : 'https://ordo-systems.github.io/keen-proxy/'
+const tproxyDocsUrl = computed(() => `${docsRoot}${locale.value === 'ru' ? 'ru/' : ''}troubleshooting/#keenetic-tproxy-apply`)
+const tproxyRecovery = computed(() => startupBlocked.value && !store.state.status?.firewall
+  && store.applied.value?.intercept.mode === 'tproxy')
+const canReapplyTProxy = computed(() => tproxyRecovery.value && !store.dirty.value
+  && !store.state.applying && !tproxyChecking.value && !tproxyUnavailable.value)
+
+async function reapplyTProxy() {
+  if (!canReapplyTProxy.value) return
+  store.state.applying = true
+  store.state.error = ''
+  try {
+    const [retry] = await Promise.allSettled([api.retryTProxy()])
+    // Refresh even after an error: another session may have already recovered.
+    const [status] = await Promise.allSettled([store.refreshStatus(), checkTProxy(true)])
+    if (retry.status === 'rejected') throw retry.reason
+    if (status.status === 'rejected') throw status.reason
+    message.success(t('shell.applied'))
+  } catch (error) {
+    store.state.error = (error as Error).message
+    message.error(store.state.error, { duration: 10000, closable: true })
+  } finally {
+    store.state.applying = false
+  }
+}
 
 // Trusted networks bypass token login; an empty list always requires a token.
 const noToken = computed({
@@ -95,11 +141,34 @@ const themeOptions = computed(() => [
                 <b>{{ t('monitor.redirect') }}</b>
                 <div class="hint">{{ t('settings.redirectHint') }}</div>
               </NRadio>
-              <NRadio value="tproxy">
+              <NRadio value="tproxy" :disabled="tproxyUnavailable">
                 <b>{{ t('monitor.tproxy') }}</b>
                 <div class="hint">{{ t('settings.tproxyHint') }}</div>
               </NRadio>
             </NRadioGroup>
+            <div class="tproxy-readiness">
+              <div role="status">
+                <NAlert :type="tproxyNotice.type" :title="t(`settings.tproxyReadiness.${tproxyNotice.title}`)">
+                  <template v-if="tproxyNotice.detail">{{ t(`settings.tproxyReadiness.${tproxyNotice.detail}`) }}</template>
+                </NAlert>
+              </div>
+              <div class="row">
+                <NButton size="small" :loading="tproxyChecking" :disabled="tproxyChecking" @click="checkTProxy()">
+                  {{ t('settings.tproxyReadiness.retry') }}
+                </NButton>
+                <a :href="tproxyDocsUrl" target="_blank" rel="noreferrer">
+                  {{ t('settings.tproxyReadiness.troubleshooting') }}
+                </a>
+              </div>
+            </div>
+            <NAlert v-if="tproxyRecovery" type="warning" style="margin-top: 12px">
+              {{ t('settings.tproxyReadiness.startupBlocked') }}
+              <div v-if="!store.dirty.value" class="row">
+                <NButton size="small" :loading="store.state.applying" :disabled="!canReapplyTProxy" @click="reapplyTProxy">
+                  {{ t('settings.tproxyReadiness.reapply') }}
+                </NButton>
+              </div>
+            </NAlert>
             <NAlert type="info" :show-icon="false" style="margin-top: 12px">{{ t('settings.interceptNote') }}</NAlert>
             <NForm label-placement="top" style="margin-top: 12px">
               <NFormItem :label="t('settings.tcpPort')"><NInputNumber v-model:value="cfg.intercept.tcp_port" :min="1" :max="65535" /></NFormItem>
@@ -258,6 +327,8 @@ const themeOptions = computed(() => [
   align-items: center;
   margin-top: 10px;
 }
+.tproxy-readiness { margin-top: 12px; }
+.tproxy-readiness a { color: var(--accent); }
 .modes {
   display: flex;
   flex-direction: column;

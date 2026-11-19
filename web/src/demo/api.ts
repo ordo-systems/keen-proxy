@@ -1,7 +1,7 @@
 import { catalog, createDemo } from './model.ts'
 import { DEMO_JOURNAL_LIMIT, DEMO_TICK_MS } from './telemetry.ts'
 import { createDemoUpdates, demoRevision } from './updates.ts'
-import type { Config, Connection, JournalKind, LinkPreview, Status, UpdatePreferences, UpdateSelection } from '../types'
+import type { Config, Connection, JournalKind, LinkPreview, Status, TProxyReadiness, UpdatePreferences, UpdateSelection } from '../types'
 import type { ResourceExport, ResourceFormat, ResourceList, ResourcePreview } from '../resourceExchange'
 import { activeExit } from '../activation.ts'
 
@@ -50,6 +50,8 @@ function journalStream(kind: JournalKind) {
 export const api = {
   diagnosticCheck: async (connection: string) => demo.diagnostics(connection),
   diagnosticBundle: async (): Promise<Blob> => { throw new Error('Diagnostics archives are available on the router only') },
+  tproxyReadiness: async (): Promise<TProxyReadiness> => ({ state: 'ready' }),
+  retryTProxy: async (): Promise<void> => { throw new Error('TPROXY startup recovery is available on the router only') },
   catalog: async () => structuredClone(catalog),
   features: async () => ({ demo: true, dns: { route: dnsExit(demo.config()), checked: new Date().toISOString(), fallbacks: 0, blocked: 18 }, filters: [] }),
   previewPreset: async (config: Config, id: string, target: string, index?: number) => demo.preview(config, id, target, index),

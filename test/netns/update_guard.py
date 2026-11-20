@@ -34,9 +34,11 @@ esac
 
     def setUp(self) -> None:
         super().setUp()
+        # GitHub runners lack the legacy IPv6 filter table. Exercise legacy
+        # IPv4 interception alongside the nft-backed IPv6 forwarding guard.
         for tool, backend in (('iptables', 'iptables-legacy'),
                               ('iptables-restore', 'iptables-legacy-restore'),
-                              ('ip6tables', 'ip6tables-legacy')):
+                              ('ip6tables', 'ip6tables-nft')):
             target = self.prefix / 'sbin' / tool
             target.unlink(missing_ok=True)
             target.symlink_to(Path('/usr/sbin') / backend)
@@ -71,6 +73,8 @@ probe 2001:db8:1::1
 
         failed = self.install('--version', 'v1.2.4')
         self.assertNotEqual(failed.returncode, 0, failed.stdout)
+        self.assertIn('new service failed to start with routing', failed.stderr)
+        self.assertIn('restoring the previous installation', failed.stderr)
         self.assertFalse((self.prefix / 'leak').exists(), failed.stderr)
         self.assertTrue((self.prefix / 'running').exists(), failed.stderr)
         self.assert_forwarding()

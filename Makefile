@@ -135,3 +135,7 @@ integration:
 .PHONY: integration-openwrt
 integration-openwrt:
 	sh test/openwrt/run.sh $(GO) build -tags $(TAGS)
+
+.PHONY: integration-entware
+integration-entware:
+	sh test/entware/run.sh $(GO) build -tags $(TAGS)

@@ -29,7 +29,8 @@ import { useStats } from '../useStats'
 import { ago, bits, bytes, duration, mbit } from '../format'
 import { mask, protocolOf, serverOf } from '../conn'
 import { countryName, flag } from '../countries'
-import type { Connection, HostStat } from '../types'
+import type { Connection } from '../types'
+import { useHostTraffic } from '../useHostTraffic'
 import { activeExit, ruleActive } from '../activation'
 import ConnectionHealth from '../components/ConnectionHealth.vue'
 import AreaChart from '../components/AreaChart.vue'
@@ -306,22 +307,17 @@ const specific = computed<Row[]>(() => {
 })
 
 // Host-level traffic for the selected connection.
-const hosts = ref<HostStat[]>([])
-const hostsTotal = ref(0)
 const q = ref('')
-async function loadHosts() {
-  try {
-    const r = await api.hosts(tab.value, q.value, 300)
-    hosts.value = r.hosts
-    hostsTotal.value = r.total
-  } catch {
-    /* Preserve existing host rows when refresh fails. */
-  }
-}
-watch([tab, q], loadHosts)
+const {
+  hosts,
+  total: hostsTotal,
+  more: moreHosts,
+  expanding: expandingHosts,
+  load: loadHosts,
+  showAll: showAllHosts,
+} = useHostTraffic(() => tab.value, () => q.value, api.hosts)
 let hostTimer: number | undefined
 onMounted(() => {
-  loadHosts()
   hostTimer = window.setInterval(loadHosts, 5000)
 })
 onUnmounted(() => clearInterval(hostTimer))
@@ -564,6 +560,15 @@ function remove() {
         </table>
       </div>
       <p v-if="!hosts.length" class="muted">{{ t('monitor.noTraffic') }}</p>
+      <NButton
+        v-if="moreHosts"
+        class="hosts-more"
+        secondary
+        :loading="expandingHosts"
+        @click="showAllHosts"
+      >
+        {{ t('conn.hostsShowAll', { n: hostsTotal }) }}
+      </NButton>
     </section>
     <ConnectionDialog v-model:show="show" :edit="editing" />
   </div>
@@ -679,6 +684,9 @@ h2 {
 .hosts-table {
   overflow: auto;
   margin-top: 18px;
+}
+.hosts-more {
+  margin-top: 16px;
 }
 table {
   border-collapse: collapse;

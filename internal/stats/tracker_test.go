@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"strconv"
 	"testing"
 	"time"
 
@@ -68,13 +69,33 @@ func TestTrackerCountsAndSamples(t *testing.T) {
 
 func TestEvictsOldHosts(t *testing.T) {
 	tr := NewTracker()
-	for i := 0; i < maxHosts+10; i++ {
+	for i := 0; i < MaxHosts+10; i++ {
 		meta := adapter.InboundContext{Destination: M.SocksaddrFrom(netip.AddrFrom4([4]byte{10, 0, byte(i >> 8), byte(i)}), 80)}
 		a, b := net.Pipe()
 		tr.RoutedConnection(context.Background(), a, meta, nil, fakeOut{tag: "direct"}).Close()
 		b.Close()
 	}
-	if _, total := tr.Hosts("direct", "", 0); total != maxHosts {
-		t.Errorf("hosts %d, want limit %d", total, maxHosts)
+	if _, total := tr.Hosts("direct", "", 0); total != MaxHosts {
+		t.Errorf("hosts %d, want limit %d", total, MaxHosts)
+	}
+}
+
+// The panel previews the ranking and offers the rest only when total says more
+// hosts match the current filter.
+func TestHostsTotalCountsFilteredMatchesBeforeLimit(t *testing.T) {
+	tr := NewTracker()
+	for i := 0; i < 15; i++ {
+		name := "video" + strconv.Itoa(i) + ".example"
+		if i >= 12 {
+			name = "mail" + strconv.Itoa(i) + ".example"
+		}
+		tr.open(adapter.InboundContext{Domain: name}, fakeOut{tag: "fi"}).host.down.Store(int64(i))
+	}
+	list, total := tr.Hosts("fi", "VIDEO", 10)
+	if total != 12 || len(list) != 10 || list[0].Host != "video11.example" || list[9].Host != "video2.example" {
+		t.Fatalf("preview: total %d, %+v", total, list)
+	}
+	if all, total := tr.Hosts("fi", "", 15); total != 15 || len(all) != 15 {
+		t.Fatalf("all: total %d, %d rows", total, len(all))
 	}
 }

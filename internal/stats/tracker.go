@@ -21,7 +21,7 @@ import (
 const (
 	SampleInterval = 2 * time.Second
 	seriesLen      = 900  // 30 minutes at two-second intervals.
-	maxHosts       = 3000 // Per outbound; evict the oldest hosts first.
+	MaxHosts       = 3000 // Per outbound; evict the oldest hosts first.
 )
 
 // Point is one timestamped traffic-history sample.
@@ -151,7 +151,7 @@ func (t *Tracker) open(m adapter.InboundContext, out adapter.Outbound) *conn {
 	o := t.outboundLocked(tag)
 	h := o.hosts[name]
 	if h == nil {
-		if len(o.hosts) >= maxHosts {
+		if len(o.hosts) >= MaxHosts {
 			evictOldest(o.hosts)
 		}
 		h = &hostStat{}
@@ -316,14 +316,15 @@ func (t *Tracker) Snapshot(withSeries bool) Snapshot {
 		if withSeries {
 			out.Series = append([]Point(nil), o.series...)
 		}
-		out.Top = topHosts(o.hosts, 5, "", func(a, b Host) bool { return a.Requests > b.Requests })
+		out.Top, _ = topHosts(o.hosts, 5, "", func(a, b Host) bool { return a.Requests > b.Requests })
 		snap.Outbounds = append(snap.Outbounds, out)
 	}
 	sort.Slice(snap.Outbounds, func(i, j int) bool { return snap.Outbounds[i].Tag < snap.Outbounds[j].Tag })
 	return snap
 }
 
-// Hosts returns filtered host traffic for one outbound and its total known-host count.
+// Hosts returns the busiest filtered hosts for one outbound and the number of
+// hosts matching the query before the limit, so callers can tell whether more exist.
 func (t *Tracker) Hosts(tag, query string, limit int) (list []Host, total int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -331,13 +332,13 @@ func (t *Tracker) Hosts(tag, query string, limit int) (list []Host, total int) {
 	if o == nil {
 		return []Host{}, 0
 	}
-	list = topHosts(o.hosts, limit, strings.ToLower(query), func(a, b Host) bool { return a.Down > b.Down })
-	return list, len(o.hosts)
+	return topHosts(o.hosts, limit, strings.ToLower(query), func(a, b Host) bool { return a.Down > b.Down })
 }
 
 // topHosts snapshots atomic counters, filters host names, sorts, and applies a positive limit.
+// It also returns the match count before limiting.
 // The caller protects the host map from concurrent structural changes.
-func topHosts(hosts map[string]*hostStat, limit int, query string, less func(a, b Host) bool) []Host {
+func topHosts(hosts map[string]*hostStat, limit int, query string, less func(a, b Host) bool) ([]Host, int) {
 	out := make([]Host, 0, len(hosts))
 	for name, h := range hosts {
 		if query != "" && !strings.Contains(name, query) {
@@ -346,8 +347,9 @@ func topHosts(hosts map[string]*hostStat, limit int, query string, less func(a, 
 		out = append(out, Host{Host: name, Down: h.down.Load(), Up: h.up.Load(), Requests: h.requests.Load(), LastSeen: h.lastSeen.Load()})
 	}
 	sort.Slice(out, func(i, j int) bool { return less(out[i], out[j]) })
+	matched := len(out)
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}
-	return out
+	return out, matched
 }

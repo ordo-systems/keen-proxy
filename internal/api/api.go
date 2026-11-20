@@ -323,10 +323,13 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.D.Stats(r.URL.Query().Get("series") == "1"))
 }
 
+// hosts returns the busiest hosts matching q and the match count before limit.
+// A missing or out-of-range limit keeps the historical default of 200; the
+// upper bound is the tracker's retention, so callers can request every host.
 func (s *Server) hosts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	if limit <= 0 || limit > 1000 {
+	if limit <= 0 || limit > stats.MaxHosts {
 		limit = 200
 	}
 	list, total := s.D.Hosts(q.Get("tag"), q.Get("q"), limit)

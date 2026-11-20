@@ -401,6 +401,7 @@ const en: Messages = {
     hosts: 'Traffic by host',
     hostsSearch: 'Search hosts…',
     hostsTotal: '{n} hosts · since start',
+    hostsShowAll: 'Show all ({n})',
     thHost: 'Host',
     thRequests: 'Requests',
     thSeen: 'Last seen',

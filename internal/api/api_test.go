@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -25,6 +26,7 @@ type fakeDaemon struct {
 	applied  *model.Config
 	failErr  error
 	journals journal.Set
+	limits   []int
 }
 
 func (f *fakeDaemon) Journal(k journal.Kind) *journal.Journal { return f.journals[k] }
@@ -48,7 +50,8 @@ func (f *fakeDaemon) Devices() []daemon.Device {
 }
 
 func (f *fakeDaemon) Stats(bool) stats.Snapshot { return stats.Snapshot{} }
-func (f *fakeDaemon) Hosts(string, string, int) ([]stats.Host, int) {
+func (f *fakeDaemon) Hosts(_, _ string, limit int) ([]stats.Host, int) {
+	f.limits = append(f.limits, limit)
 	return []stats.Host{{Host: "youtube.com", Down: 10}}, 1
 }
 
@@ -265,6 +268,20 @@ func TestStatsEndpoints(t *testing.T) {
 	}
 	if w := do(t, s.Handler(), "GET", "/api/stats/hosts?tag=fi", "", "secret", lan); w.Code != 200 || !strings.Contains(w.Body.String(), "youtube.com") {
 		t.Errorf("hosts: %d %s", w.Code, w.Body)
+	}
+}
+
+// The panel requests a short preview, then every retained host; invalid limits keep the old default.
+func TestHostsLimit(t *testing.T) {
+	s, d := newServer()
+	for _, l := range []string{"10", strconv.Itoa(stats.MaxHosts), strconv.Itoa(stats.MaxHosts + 1), "0", "x"} {
+		if w := do(t, s.Handler(), "GET", "/api/stats/hosts?tag=fi&limit="+l, "", "secret", lan); w.Code != 200 {
+			t.Fatalf("limit %s: %d", l, w.Code)
+		}
+	}
+	want := []int{10, stats.MaxHosts, 200, 200, 200}
+	if !slices.Equal(d.limits, want) {
+		t.Errorf("limits %v, want %v", d.limits, want)
 	}
 }
 

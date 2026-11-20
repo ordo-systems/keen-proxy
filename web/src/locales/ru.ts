@@ -400,6 +400,7 @@ const ru = {
     hosts: 'Трафик по хостам',
     hostsSearch: 'Поиск по хостам…',
     hostsTotal: '{n} хостов · с запуска',
+    hostsShowAll: 'Показать все ({n})',
     thHost: 'Хост',
     thRequests: 'Запросов',
     thSeen: 'Визит',

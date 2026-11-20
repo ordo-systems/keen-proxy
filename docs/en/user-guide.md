@@ -41,6 +41,8 @@ Groups, devices, networks, and DNS settings keep their references to a disabled 
 
 Raw sing-box profiles keep their `detour` and selector references to the configured connection ID. When that connection is disabled, its runtime relay uses the same enabled fallback chain, or blocks if none is available; the saved raw profile is not rewritten.
 
+**Traffic by host** ranks the selected connection's destinations by received traffic since KeenProxy started. It shows the 10 busiest hosts first; when more match, choose **Show all** to load the full list. Search filters the ranking and keeps the chosen view; selecting another connection returns to the top 10. The table refreshes every 5 seconds.
+
 ![Connection profiles and routing targets](../assets/screenshots/en-connections.png)
 
 ![Connection creation wizard](../assets/screenshots/en-wizard.png)

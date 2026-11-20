@@ -95,6 +95,9 @@ type Daemon struct {
 	restored     int // number of watchdog firewall restorations
 	stats        *stats.Tracker
 	geo          geoState
+
+	neighborUpdatePending bool // a failed compile may have written only some rule-sets
+
 	// geoStore owns downloaded IP databases; geoWake triggers a check.
 	geoStore *geoip.Store
 	geoWake  chan struct{}
@@ -699,13 +702,19 @@ func (d *Daemon) watch(ctx context.Context) {
 	if ctx.Err() != nil || (!d.planOn && !d.planPending) {
 		return
 	}
-	if n := d.readNeighbors(d.cfg); !maps.Equal(n, d.neighbors) {
-		d.audit("watchdog", "Device addresses updated", "clients", "info", neighborsChange(d.neighbors, n))
+	if n := d.readNeighbors(d.cfg); d.neighborUpdatePending || !maps.Equal(n, d.neighbors) {
+		previous := d.neighbors
 		d.neighbors = n
 		out, err := d.compileLocked()
 		if err != nil {
+			d.neighbors = previous
+			d.neighborUpdatePending = true
 			d.log.Error("recompile", "err", err)
 			return
+		}
+		d.neighborUpdatePending = false
+		if !maps.Equal(previous, n) {
+			d.audit("watchdog", "Device addresses updated", "clients", "info", neighborsChange(previous, n))
 		}
 		// Client addresses live in watched rule-set files, so sing-box can
 		// pick up changes without restarting.

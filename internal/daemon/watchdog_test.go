@@ -401,3 +401,44 @@ func TestWatchdogRetriesFailedNeighborUpdate(t *testing.T) {
 		t.Fatalf("unchanged neighbors prevented retry: applies=%d events=%+v", runner.applyCalls, entries)
 	}
 }
+
+func TestWatchdogRetriesClientRuleSetWrite(t *testing.T) {
+	ctx := context.Background()
+	d, runner := eventDaemon(t, time.Hour)
+	d.opt.RuleSetDir = t.TempDir()
+	d.cfg.LAN.Interface = "lan0"
+	d.cfg.Clients = []model.Client{{MAC: "02:00:00:00:00:01", Mode: model.ModeSplit}}
+	if _, err := d.compileLocked(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(d.opt.RuleSetDir, "clients-split.json")
+	blocked := path + ".tmp"
+	if err := os.Mkdir(blocked, 0700); err != nil {
+		t.Fatal(err)
+	}
+	const ip = "192.0.2.10"
+	arp := "IP address HW type Flags HW address Mask Device\n" + ip + " 0x1 0x2 02:00:00:00:00:01 * lan0\n"
+	if err := os.WriteFile(d.opt.ARPPath, []byte(arp), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runner.missing = false
+	d.watch(ctx)
+	if runner.applyCalls != 0 {
+		t.Fatal("installed firewall before writing client rule-set")
+	}
+	if err := os.Remove(blocked); err != nil {
+		t.Fatal(err)
+	}
+	d.watch(ctx)
+	data, err := os.ReadFile(path)
+	if err != nil || !bytes.Contains(data, []byte(ip+"/32")) {
+		t.Fatalf("client rule-set did not converge after write failure: %s (%v)", data, err)
+	}
+	if runner.applyCalls != 1 || !strings.Contains(runner.restoreInput, ip) {
+		t.Fatalf("firewall did not install the new client address: %+v", runner)
+	}
+	d.watch(ctx)
+	if runner.applyCalls != 1 {
+		t.Fatal("reapplied firewall for unchanged neighbors")
+	}
+}

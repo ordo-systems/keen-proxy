@@ -127,6 +127,8 @@ For a protected upgrade from 0.9.2 or earlier to 0.9.3, run the current command-
 
 The protected installer blocks forwarded traffic before stopping the old service. The router remains reachable from the LAN. Forwarding resumes once interception is active in the new release or in the restored release after a failed update. If neither restores interception, forwarding stays blocked. From the LAN, rerun the bootstrap with a working release and configuration to restore access. If IPv6 forwarding is enabled, the installer also needs working `ip6tables`. On OpenWrt, disable software and hardware flow offloading and reload the firewall before updating. The guard covers traffic that passes through the router's Netfilter forwarding chains.
 
+If the service starts in `management-only` mode, for example because TPROXY is unavailable, the panel can be reachable while the installer still considers interception unavailable. If the restored release also starts in this mode, fix and apply the interception settings from the LAN and then rerun the protected bootstrap with the working release. Applying the settings alone does not remove a guard left by the installer.
+
 **Roll back** reinstalls the previous published version and switches off automatic installation. It needs access to GitHub and keeps the existing configuration and token. The installer rejects an incompatible configuration before restarting the service. Rolling back to a version released before panel updates also restores that version's earlier panel. Use the command-line installer to upgrade again.
 
 ## First configuration

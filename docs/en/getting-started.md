@@ -117,6 +117,8 @@ curl -fsSL https://raw.githubusercontent.com/ordo-systems/keen-proxy/main/tools/
 
 The tag must have installer assets and checksums attached. If publication is still in progress, wait for the assets and rerun the command. Service commands are `status`, `start`, `stop`, and `restart` on `/opt/etc/init.d/S99keenproxy`. See the root README for manual installation. [Installation reference](https://github.com/ordo-systems/keen-proxy#configuration-and-router-installation)
 
+On Entware, the service tries to raise the daemon's open-file limit to at least 8192 at startup, keeping any higher limits. If the system does not allow the increase, the service warns and still starts. To confirm the effective limit, check `Max open files` in `/proc/<PID>/limits` for the KeenProxy process.
+
 ## Update from the panel
 
 On a managed Entware or native OpenWrt installation, **Settings → Updates** shows the installed version, the latest available stable release, and the previous installed version when recorded. Upgrade once with the command-line bootstrap if the current build predates panel updates. To make that older release a rollback target, first rerun the current bootstrap with the exact tag and build variant already installed, then upgrade. Native OpenWrt additionally requires that target release's procd asset. Update actions and schedule changes require the panel token, including on trusted networks.

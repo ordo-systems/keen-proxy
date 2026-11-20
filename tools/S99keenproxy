@@ -30,6 +30,17 @@ startup_reported() {
     esac
 }
 
+# Give sockets and pipes headroom without changing the caller's limits.
+raise_nofile() {
+    soft=$(ulimit -Sn) || return 1
+    if [ "$soft" = unlimited ] || [ "$soft" -ge 8192 ]; then return 0; fi
+    hard=$(ulimit -Hn) || return 1
+    if [ "$hard" != unlimited ] && [ "$hard" -lt 8192 ]; then
+        ulimit -Hn 8192 || return 1
+    fi
+    ulimit -Sn 8192
+}
+
 start() {
     existing=
     if owns_pid; then
@@ -54,6 +65,9 @@ start() {
     rm -f "$startup_state" || return 1
     if [ -r "$prefix/etc/ssl/certs/ca-certificates.crt" ]; then
         export SSL_CERT_FILE="$prefix/etc/ssl/certs/ca-certificates.crt"
+    fi
+    if ! raise_nofile 2>/dev/null; then
+        echo 'KeenProxy: could not raise the open-file limit to 8192; continuing startup' >&2
     fi
     # The daemon writes a bounded system journal beside its rule sets.
     (

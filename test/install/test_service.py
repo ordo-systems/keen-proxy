@@ -1,6 +1,7 @@
 """Exercise the actual Entware controller with isolated Linux processes."""
 import os
 from pathlib import Path
+import resource
 import shutil
 import signal
 import subprocess
@@ -79,11 +80,15 @@ esac''')
         except FileNotFoundError:
             return None
 
-    def action(self, name, *, controller=CONTROLLER, token=None):
+    def action(self, name, *, controller=CONTROLLER, token=None, nofile=None):
         env = self.env.copy()
         if token is not None:
             env['KEENPROXY_SERVICE_LOCK_TOKEN'] = token
-        return subprocess.run(['sh', str(controller), name], env=env,
+        command = ['sh', str(controller), name]
+        if nofile is not None:
+            command = ['sh', '-ec', 'ulimit -Sn "$1"; ulimit -Hn "$2"; shift 2; exec "$@"',
+                       'sh', *map(str, nofile), *command]
+        return subprocess.run(command, env=env,
                               capture_output=True, text=True, timeout=15)
 
     def assert_success(self, result):
@@ -93,6 +98,35 @@ esac''')
         pid = int(self.pidfile.read_text())
         self.assertEqual(self.process_executable(pid), str(self.binary))
         return pid
+
+    def start_with_nofile(self, soft, hard):
+        result = self.action('start', nofile=(soft, hard))
+        self.assert_success(result)
+        limits = Path(f'/proc/{self.running_pid()}/limits').read_text().splitlines()
+        nofile = next(line.split()[3:5] for line in limits if line.startswith('Max open files '))
+        self.assert_success(self.action('stop'))
+        return nofile, result.stderr
+
+    def test_start_raises_the_daemon_soft_fd_limit_without_lowering_a_higher_limit(self):
+        _, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if hard != resource.RLIM_INFINITY and hard < 16384:
+            self.skipTest('requires an inherited hard limit of at least 16384')
+        for inherited, expected in [(4095, 8192), (12288, 12288)]:
+            with self.subTest(inherited=inherited):
+                limits, stderr = self.start_with_nofile(inherited, 16384)
+                self.assertEqual(limits, [str(expected), '16384'])
+                self.assertNotIn('could not raise', stderr)
+
+    def test_start_with_a_low_hard_limit_uses_available_privileges(self):
+        probe = subprocess.run(['sh', '-ec', 'ulimit -Sn 4095; ulimit -Hn 4096; ulimit -Hn 8192'],
+                               capture_output=True, timeout=5)
+        limits, stderr = self.start_with_nofile(4095, 4096)
+        if probe.returncode == 0:
+            self.assertEqual(limits, ['8192', '8192'])
+            self.assertNotIn('could not raise', stderr)
+        else:
+            self.assertEqual(limits, ['4095', '4096'])
+            self.assertIn('could not raise the open-file limit to 8192', stderr)
 
     def test_start_is_idempotent_and_restart_replaces_the_process(self):
         self.assert_success(self.action('start'))

@@ -70,3 +70,8 @@ apply /tmp/tproxy.json
 assert_active tproxy
 assert_tproxy_rule
 echo 'OpenWrt: saved TPROXY and TPROXY → REDIRECT → TPROXY passed'
+
+kill "$pid"
+wait "$pid"
+pid=
+sh /work/update-guard.sh

@@ -16,7 +16,7 @@ class NativeFixture(BootstrapFixture):
             (self.prefix / directory).mkdir(parents=True, exist_ok=True)
         (self.prefix / 'etc/openwrt_release').write_text("DISTRIB_ID='OpenWrt'\n")
         self.executable(self.prefix / 'sbin/procd', 'exit 0')
-        for name in ('iptables', 'iptables-restore'):
+        for name in ('iptables', 'iptables-restore', 'ip6tables'):
             self.executable(self.prefix / 'usr/sbin' / name, 'exit 0')
         # rc.common is an external OpenWrt boundary, not an alternative installer.
         self.executable(self.prefix / 'etc/rc.common', '''

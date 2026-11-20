@@ -46,7 +46,7 @@ cp "$FIXTURES/$path" "$out"
 ''')
         for path in ('bin', 'sbin', 'etc/init.d'):
             (self.prefix / path).mkdir(parents=True)
-        for name in ('iptables', 'iptables-restore'):
+        for name in ('iptables', 'iptables-restore', 'ip6tables'):
             self.executable(self.prefix / 'sbin' / name, 'exit 0')
         self.executable(self.prefix / 'etc/init.d/rc.unslung', 'exit 0')
         (self.mirror / 'version.txt').write_text('1.2.3\n')

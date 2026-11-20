@@ -50,7 +50,8 @@ class ServiceTest(BootstrapFixture):
         self.executable(self.prefix / 'sbin/iptables', '''
 case "$*" in
     "-t nat -S") exit 0 ;;
-    "-t nat -C PREROUTING -j KEENPROXY_DNS") [ "$FIXTURE_READY" = yes ] ;;
+    *"-t nat -C PREROUTING -j KEENPROXY_DNS") [ "$FIXTURE_READY" = yes ] ;;
+    "-w -t filter -I FORWARD "*|"-w -t filter -D FORWARD "*) exit 0 ;;
     *) exit 1 ;;
 esac''')
 

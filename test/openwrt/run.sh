@@ -34,6 +34,8 @@ curl -fsSL --retry 3 --max-time 90 -o "$work/$rootfs" "$url"
 (cd "$work" && printf '%s  %s\n' "$sha" "$rootfs" | shasum -a 256 -c -)
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 "$@" -o "$work/keenproxy" ./cmd/keenproxy
 docker import --platform linux/arm64 --change "LABEL keenproxy.openwrt.owner=$owner" "$work/$rootfs" "$image" >/dev/null
-docker run --rm --init --cap-add NET_ADMIN --name "$owner" --label "keenproxy.openwrt.owner=$owner" \
+docker run --rm --init --privileged --name "$owner" --label "keenproxy.openwrt.owner=$owner" \
     -v "$work/keenproxy:/work/keenproxy:ro" -v "$PWD/test/openwrt/smoke.sh:/work/smoke.sh:ro" \
+    -v "$PWD/test/openwrt/update-guard.sh:/work/update-guard.sh:ro" \
+    -v "$PWD/tools:/work/tools:ro" \
     "$image" /bin/sh /work/smoke.sh

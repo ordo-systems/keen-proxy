@@ -178,6 +178,87 @@ service_action() {
     fi
 }
 
+# Match only the installer-owned rule. FORWARD leaves access to router services
+# and the replacement daemon's outbound connections available during startup.
+guard_rule() {
+    "$1" -w -t filter "$2" FORWARD -m comment --comment keenproxy-release-guard -j DROP
+}
+
+find_forwarding_guard() {
+    if [ -x "$guard4" ] && guard_rule "$guard4" -C >/dev/null 2>&1; then held4=1; fi
+    if [ -x "$guard6" ] && guard_rule "$guard6" -C >/dev/null 2>&1; then held6=1; fi
+}
+
+hold_forwarding() {
+    ipv6_forwarding=0
+    for control in /proc/sys/net/ipv6/conf/*/forwarding; do
+        if [ -r "$control" ] && [ "$(cat "$control")" = 1 ]; then
+            ipv6_forwarding=1
+            break
+        fi
+    done
+    if [ "$ipv6_forwarding" = 1 ] && [ ! -x "$guard6" ]; then
+        fail 'IPv6 forwarding is enabled; install ip6tables before updating'
+    fi
+    if [ "$platform" = openwrt ]; then
+        for option in flow_offloading flow_offloading_hw; do
+            case "$(uci -q get "firewall.@defaults[0].$option" 2>/dev/null || :)" in
+                1|on|true|yes) fail 'disable OpenWrt flow offloading and reload the firewall before updating' ;;
+            esac
+        done
+        if nft list flowtable inet fw4 ft >/dev/null 2>&1; then
+            fail 'reload the OpenWrt firewall with flow offloading disabled before updating'
+        fi
+    fi
+    if [ "$ipv6_forwarding" = 1 ] && [ "$held6" = 0 ]; then
+        guard_rule "$guard6" -I || fail 'could not block IPv6 forwarding; service left unchanged'
+        held6=1
+        if [ "$held4" = 0 ] && ! guard_rule "$guard4" -I; then
+            release_forwarding || :
+            fail 'could not block IPv4 forwarding; service left unchanged'
+        fi
+    elif [ "$held4" = 0 ]; then
+        guard_rule "$guard4" -I || fail 'could not block IPv4 forwarding; service left unchanged'
+    fi
+    held4=1
+}
+
+release_forwarding() {
+    if [ "$held4" = 1 ]; then
+        guard_rule "$guard4" -D || return 1
+        held4=0
+    fi
+    if [ "$held6" = 1 ]; then
+        guard_rule "$guard6" -D || return 1
+        held6=0
+    fi
+}
+
+start_release() {
+    service_action start || return 1
+    [ "$held4$held6" != 00 ] || return 0
+    attempts=5
+    while [ "$attempts" -gt 0 ]; do
+        if [ -r "$state/startup-state" ]; then
+            case "$(cat "$state/startup-state")" in 'management-only '*) break ;; esac
+        fi
+        # Older controllers return at the DNS jump. The daemon restores the
+        # UDP chain before attaching any jumps, and attaches its jump last.
+        if "$guard4" -w -t nat -C PREROUTING -j KEENPROXY_DNS >/dev/null 2>&1 &&
+            "$guard4" -w -t nat -C PREROUTING -j KEENPROXY_TCP >/dev/null 2>&1 &&
+            mangle=$("$guard4" -w -t mangle -S 2>/dev/null); then
+            if ! printf '%s\n' "$mangle" | grep -Fxq -- '-N KEENPROXY_UDP' ||
+                printf '%s\n' "$mangle" | grep -Fxq -- '-A PREROUTING -j KEENPROXY_UDP'; then
+                return 0
+            fi
+        fi
+        attempts=$((attempts - 1))
+        if [ "$attempts" -gt 0 ]; then sleep 1; fi
+    done
+    echo 'KeenProxy: traffic interception is not active' >&2
+    return 1
+}
+
 managed_service() {
     [ -f "$service" ] && [ ! -L "$service" ] && grep -Fxq "$marker" "$service"
 }
@@ -294,7 +375,14 @@ finish() {
         restore_autostart || { echo 'KeenProxy: could not restore service autostart state' >&2; result=1; }
     fi
     if [ "$restart_previous" = 1 ] && [ "$keep_work" = 0 ]; then
-        service_action start || echo 'KeenProxy: previous service did not restart; check its status' >&2
+        if start_release; then
+            release_forwarding || result=1
+        else
+            echo 'KeenProxy: previous service did not restore routing; check its status' >&2
+        fi
+    fi
+    if [ "$held4$held6" != 00 ]; then
+        echo 'KeenProxy: forwarding guard remains active; restore a working release from the LAN' >&2
     fi
     if [ -n "$service_lock" ]; then
         rm -f "$service_lock/owner" || :
@@ -328,6 +416,7 @@ uninstall_release() {
         return
     fi
     managed_service || fail 'unmanaged installation; no files removed'
+    find_forwarding_guard
     if [ "$platform" = entware ]; then
         grep -Fq 'KEENPROXY_SERVICE_LOCK_TOKEN' "$service" || fail 'init script does not support installer locking; no files removed'
     fi
@@ -350,6 +439,7 @@ uninstall_release() {
     for path in $payload; do rm -f "$prefix/$path" || fail "could not remove $path"; done
     replacing=0
     restart_previous=0
+    release_forwarding || fail 'could not release forwarding guard'
     printf 'KeenProxy uninstalled. Settings retained in %s/etc/keenproxy\n' "$prefix"
 }
 
@@ -377,6 +467,10 @@ was_running=0
 restart_previous=0
 autostart_saved=0
 was_enabled=0
+guard4="$prefix/$firewall_path/iptables"
+guard6="$prefix/$firewall_path/ip6tables"
+held4=0
+held6=0
 trap finish EXIT
 trap 'exit 1' HUP INT TERM
 if [ "$platform" = openwrt ]; then
@@ -473,6 +567,11 @@ if [ "$config_source" != "$config" ]; then
     # Avoid overwriting a configuration created while the release was downloading.
     (set -C; cat "$config_source" > "$config") || fail 'could not create initial configuration'
 fi
+if [ -f "$service" ]; then
+    # A previous failed transaction may have deliberately left these rules in place.
+    find_forwarding_guard
+    if [ "$changed" = 1 ] || [ "$was_running" = 0 ]; then hold_forwarding; fi
+fi
 if [ "$changed" = 1 ]; then
     if [ "$was_running" = 1 ]; then
         restart_previous=1
@@ -481,15 +580,16 @@ if [ "$changed" = 1 ]; then
     replacing=1
     install_payload || fail 'could not install staged files'
     start_attempted=1
-    service_action start || fail 'new service failed to start'
+    start_release || fail 'new service failed to start with routing'
     if [ "$platform" = openwrt ] && [ "$autostart_saved" = 0 ]; then
         service_action enable || fail 'could not enable service autostart'
     fi
     restart_previous=0
     replacing=0
-elif [ "$was_running" = 0 ]; then
-    service_action start || fail 'service failed to start'
+elif [ "$was_running" = 0 ] || [ "$held4$held6" != 00 ]; then
+    start_release || fail 'service failed to start with routing'
 fi
+release_forwarding || fail 'could not release forwarding guard'
 printf 'KeenProxy %s (%s) installed. Configuration: %s\n' "$tag" "$asset" "$config"
 print_panel_access
 )

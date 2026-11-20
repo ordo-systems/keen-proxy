@@ -126,9 +126,11 @@ integration:
 	docker run --rm --privileged -v $(CURDIR)/dist/keenproxy-test:/work/keenproxy:ro \
 		-v $(CURDIR)/dist/sbserver-test:/work/sbserver:ro \
 		-v $(CURDIR)/dist/mkgeo-test:/work/mkgeo:ro \
-		-v $(CURDIR)/test/netns/run.sh:/work/run.sh:ro debian:bookworm-slim sh -c '\
+		-v $(CURDIR)/tools:/work/tools:ro \
+		-v $(CURDIR)/test/install:/work/test/install:ro \
+		-v $(CURDIR)/test/netns:/work/test/netns:ro debian:bookworm-slim sh -c '\
 		apt-get -qq update >/dev/null && apt-get -qq install -y --no-install-recommends \
-		iptables iproute2 dnsmasq-base curl dnsutils python3 >/dev/null 2>&1 && sh /work/run.sh'
+		iptables iproute2 iputils-ping dnsmasq-base curl dnsutils python3 >/dev/null 2>&1 && sh /work/test/netns/run.sh'
 
 .PHONY: integration-openwrt
 integration-openwrt:

@@ -529,4 +529,16 @@ wait "$KPID"
 kill "$NDMPID"
 ok "NDM lifecycle cleanup is safe"
 
+# Give both families direct return routes so the probes detect an unguarded gap.
+ip -n wan route add 192.168.77.10/32 via 198.51.100.1
+ip addr add 2001:db8:1::1/64 dev br0 nodad
+ip addr add 2001:db8:2::1/64 dev veth-w nodad
+ip -n client addr add 2001:db8:1::2/64 dev eth0 nodad
+ip -n wan addr add 2001:db8:2::2/64 dev eth0 nodad
+ip -n client -6 route add default via 2001:db8:1::1
+ip -n wan -6 route add default via 2001:db8:2::1
+echo 1 >/proc/sys/net/ipv6/conf/all/forwarding
+PYTHONPATH=/work/test/install python3 -B /work/test/netns/update_guard.py
+ok "release replacement and rollback protect IPv4 and IPv6 forwarding"
+
 echo "PASS"

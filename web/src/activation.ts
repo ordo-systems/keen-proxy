@@ -13,10 +13,11 @@ export function canonicalEntry(raw: string): CanonicalEntry {
   const domain = value.replace(/^\*?\.?/, '').replace(/\.$/, '')
   if (domain && !/[\s%/\\:@?#\[\]]/.test(domain)) {
     try {
-      // A nonnumeric tail keeps WHATWG URL from treating numeric suffixes as IPv4.
+      // A nonnumeric tail keeps WHATWG URL from rewriting dotted numeric domains as IPv4.
       const tail = '.invalid'
       const host = new URL(`http://${domain}${tail}`).hostname
       const ascii = host.endsWith(tail) ? host.slice(0, -tail.length) : ''
+      if (/^\.*[0-9]+\.*$/.test(ascii)) return { type: 'invalid', value: value.toLowerCase() }
       const singleLabel = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(ascii) &&
         (!value.startsWith('*') || value.startsWith('*.'))
       if (ascii.includes('.') || singleLabel) return { type: 'domain_suffix', value: ascii.toLowerCase() }

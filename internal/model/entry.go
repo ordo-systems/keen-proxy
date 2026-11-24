@@ -62,8 +62,11 @@ func ParseEntry(s string) (Entry, error) {
 	d = strings.TrimSuffix(d, ".")
 	ascii, err := idna.Lookup.ToASCII(d)
 	ascii = strings.ToLower(ascii)
-	if err != nil || (!strings.Contains(ascii, ".") &&
-		(!singleDomainLabel.MatchString(ascii) || strings.HasPrefix(s, "*") && !strings.HasPrefix(s, "*."))) {
+	// IDNA can introduce ASCII dots at the edges of a single numeric label.
+	label := strings.Trim(ascii, ".")
+	if err != nil || (label != "" && strings.Trim(label, "0123456789") == "") ||
+		(!strings.Contains(ascii, ".") &&
+			(!singleDomainLabel.MatchString(ascii) || strings.HasPrefix(s, "*") && !strings.HasPrefix(s, "*."))) {
 		return Entry{}, fmt.Errorf("not a domain, IP, or subnet: %q", s)
 	}
 	return Entry{Kind: EntryDomain, Domain: ascii}, nil

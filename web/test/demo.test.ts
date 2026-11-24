@@ -22,6 +22,10 @@ test('demo rejects invalid configurations without changing saved state', () => {
   invalid.groups![0]!.target = 'missing'
   assert.throws(() => demo.save(invalid), /target/i)
   assert.deepEqual(demo.config(), before)
+  const numeric = demo.config()
+  numeric.groups![0]!.entries = ['*.10']
+  assert.throws(() => demo.save(numeric), /not a domain/i)
+  assert.deepEqual(demo.config(), before)
   const duplicate = demo.config()
   duplicate.connections!.push(duplicate.connections![0]!)
   assert.throws(() => demo.validate(duplicate), /unique/i)

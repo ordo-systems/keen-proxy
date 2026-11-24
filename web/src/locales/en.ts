@@ -127,6 +127,7 @@ const en: Messages = {
     "remove": "Remove entry",
     "oneOnly": "Enter one entry to edit",
     "duplicateSuffix": "The suffix {suffix} is already in this group",
+    "zoneHint": "This matches these entire DNS zones, including their apexes and subdomains: {zones}",
     "error": "DNS error",
     "noDNS": "IP and subnet entries do not need DNS"
 },

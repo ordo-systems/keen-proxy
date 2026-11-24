@@ -139,6 +139,7 @@ When certificate verification is enabled, `custom_sni` must match the exported `
 Open **Rules → Whitelist**. Create a group, name it, select its target connection (or **Direct**/**Block**), and add domains or addresses. For example, direct `work.example.com` to the Netherlands profile. Review imported entries before confirming; country selectors express broader policies.
 
 Use `ru`, `.ru`, or `*.ru` to match the entire `.ru` domain suffix. All three match `ru` itself and names such as `example.ru`, but not `guru` or `example.ru.com`. This matches domain names, not the country of an IP address.
+The entry editor shows which entire zones will match before you save the draft. A single label consisting only of digits (such as `10`) is not a valid suffix; enter a full IP address or CIDR prefix to match by address.
 
 To move several domain or country groups together, select their checkboxes, choose a target in **Change route**, and review the preview. Groups hidden by a filter can still be selected. Choose **Save to draft**, then **Apply** when ready.
 

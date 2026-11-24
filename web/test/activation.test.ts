@@ -84,7 +84,8 @@ test('top-level suffix aliases share activation and match only at label boundari
     assert.equal(entryIdentity(alias), 'domain_suffix:ru')
   }
   assert.equal(entryIdentity('*.\u0440\u0444'), 'domain_suffix:xn--p1ai')
-  for (const invalid of ['*.', '*ru', '-ru', 'ru-', 'r_u', 'a'.repeat(64)]) {
+  assert.equal(entryIdentity('*.3com'), 'domain_suffix:3com')
+  for (const invalid of ['*.', '*ru', '-ru', 'ru-', 'r_u', '10', '.1234', '*.10.', '\uff11\uff10', '\uff11\uff10\u3002', '\u300210', 'a'.repeat(64)]) {
     assert.equal(canonicalEntry(invalid).type, 'invalid', invalid)
   }
   for (const host of ['ru', 'example.ru', 'a.example.ru']) {

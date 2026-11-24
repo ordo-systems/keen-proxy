@@ -1,7 +1,7 @@
 import dnsProfiles from '../../../internal/catalog/dns.json' with { type: 'json' }
 import initial from './config.json' with { type: 'json' }
 import { createTelemetry } from './telemetry.ts'
-import { activeExit, entryIdentity, groupDisabledEntryKeys, isGeo, retainPresetActivation } from '../activation.ts'
+import { activeExit, canonicalEntry, entryIdentity, groupDisabledEntryKeys, isGeo, retainPresetActivation } from '../activation.ts'
 import { connectionChain } from '../connectionDraft.ts'
 import { maxMemoryLimitMiB, type Catalog, type Config, type DiagnosticReport, type DomainStatus, type GeoLookup, type GeoStatus, type JournalKind, type Status } from '../types.ts'
 
@@ -60,6 +60,9 @@ function validate(config: Config) {
   const targets = new Set([...ids, 'direct', 'block'])
   for (const group of config.groups ?? []) {
     if (!targets.has(group.target)) throw new Error('Unknown group target')
+    for (const entry of group.entries ?? []) {
+      if (canonicalEntry(entry).type === 'invalid') throw new Error(`Not a domain, IP, or subnet: ${entry}`)
+    }
   }
   const limit = config.system?.memory_limit_mib
   if (limit != null && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > maxMemoryLimitMiB)) {

@@ -91,6 +91,8 @@ func TestParseEntry(t *testing.T) {
 		{".ru.", EntryDomain, "ru", ""},
 		{"ru", EntryDomain, "ru", ""},
 		{"*.\u0440\u0444", EntryDomain, "xn--p1ai", ""},
+		{"*.3com", EntryDomain, "3com", ""},
+		{"010.0.0.1", EntryDomain, "010.0.0.1", ""},
 		{"\u043f\u0440\u0438\u043c\u0435\u0440.\u0440\u0444", EntryDomain, "xn--e1afmkfd.xn--p1ai", ""},
 		{"1.2.3.4", EntryPrefix, "", "1.2.3.4/32"},
 		{"10.1.2.3/8", EntryPrefix, "", "10.0.0.0/8"},
@@ -107,7 +109,7 @@ func TestParseEntry(t *testing.T) {
 			t.Errorf("%q: got %+v", c.in, e)
 		}
 	}
-	for _, bad := range []string{"", "*.", "*ru", "-ru", "ru-", "r_u", strings.Repeat("a", 64), "# only comment", "http://x"} {
+	for _, bad := range []string{"", "*.", "*ru", "-ru", "ru-", "r_u", "10", ".1234", "*.10.", "\uff11\uff10", "\uff11\uff10\u3002", "\u300210", strings.Repeat("a", 64), "# only comment", "http://x"} {
 		if _, err := ParseEntry(bad); err == nil {
 			t.Errorf("%q must fail", bad)
 		}

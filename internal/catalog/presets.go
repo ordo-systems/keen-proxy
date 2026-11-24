@@ -6,14 +6,13 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
 	"github.com/ordo-systems/keen-proxy/internal/model"
 )
 
-//go:embed presets.json presets.upstream.json
+//go:embed presets.json
 var data embed.FS
 
 // Preset is a domain and optional IP-prefix routing collection.
@@ -30,37 +29,13 @@ type Preset struct {
 var Presets = load()
 
 func load() []Preset {
-	legacy := readPresets("presets.json")
-	for _, p := range readPresets("presets.upstream.json") {
-		i := slices.IndexFunc(legacy, func(old Preset) bool { return old.ID == p.ID })
-		if i < 0 {
-			legacy = append(legacy, p)
-			continue
-		}
-		// A matching ID supplements a retained legacy preset without changing its metadata.
-		legacy[i].Domains = appendMissing(legacy[i].Domains, p.Domains)
-		legacy[i].Prefixes = appendMissing(legacy[i].Prefixes, p.Prefixes)
-	}
-	return legacy
-}
-
-func appendMissing(existing, additions []string) []string {
-	for _, entry := range additions {
-		if !slices.Contains(existing, entry) {
-			existing = append(existing, entry)
-		}
-	}
-	return existing
-}
-
-func readPresets(name string) []Preset {
-	raw, err := data.ReadFile(name)
+	raw, err := data.ReadFile("presets.json")
 	if err != nil {
 		panic(err)
 	}
 	var p []Preset
 	if err := json.Unmarshal(raw, &p); err != nil {
-		panic(fmt.Errorf("%s: %w", name, err))
+		panic(fmt.Errorf("presets.json: %w", err))
 	}
 	return p
 }

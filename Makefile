@@ -35,7 +35,7 @@ check-secrets:
 
 # Verify the pinned catalog and attribution without network access.
 check-presets:
-	shasum -a 256 --check internal/catalog/presets.upstream.sha256
+	shasum -a 256 --check internal/catalog/presets.sha256
 
 test: check-language test-install memory-regression-unit test-secrets check-presets
 	$(GO) test -tags $(TAGS) ./internal/... ./cmd/...

@@ -28,7 +28,7 @@ Open `http://localhost:8097/` for English, `/ru/` for Russian and `/demo/` for t
 
 ## Preset catalog
 
-Catalog recipes and builds live in [keenproxy-presets](https://github.com/ordo-systems/keenproxy-presets). KeenProxy embeds the verified [`v0.1.2` release](https://github.com/ordo-systems/keenproxy-presets/releases/tag/v0.1.2) as `internal/catalog/presets.upstream.json`; neither the app build nor the router downloads it. To update the pin, download the named release, verify `SHA256SUMS` and the published asset digests, then vendor `presets.json` as `presets.upstream.json`, `PRESET_SOURCES.md`, and the licenses under `LICENSES/presets/`. Update `internal/catalog/presets.upstream.sha256` and the release links in the same PR. `make check-presets` checks the vendored files offline. Keep `internal/catalog/presets.json` as the compatibility catalog until its presets have independently sourced replacements.
+Manage presets in [keenproxy-presets](https://github.com/ordo-systems/keenproxy-presets). KeenProxy embeds the complete `presets.json` from the pinned [catalog release](https://github.com/ordo-systems/keenproxy-presets/releases/tag/v0.2.1) at `internal/catalog/presets.json`; builds and routers do not download it. To update the pin, download the new release, verify its `SHA256SUMS`, and update the vendored catalog, `PRESET_SOURCES.md`, and the licenses in `LICENSES/presets/`. Update `internal/catalog/presets.sha256` and the release links in the same PR. `make check-presets` verifies the vendored files offline.
 
 ## Embedded engine modules
 

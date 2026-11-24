@@ -28,7 +28,7 @@ python3 -m http.server 8097 --directory site
 
 ## Каталог пресетов
 
-Рецепты и сборка каталога находятся в [keenproxy-presets](https://github.com/ordo-systems/keenproxy-presets). KeenProxy встраивает проверенный [релиз `v0.1.2`](https://github.com/ordo-systems/keenproxy-presets/releases/tag/v0.1.2) как `internal/catalog/presets.upstream.json`; сборка приложения и роутер не скачивают его. Для обновления скачайте конкретный релиз, сверьте `SHA256SUMS` и опубликованные хеши файлов, затем перенесите `presets.json` как `presets.upstream.json`, `PRESET_SOURCES.md` и лицензии в `LICENSES/presets/`. В том же PR обновите `internal/catalog/presets.upstream.sha256` и ссылки на релиз. `make check-presets` проверяет локальные файлы без сети. Сохраняйте `internal/catalog/presets.json` для совместимости, пока для его пресетов не появятся замены из независимо проверенных источников.
+Управляйте пресетами в [keenproxy-presets](https://github.com/ordo-systems/keenproxy-presets). KeenProxy встраивает полный `presets.json` из закреплённого [релиза каталога](https://github.com/ordo-systems/keenproxy-presets/releases/tag/v0.2.1) как `internal/catalog/presets.json`; сборка и роутер не скачивают его. Для обновления скачайте новый релиз, сверьте `SHA256SUMS` и обновите встроенный каталог, `PRESET_SOURCES.md` и лицензии в `LICENSES/presets/`. В том же PR обновите `internal/catalog/presets.sha256` и ссылки на релиз. `make check-presets` проверяет локальные файлы без сети.
 
 ## Модули встроенного движка
 

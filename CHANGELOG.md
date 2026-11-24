@@ -2,9 +2,7 @@
 
 ## Unreleased
 
-- Bundle independently built routing presets from the pinned KeenProxy Presets release alongside the historical compatibility catalog.
-- Restore the 37 official government hostnames that were present in the historical ru-state preset but absent from the MIT v2fly source, including zakupki.gov.ru, minfin.gov.ru, and service.nalog.ru.
-- Restore the 10 historical ru-banks and ru-social hosts absent from the MIT sources, including cbr.ru, online.sberbank.ru, sbp.nspk.ru, and my.mail.ru.
+- Embed the complete preset catalog from a pinned KeenProxy Presets release; no downloads at build time or on the router.
 - Keep preset updates from reopening disabled routing suffixes; limit imported government, social, and operator lists to relevant routing scopes.
 - Add verified Docker Hardened Images, GitHub Copilot, and ChatGPT endpoints without replacing historical entries; keep catalog generation and publishing in the dedicated repository.
 - Record sanitized iptables-restore failure locations in diagnostic archives, distinguishing a rejected Apply from a failed rollback.

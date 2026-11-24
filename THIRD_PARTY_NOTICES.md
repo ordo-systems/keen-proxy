@@ -28,8 +28,6 @@ Custom databases added by URL or local file have their own terms.
 
 ## Domain presets and filter lists
 
-The unmanaged presets in `internal/catalog/presets.json` are historical data from an exported domain collection. Their provenance and redistribution terms are not established; do not assume that the project license covers them.
-
-The additional catalog is vendored from the [KeenProxy Presets v0.1.2 release](https://github.com/ordo-systems/keenproxy-presets/releases/tag/v0.1.2). Its [source attribution](PRESET_SOURCES.md) and license texts under [`LICENSES/presets/`](LICENSES/presets/) cover only the published content.
+The bundled catalog comes from [KeenProxy Presets v0.2.1](https://github.com/ordo-systems/keenproxy-presets/releases/tag/v0.2.1). See the [source attribution](PRESET_SOURCES.md) and the accompanying [license texts](LICENSES/presets/).
 
 DNS blocklists are fetched from separately configured providers. Each provider's license and attribution requirements apply to its content. The ability to download a list is not a license grant.

@@ -2,7 +2,7 @@
 
 ## Generated preset sources
 
-Presets are generated from the sources below. License texts are under `LICENSES/` inside the notices archive.
+License texts for the sources listed below are under `LICENSES/` inside the notices archive.
 
 | Source | URL | Revision | License |
 |---|---|---|---|

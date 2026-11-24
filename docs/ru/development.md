@@ -26,6 +26,10 @@ python3 -m http.server 8097 --directory site
 
 Откройте `http://localhost:8097/` для английского, `/ru/` для русского и `/demo/` для отдельного демо. Сервер раздаёт только статические файлы. `npm run build` по-прежнему собирает интерфейс роутера в `web/dist`, а `build:demo` — в `web/dist-demo`.
 
+## Каталог пресетов
+
+`internal/catalog/presets.json` генерируется. Изменяйте `tools/presets/recipe.yaml` или `tools/presets/data/`, затем запускайте `make presets`. `make check-presets` проверяет актуальность сгенерированных файлов и разрешимость новых доменов; CI сравнивает с целевой веткой. Не редактируйте вручную каталог, `sources.lock.json`, `sources.snapshot.json`, `PRESET_SOURCES.md` и `LICENSES/presets/`. Подробности — в `tools/presets/README.md`.
+
 ## Модули встроенного движка
 
 После клонирования выполните `go mod download`; Git submodules не нужны. Корневой `go.mod` сохраняет upstream-пути импортов и закрепляет sing-box-lx `v1.14.4-lx.35` и соответствующие форки WireGuard/AWG, sing-tun, gVisor и uTLS пятью версионными директивами `replace`. Go не наследует `replace` зависимостей: все пять закреплений должны оставаться в корневом модуле и проверяться вместе при обновлении движка.

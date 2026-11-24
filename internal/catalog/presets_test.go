@@ -8,7 +8,7 @@ import (
 )
 
 func TestCatalogAndManagedUpdates(t *testing.T) {
-	if len(Presets) != 60 {
+	if len(Presets) != 62 {
 		t.Fatal(len(Presets))
 	}
 	seen := map[string]bool{}

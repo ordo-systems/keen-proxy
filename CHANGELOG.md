@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Generate the six restricted Russian presets from pinned MIT-licensed sources, record source revisions and snapshots, copy license texts, and gate catalog freshness plus DNS resolution in CI. Preserve unmanaged historical presets; shrinking source files keep old domains and warn.
 - Record sanitized iptables-restore failure locations in diagnostic archives, distinguishing a rejected Apply from a failed rollback.
 - Check TPROXY readiness before startup and Apply, explain unavailable mode in Network settings, and keep the panel available for recovery without switching modes automatically.
 - Allow LAN DNS forwarders to bypass UDP/TCP port 53 interception by source IPv4 address without changing interception for other clients or ports.

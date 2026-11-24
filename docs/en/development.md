@@ -26,6 +26,10 @@ python3 -m http.server 8097 --directory site
 
 Open `http://localhost:8097/` for English, `/ru/` for Russian and `/demo/` for the independent demo. The server serves static files only. `npm run build` still builds the normal router UI in `web/dist`; `build:demo` writes to `web/dist-demo`.
 
+## Preset catalog
+
+`internal/catalog/presets.json` is generated. Edit `tools/presets/recipe.yaml` or `tools/presets/data/`, then run `make presets`. `make check-presets` verifies generated files and newly added domain resolution; CI compares against the target branch. Do not edit the catalog, `sources.lock.json`, `sources.snapshot.json`, `PRESET_SOURCES.md`, or `LICENSES/presets/` manually. See `tools/presets/README.md`.
+
 ## Embedded engine modules
 
 Run `go mod download` after cloning; no Git submodules are required. Root `go.mod` keeps upstream import paths and pins sing-box-lx `v1.14.4-lx.35` plus the corresponding WireGuard/AWG, sing-tun, gVisor and uTLS forks through five versioned `replace` directives. Go does not inherit replacement directives from dependencies; keep all five pins in the root module and review them together when updating the engine.

@@ -32,7 +32,7 @@ class ReleaseAssetsTest(unittest.TestCase):
                 tools.mkdir()
                 dist.mkdir()
                 (root / 'LICENSES').mkdir()
-                for name in ('LICENSE', 'THIRD_PARTY_NOTICES.md'):
+                for name in ('LICENSE', 'THIRD_PARTY_NOTICES.md', 'PRESET_SOURCES.md'):
                     (root / name).write_text('fixture notice\n')
                 for name in ('install.sh', 'S99keenproxy'):
                     (tools / name).write_text('fixture controller\n')

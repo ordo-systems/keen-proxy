@@ -48,7 +48,7 @@ Every managed preset is generated from the pinned sources below. License texts a
 | `ru-finance` | `local` (ru-finance.txt) |
 | `ru-sber` | `local` (ru-sber.txt) |
 | `ru-state` | `v2fly` (category-gov-ru); `local` (ru-state-extra.txt) |
-| `ru-social` | `v2fly` (vk, ok, dzen, mailru-group); `local` (ru-social-extra.txt) |
+| `ru-social` | `v2fly` (vk, ok, dzen); `v2fly` (mailru-group); `local` (ru-social-extra.txt) |
 | `ru-video` | `v2fly` (rutube, okko, wink, kinopoisk, category-entertainment-ru); `local` (ru-video-extra.txt) |
 | `ru-essential` | `hxehex` (whitelist.txt); `chebur` (moscow-tele2/domains.txt, spb-tele2/domains.txt); `local` (ru-essential-extra.txt) |
 | `miro` | `local` (miro.txt) |

@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -49,16 +50,19 @@ type source struct {
 }
 
 type presetSpec struct {
-	ID          string `yaml:"id"`
-	Name        string `yaml:"name"`
-	Category    string `yaml:"category"`
-	Description string `yaml:"description"`
-	Parts       []part `yaml:"parts"`
+	ID              string   `yaml:"id"`
+	Name            string   `yaml:"name"`
+	Category        string   `yaml:"category"`
+	Description     string   `yaml:"description"`
+	Parts           []part   `yaml:"parts"`
+	Exclude         []string `yaml:"exclude"`
+	ExcludeSubtrees []string `yaml:"exclude_subtrees"`
 }
 
 type part struct {
 	Source string   `yaml:"source"`
 	Files  []string `yaml:"files"`
+	Only   []string `yaml:"only"`
 }
 
 type lockFile struct {
@@ -255,6 +259,11 @@ func loadRecipe(path string) (*recipe, error) {
 		if len(p.Parts) == 0 {
 			return nil, fmt.Errorf("preset %s has no parts", p.ID)
 		}
+		for _, domains := range [][]string{p.Exclude, p.ExcludeSubtrees} {
+			if err := validateFilters(p.ID, domains); err != nil {
+				return nil, err
+			}
+		}
 		for _, part := range p.Parts {
 			if _, ok := r.Sources[part.Source]; !ok {
 				return nil, fmt.Errorf("preset %s references unknown source %s", p.ID, part.Source)
@@ -262,9 +271,22 @@ func loadRecipe(path string) (*recipe, error) {
 			if len(part.Files) == 0 {
 				return nil, fmt.Errorf("preset %s source %s has no files", p.ID, part.Source)
 			}
+			if err := validateFilters(p.ID, part.Only); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return &r, nil
+}
+
+func validateFilters(preset string, domains []string) error {
+	for _, domain := range domains {
+		e, err := model.ParseEntry(domain)
+		if err != nil || e.Kind != model.EntryDomain || e.Domain != domain || !strings.Contains(domain, ".") {
+			return fmt.Errorf("preset %s: non-canonical domain filter %q", preset, domain)
+		}
+	}
+	return nil
 }
 
 func loadCatalog(path string) ([]catalog.Preset, error) {
@@ -504,6 +526,21 @@ func compose(r *recipe, sources map[string]*loadedSource, snap *snapshotFile, ch
 	for _, spec := range r.Presets {
 		var domains []string
 		for _, part := range spec.Parts {
+			only := make(map[string]bool, len(part.Only))
+			for _, domain := range part.Only {
+				only[domain] = true
+			}
+			preserve := func(candidates []string) {
+				if len(only) == 0 {
+					domains = append(domains, candidates...)
+					return
+				}
+				for _, domain := range candidates {
+					if only[domain] {
+						domains = append(domains, domain)
+					}
+				}
+			}
 			src := sources[part.Source]
 			for _, file := range part.Files {
 				newDomains, err := readDomains(src, file)
@@ -512,7 +549,7 @@ func compose(r *recipe, sources map[string]*loadedSource, snap *snapshotFile, ch
 				if err != nil {
 					if hasOld {
 						fmt.Fprintf(os.Stderr, "WARN source %s/%s unavailable: %v; preserving %d domains\n", part.Source, file, err, len(old.Domains))
-						domains = append(domains, old.Domains...)
+						preserve(old.Domains)
 						continue
 					}
 					return nil, nil, err
@@ -525,10 +562,23 @@ func compose(r *recipe, sources map[string]*loadedSource, snap *snapshotFile, ch
 				} else {
 					snap.Files[key] = snapshotEntry{Source: part.Source, File: file, SourceCount: len(newDomains), Domains: newDomains}
 				}
-				domains = append(domains, newDomains...)
+				preserve(newDomains)
 			}
 		}
 		domains = sortUnique(domains)
+		if len(spec.Exclude) != 0 || len(spec.ExcludeSubtrees) != 0 {
+			domains = slices.DeleteFunc(domains, func(domain string) bool {
+				if slices.Contains(spec.Exclude, domain) {
+					return true
+				}
+				for _, root := range spec.ExcludeSubtrees {
+					if domain == root || strings.HasSuffix(domain, "."+root) {
+						return true
+					}
+				}
+				return false
+			})
+		}
 		if len(domains) == 0 {
 			return nil, nil, fmt.Errorf("preset %s has no domains", spec.ID)
 		}

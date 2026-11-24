@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/ordo-systems/keen-proxy/internal/model"
 )
@@ -69,6 +70,20 @@ func normalized(entries []string) map[string]bool {
 	return m
 }
 
+// suffixParents visits proper DNS-label ancestors, not arbitrary string suffixes.
+func suffixParents(domain string, visit func(string) bool) bool {
+	for {
+		_, parent, ok := strings.Cut(domain, ".")
+		if !ok {
+			return false
+		}
+		if visit(parent) {
+			return true
+		}
+		domain = parent
+	}
+}
+
 // Update merges a catalog revision while preserving user additions, exclusions, and opt-in state.
 func Update(g model.Group, p Preset) (model.Group, Diff) {
 	current := normalized(g.Entries)
@@ -87,6 +102,35 @@ func Update(g model.Group, p Preset) (model.Group, Diff) {
 		if !current[s] && !off[s] {
 			excluded[s] = true
 			delete(next, s)
+		}
+	}
+	// New overlapping suffixes must not re-enable previously excluded traffic.
+	// Leave them out of Base so they do not become exclusions themselves.
+	if len(excluded) != 0 || len(off) != 0 {
+		parentOfExcluded := make(map[string]bool)
+		addParents := func(s string) {
+			if e, err := model.ParseEntry(s); err == nil && e.Kind == model.EntryDomain {
+				suffixParents(s, func(parent string) bool {
+					parentOfExcluded[parent] = true
+					return false
+				})
+			}
+		}
+		for s := range excluded {
+			addParents(s)
+		}
+		for s := range off {
+			addParents(s)
+		}
+		for s := range next {
+			if current[s] || base[s] || off[s] {
+				continue
+			}
+			if parentOfExcluded[s] || suffixParents(s, func(parent string) bool {
+				return excluded[parent] || off[parent]
+			}) {
+				delete(next, s)
+			}
 		}
 	}
 	for s := range current {
@@ -110,17 +154,16 @@ func Update(g model.Group, p Preset) (model.Group, Diff) {
 	sort.Strings(out)
 	sort.Strings(diff.Added)
 	sort.Strings(diff.Removed)
-	b := normalized(p.Domains)
 	for s := range current {
 		if !base[s] {
-			delete(b, s)
+			delete(next, s)
 		}
 	}
 	for s := range excluded {
-		b[s] = true
+		next[s] = true
 	}
 	baseline := []string{}
-	for s := range b {
+	for s := range next {
 		baseline = append(baseline, s)
 	}
 	sort.Strings(baseline)

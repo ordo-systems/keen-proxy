@@ -159,9 +159,9 @@ See [Country rules](routing.md#country-rules) for an illustrated setup, country 
 
 Open **Rules → Presets**, select a target, then preview a collection. Inspect the added/removed entries and accept it into the draft. Presets can be enabled, disabled, or removed. The static demo includes one original example collection; it does not redistribute the full community catalog.
 
-The catalog shows domain lists without resolving them. KeenProxy resolves IPs for enabled presets after **Apply**. Enable **Update with new app versions** to adopt changes to the bundled preset after upgrading KeenProxy. The bundled catalog is generated from pinned public sources; license texts are in `LICENSES/presets/`. To block ads or other domains through DNS, see [DNS filters](routing.md#dns-filters).
+The catalog shows domain lists without resolving them. KeenProxy resolves IPs for enabled presets after **Apply**. Enable **Update with new app versions** to adopt changes to the bundled preset after upgrading KeenProxy. Rebuilt presets record their pinned sources and licenses in `PRESET_SOURCES.md`. To block ads or other domains through DNS, see [DNS filters](routing.md#dns-filters).
 
-Updating a preset preserves per-entry off states separately from deletions, including entries that disappear from one preset revision and return later. Disabling a rule does not remove it from the preset or discard your saved value.
+Updating a preset preserves per-entry off states separately from deletions, including entries that disappear from one preset revision and return later. New suffixes that would overlap a disabled or removed entry are not added to the group. Disabling a rule does not remove it from the preset or discard your saved value.
 
 ### Exchange resource lists { #resource-lists }
 

@@ -32,6 +32,24 @@ func testSources(root string) map[string]*loadedSource {
 	}
 }
 
+func TestComposeFiltersRulesByRoutingScope(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "a.txt"), "host.registration.test\nbroad.test\nhost.broad.test\nother.test\n")
+	r := testRecipe()
+	p := &r.Presets[0]
+	p.Exclude = []string{"broad.test"}
+	p.ExcludeSubtrees = []string{"registration.test"}
+	p.Parts[0].Only = []string{"host.registration.test", "broad.test", "host.broad.test"}
+	snap := snapshotFile{Files: map[string]snapshotEntry{}}
+	managed, _, err := compose(r, testSources(dir), &snap, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := managed["p"].Domains; !slices.Equal(got, []string{"host.broad.test"}) {
+		t.Fatalf("routing suffixes = %v", got)
+	}
+}
+
 func TestShrinkKeepsOldDomains(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "a.txt"), "one.test\ntwo.test\n")

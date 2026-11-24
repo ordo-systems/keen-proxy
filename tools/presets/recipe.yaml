@@ -70,6 +70,8 @@ presets:
     name: Russian government
     category: Russia
     description: Federal and regional government services from v2fly and a project-owned seed.
+    # These public registration zones do not identify government services.
+    exclude_subtrees: [cbg.ru, edu.ru, marine.ru]
     parts:
       - source: v2fly
         files: [category-gov-ru]
@@ -80,9 +82,17 @@ presets:
     name: Russian social media
     category: Russia
     description: Russian social networks, blogs, and messengers.
+    exclude: [cdn-vk.ru]
     parts:
       - source: v2fly
-        files: [vk, ok, dzen, mailru-group]
+        files: [vk, ok, dzen]
+      - source: v2fly
+        files: [mailru-group]
+        # Keep previously supported services without importing the whole holding.
+        only: [appsmail.ru, attachmail.ru, bk.ru, boosty.to, donationalerts.com,
+          imgsmail.ru, inbox.ru, internet.ru, list.ru, mail.ru, max.ru, mycdn.me,
+          sferum.ru, vk-apps.com, vk-apps.ru, vk.company, vk.team, vkgo.app,
+          vklive.app, vkvideo.ru, xmail.ru, youla.io, youla.ru]
       - source: local
         files: [ru-social-extra.txt]
 
@@ -99,12 +109,25 @@ presets:
   - id: ru-essential
     name: Essential Russian services
     category: Russia
-    description: Russian essential services from the Mintsifry availability list, operator whitelists, and official sites.
+    description: Selected Russian services from operator lists and official sites.
     parts:
       - source: hxehex
         files: [whitelist.txt]
+        # An observed SNI does not authorize its whole subtree. Retain only
+        # suffixes supported by the earlier catalog and still in these sources.
+        only: &essential_suffixes [2gis.ru, aeroflot.ru, aif.ru, auchan.ru, avito.ru,
+          avito.st, beeline.ru, citydrive.ru, ctc.ru, dellin.ru, dixy.ru, domashniy.ru,
+          duma.gov.ru, dzen.ru, esia.gosuslugi.ru, gazeta.ru, gosuslugi.ru,
+          government.ru, hh.ru, ivi.ru, kommersant.ru, kp.ru, kremlin.ru, kuper.ru,
+          lenta.ru, magnit.ru, mail.ru, matchtv.ru, max.ru, mchs.gov.ru, megafon.ru,
+          metro-cc.ru, mir24.tv, mk.ru, moex.com, mos.ru, mts.ru, mvd.ru, nspk.ru,
+          ntv.ru, ok.ru, otr-online.ru, ozon.ru, perekrestok.ru, petrovich.ru,
+          pochta.ru, rambler.ru, rbc.ru, rg.ru, ria.ru, rosseti.ru, rt.ru, rutube.ru,
+          rzd.ru, samokat.ru, tnt-online.ru, tutu.ru, tv3.ru, tvc.ru, vedomosti.ru,
+          vk.com, vkusvill.ru, wb.ru, wildberries.ru, x5.ru, ya.ru, yandex.ru]
       - source: chebur
         files: [moscow-tele2/domains.txt, spb-tele2/domains.txt]
+        only: *essential_suffixes
       - source: local
         files: [ru-essential-extra.txt]
 

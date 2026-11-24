@@ -13,7 +13,11 @@ func TestPresetJSONUsesDomainsWithoutExportMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, input := range [][]byte{raw, mustCatalogJSON(t)} {
+	upstream, err := data.ReadFile("presets.upstream.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range [][]byte{raw, upstream, mustCatalogJSON(t)} {
 		var presets []map[string]json.RawMessage
 		if err := json.Unmarshal(input, &presets); err != nil {
 			t.Fatal(err)

@@ -17,7 +17,7 @@ NPM := PATH="$(NODE_BIN):$$PATH" npm
 # Preview identity is separate from the last published installer version.
 DEMO_VERSION = $(shell PATH="$(NODE_BIN):$$PATH" node -p "require('./web/src/demo/release.json').version")
 
-.PHONY: test vet web build ui-demo build-router build-router-lite build-router-ci build-router-lite-ci clean integration test-install check-language check-secrets test-secrets docs docs-preview memory-regression memory-regression-unit memory-stress memory-build-settings presets check-presets
+.PHONY: test vet web build ui-demo build-router build-router-lite build-router-ci build-router-lite-ci clean integration test-install check-language check-secrets test-secrets docs docs-preview memory-regression memory-regression-unit memory-stress memory-build-settings check-presets
 
 check-language:
 	python3 -B -m unittest discover -s test/language -v
@@ -33,19 +33,12 @@ test-secrets:
 check-secrets:
 	tools/scan-secrets.sh history
 
-# Regenerate the bundled catalog from pinned sources. Newly added domains must
-# resolve. Shrinking a source file preserves old domains and prints a warning;
-# use the snapshot to review them.
-presets:
-	$(GO) run ./tools/presets -dns
-
-# CI gate: generated files must be current, and newly added domains must resolve.
-# Set PRESET_BASE to the target branch catalog so DNS checks cover the new presets.
+# Verify the pinned catalog and attribution without network access.
 check-presets:
-	$(GO) run ./tools/presets -check -dns $(if $(PRESET_BASE),-base $(PRESET_BASE),)
+	shasum -a 256 --check internal/catalog/presets.upstream.sha256
 
-test: check-language test-install memory-regression-unit test-secrets
-	$(GO) test -tags $(TAGS) ./internal/... ./cmd/... ./tools/...
+test: check-language test-install memory-regression-unit test-secrets check-presets
+	$(GO) test -tags $(TAGS) ./internal/... ./cmd/...
 	$(GO) test -tags keenproxy_lite,$(PROTO_TAGS) ./internal/engine/ ./internal/links/
 
 vet:

@@ -163,6 +163,8 @@ The catalog shows domain lists without resolving them. KeenProxy resolves IPs fo
 
 Updating a preset preserves per-entry off states separately from deletions, including entries that disappear from one preset revision and return later. New suffixes that would overlap a disabled or removed entry are not added to the group. Disabling a rule does not remove it from the preset or discard your saved value.
 
+Upgrading from 0.9.3 does not require editing YAML or fetching a catalog on the router. Existing preset IDs are retained. Groups with automatic preset updates turned off keep their entries; opted-in groups adopt the new bundled contents while preserving manual entries and exclusions.
+
 ### Exchange resource lists { #resource-lists }
 
 Import a local file into a new or existing explicit-resource group or local preset. Choose append to keep existing entries or replace to remove entries absent from the file. Inspect duplicates, additions, removals, and diagnostics before staging the result. Invalid or unsupported rules block the whole import. **Apply** saves the draft; **Discard** restores the last saved configuration.

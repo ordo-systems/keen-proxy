@@ -2,9 +2,11 @@
 
 ## Unreleased
 
-- Generate the six restricted Russian presets from pinned MIT-licensed sources, record source revisions and snapshots, copy license texts, and gate catalog freshness plus DNS resolution in CI. Preserve unmanaged historical presets; shrinking source files keep old domains and warn.
+- Bundle independently built routing presets from the pinned KeenProxy Presets release alongside the historical compatibility catalog.
 - Restore the 37 official government hostnames that were present in the historical ru-state preset but absent from the MIT v2fly source, including zakupki.gov.ru, minfin.gov.ru, and service.nalog.ru.
 - Restore the 10 historical ru-banks and ru-social hosts absent from the MIT sources, including cbr.ru, online.sberbank.ru, sbp.nspk.ru, and my.mail.ru.
+- Keep preset updates from reopening disabled routing suffixes; limit imported government, social, and operator lists to relevant routing scopes.
+- Add verified Docker Hardened Images, GitHub Copilot, and ChatGPT endpoints without replacing historical entries; keep catalog generation and publishing in the dedicated repository.
 - Record sanitized iptables-restore failure locations in diagnostic archives, distinguishing a rejected Apply from a failed rollback.
 - Check TPROXY readiness before startup and Apply, explain unavailable mode in Network settings, and keep the panel available for recovery without switching modes automatically.
 - Allow LAN DNS forwarders to bypass UDP/TCP port 53 interception by source IPv4 address without changing interception for other clients or ports.

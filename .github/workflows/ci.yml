@@ -47,29 +47,12 @@ jobs:
   presets:
     name: Preset catalog
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    env:
-      CGO_ENABLED: '0'
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Read pinned Go version
-        id: go-version
-        run: |
-          version=$(awk '$1 == "go" {print $2}' go.mod)
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: ${{ steps.go-version.outputs.version }}
-          cache-dependency-path: go.sum
-      - name: Fetch target catalog
-        run: |
-          git fetch --depth=1 origin main
-          mkdir -p .cache
-          git show FETCH_HEAD:internal/catalog/presets.json > .cache/presets-base.json
-      - name: Verify generated catalog
-        run: make check-presets PRESET_BASE=.cache/presets-base.json
+      - run: make check-presets
 
   memory:
     name: Memory regression

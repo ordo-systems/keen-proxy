@@ -3,6 +3,7 @@ import hashlib
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 import tempfile
 import textwrap
 import unittest
@@ -24,16 +25,18 @@ def release_step(name):
 @unittest.skipUnless(sys.platform == 'linux', 'release packaging requires GNU tar')
 class ReleaseAssetsTest(unittest.TestCase):
     def test_existing_release_retry_preserves_platform_asset_boundary(self):
-        for native in (False, True):
-            with self.subTest(native=native), tempfile.TemporaryDirectory() as tmp:
+        for native, with_sources in ((False, False), (True, False), (True, True)):
+            with self.subTest(native=native, with_sources=with_sources), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 tools = root / 'tools'
                 dist = root / 'dist'
                 tools.mkdir()
                 dist.mkdir()
                 (root / 'LICENSES').mkdir()
-                for name in ('LICENSE', 'THIRD_PARTY_NOTICES.md', 'PRESET_SOURCES.md'):
+                for name in ('LICENSE', 'THIRD_PARTY_NOTICES.md'):
                     (root / name).write_text('fixture notice\n')
+                if with_sources:
+                    (root / 'PRESET_SOURCES.md').write_text('preset sources\n')
                 for name in ('install.sh', 'S99keenproxy'):
                     (tools / name).write_text('fixture controller\n')
                 if native:
@@ -80,6 +83,11 @@ gh() {
                 result = subprocess.run(['bash', '-c', script], cwd=root,
                                         capture_output=True, text=True, timeout=20)
                 self.assertEqual(result.returncode, 0, result.stderr)
+                with tarfile.open(dist / 'keenproxy-notices.tar.gz') as notices:
+                    expected_notices = {'LICENSE', 'THIRD_PARTY_NOTICES.md', 'LICENSES'}
+                    if with_sources:
+                        expected_notices.add('PRESET_SOURCES.md')
+                    self.assertEqual(set(notices.getnames()), expected_notices)
                 checksums = {}
                 for line in (dist / 'SHA256SUMS').read_text().splitlines():
                     digest, name = line.split()

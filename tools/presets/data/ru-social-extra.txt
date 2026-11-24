@@ -13,3 +13,6 @@ st-ok.cdn-vk.ru
 tenchat.ru
 vc.ru
 yaplakal.com
+#
+# Historical ru-social hosts restored deliberately.
+my.mail.ru

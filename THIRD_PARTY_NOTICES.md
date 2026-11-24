@@ -28,6 +28,6 @@ Custom databases added by URL or local file have their own terms.
 
 ## Domain presets and filter lists
 
-The bundled catalog comes from [KeenProxy Presets v0.2.1](https://github.com/ordo-systems/keenproxy-presets/releases/tag/v0.2.1). See the [source attribution](PRESET_SOURCES.md) and the accompanying [license texts](LICENSES/presets/).
+The bundled catalog comes from [KeenProxy Presets](https://github.com/ordo-systems/keenproxy-presets/releases). See the [pinned version](internal/catalog/presets.version), [source attribution](PRESET_SOURCES.md), and [license texts](LICENSES/presets/).
 
 DNS blocklists are fetched from separately configured providers. Each provider's license and attribution requirements apply to its content. The ability to download a list is not a license grant.

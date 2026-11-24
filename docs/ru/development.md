@@ -28,7 +28,11 @@ python3 -m http.server 8097 --directory site
 
 ## Каталог пресетов
 
-Управляйте пресетами в [keenproxy-presets](https://github.com/ordo-systems/keenproxy-presets). KeenProxy встраивает полный `presets.json` из закреплённого [релиза каталога](https://github.com/ordo-systems/keenproxy-presets/releases/tag/v0.2.1) как `internal/catalog/presets.json`; сборка и роутер не скачивают его. Для обновления скачайте новый релиз, сверьте `SHA256SUMS` и обновите встроенный каталог, `PRESET_SOURCES.md` и лицензии в `LICENSES/presets/`. В том же PR обновите `internal/catalog/presets.sha256` и ссылки на релиз. `make check-presets` проверяет локальные файлы без сети.
+Управляйте пресетами в [keenproxy-presets](https://github.com/ordo-systems/keenproxy-presets). KeenProxy встраивает полный каталог `internal/catalog/presets.json`, версия и хеши закреплены в соседних `presets.version` и `presets.sha256`. Сборка и роутер не скачивают его. `make check-presets` проверяет локальные файлы без сети.
+
+Workflow **Update preset catalog** ежедневно ищет более новый стабильный релиз и поддерживает ручной запуск на `main`. Он сверяет хеши файлов релиза и контрольные суммы, затем открывает или обновляет один PR. Мержить PR бот не будет. Перед мерджем проверьте добавления и удаления.
+
+Разрешите запуск в окружении `preset-updates` только с `main`; для работы по расписанию без участия человека не назначайте обязательных ревьюеров окружения. Установите отдельный GitHub App только на этот репозиторий с правами **Contents: Read and write** и **Pull requests: Read and write**. Задайте переменную окружения `PRESET_BOT_APP_CLIENT_ID` и секрет `PRESET_BOT_APP_PRIVATE_KEY`. Не используйте приложение для релизов. PR от этого приложения запускают обычный CI.
 
 ## Модули встроенного движка
 

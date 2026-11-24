@@ -28,7 +28,11 @@ Open `http://localhost:8097/` for English, `/ru/` for Russian and `/demo/` for t
 
 ## Preset catalog
 
-Manage presets in [keenproxy-presets](https://github.com/ordo-systems/keenproxy-presets). KeenProxy embeds the complete `presets.json` from the pinned [catalog release](https://github.com/ordo-systems/keenproxy-presets/releases/tag/v0.2.1) at `internal/catalog/presets.json`; builds and routers do not download it. To update the pin, download the new release, verify its `SHA256SUMS`, and update the vendored catalog, `PRESET_SOURCES.md`, and the licenses in `LICENSES/presets/`. Update `internal/catalog/presets.sha256` and the release links in the same PR. `make check-presets` verifies the vendored files offline.
+Manage presets in [keenproxy-presets](https://github.com/ordo-systems/keenproxy-presets). KeenProxy embeds the complete catalog at `internal/catalog/presets.json`, pinned by `presets.version` and `presets.sha256` alongside it. Builds and routers do not download it. `make check-presets` verifies the vendored files offline.
+
+The **Update preset catalog** workflow checks for a newer stable release daily and supports manual runs on `main`. It verifies the release asset digests and checksums, then opens or updates one PR. It never merges the PR. Review additions and removals before merging.
+
+Configure the `preset-updates` environment to allow only `main`, without required reviewers if scheduled runs should be unattended. Install a dedicated GitHub App on this repository only, with **Contents: Read and write** and **Pull requests: Read and write**. Set the environment variable `PRESET_BOT_APP_CLIENT_ID` and secret `PRESET_BOT_APP_PRIVATE_KEY`. Do not reuse the release app. App-authored PRs trigger normal CI.
 
 ## Embedded engine modules
 

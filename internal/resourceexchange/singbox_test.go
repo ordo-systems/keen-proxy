@@ -18,7 +18,7 @@ import (
 func TestSingBoxExportPreservesUnion(t *testing.T) {
 	// The exact apex and leading-dot suffix can be in different rules. The
 	// nested exact/suffix are already covered and must not widen the union.
-	const source = `{"version":5,"rules":[{"domain":"example.com"},{"domain_suffix":[".example.com",".nested.example.com"],"ip_cidr":["192.0.2.0/25","192.0.2.128/25","2001:db8::/32"]},{"type":"default","domain":["child.example.com"]}]}`
+	const source = `{"version":5,"rules":[{"domain":["example.com","ru"]},{"domain_suffix":[".example.com",".nested.example.com",".ru"],"ip_cidr":["192.0.2.0/25","192.0.2.128/25","2001:db8::/32"]},{"type":"default","domain":["child.example.com"]}]}`
 	preview := Decode(SingBox, []byte(source))
 	if !preview.Valid {
 		t.Fatalf("source rejected: %+v", preview.Issues)
@@ -57,6 +57,11 @@ func TestSingBoxExportPreservesUnion(t *testing.T) {
 				{"a.b.example.com", "198.51.100.10", true},
 				{"notexample.com", "", false},
 				{"example.com.invalid", "", false},
+				{"ru", "", true},
+				{"example.ru", "", true},
+				{"a.example.ru", "", true},
+				{"example.ru.com", "", false},
+				{"guru", "", false},
 				{"unrelated.test", "192.0.2.200", true},
 				{"", "192.0.2.10", true},
 				{"", "2001:db8::42", true},
@@ -105,6 +110,8 @@ func TestSingBoxRejectsUnrepresentableOrMalformedSource(t *testing.T) {
 	}{
 		{"exact only", `{"version":1,"rules":[{"domain":"example.com"}]}`, "rules[0].domain[0]"},
 		{"leading dot only", `{"version":1,"rules":[{"domain_suffix":".example.com"}]}`, "rules[0].domain_suffix[0]"},
+		{"leading dot TLD only", `{"version":2,"rules":[{"domain_suffix":".ru"}]}`, "rules[0].domain_suffix[0]"},
+		{"exact TLD only", `{"version":2,"rules":[{"domain":"ru"}]}`, "rules[0].domain[0]"},
 		{"leading dot with unrelated apex", `{"version":2,"rules":[{"domain_suffix":".example.com"},{"domain_suffix":"notexample.com"}]}`, "rules[0].domain_suffix[0]"},
 		{"normalization changes meaning", `{"version":2,"rules":[{"domain_suffix":"EXAMPLE.COM"}]}`, "rules[0].domain_suffix[0]"},
 		{"trailing dot normalization", `{"version":2,"rules":[{"domain_suffix":"example.com."}]}`, "rules[0].domain_suffix[0]"},

@@ -122,7 +122,7 @@ func TestLocalPresetValidation(t *testing.T) {
 			c.LocalPresets[0].Entries = []string{"192.0.2.1/24", "192.0.2.0/24"}
 		}, "entries[1]: duplicate"},
 		{"invalid disabled entry", func(c *Config) {
-			c.LocalPresets[0].DisabledEntries = []string{"localhost"}
+			c.LocalPresets[0].DisabledEntries = []string{"*localhost"}
 		}, "disabled_entries[0]: not a domain"},
 		{"unknown disabled entry", func(c *Config) {
 			c.LocalPresets[0].DisabledEntries = []string{"other.example"}

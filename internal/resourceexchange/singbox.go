@@ -310,7 +310,7 @@ func coveredBySingBoxSuffix(domain string, coverage map[string]singBoxCoverage) 
 }
 
 func isSingBoxDomain(domain string) bool {
-	if len(domain) > maxSuffixBytes || !strings.Contains(domain, ".") {
+	if len(domain) > maxSuffixBytes {
 		return false
 	}
 	entry, err := Canonical(Entry{Type: singBoxSuffix, Value: domain})

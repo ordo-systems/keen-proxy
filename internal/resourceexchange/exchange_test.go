@@ -23,6 +23,9 @@ func TestExchangeNormalizedRoundTrip(t *testing.T) {
 		{JSON, "\ufeff" + `{"version":1,"name":"Example <list>","entries":[{"value":"2001:db8::1/64","disabled":true,"type":"ip_cidr"},{"type":"domain_suffix","value":"\u043f\u0440\u0438\u043c\u0435\u0440.\u0440\u0444"}]}`, List{Name: "Example <list>", Entries: []Entry{
 			{Type: IPCIDR, Value: "2001:db8::/64", Disabled: true}, {Type: DomainSuffix, Value: "xn--e1afmkfd.xn--p1ai"},
 		}}},
+		{Text, "*.RU\n", List{Entries: []Entry{{Type: DomainSuffix, Value: "ru"}}}},
+		{CSV, "type,value\ndomain_suffix,.RU\n", List{Entries: []Entry{{Type: DomainSuffix, Value: "ru"}}}},
+		{JSON, `{"version":1,"entries":[{"type":"domain_suffix","value":"ru","disabled":true}]}`, List{Entries: []Entry{{Type: DomainSuffix, Value: "ru", Disabled: true}}}},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.format), func(t *testing.T) {
@@ -199,7 +202,7 @@ func TestExchangeLimits(t *testing.T) {
 		}
 	})
 	t.Run("diagnostics", func(t *testing.T) {
-		preview := Decode(Text, bytes.Repeat([]byte("invalid\n"), 2*maxIssues))
+		preview := Decode(Text, bytes.Repeat([]byte("*invalid\n"), 2*maxIssues))
 		if preview.Valid || len(preview.Issues) != maxIssues || preview.OmittedIssues != maxIssues {
 			t.Fatalf("diagnostics not bounded: issues=%d, omitted=%d, valid=%t", len(preview.Issues), preview.OmittedIssues, preview.Valid)
 		}

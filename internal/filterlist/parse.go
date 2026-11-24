@@ -34,7 +34,9 @@ var domainRE = regexp.MustCompile(`^[a-z0-9_][a-z0-9_.-]*[a-z0-9]$`)
 
 func domain(s string) string {
 	e, err := model.ParseEntry(s)
-	if err != nil || e.Kind != model.EntryDomain || !domainRE.MatchString(e.Domain) || strings.Contains(e.Domain, "..") {
+	// A single-label status response such as "OK" is not a DNS filter list.
+	if err != nil || e.Kind != model.EntryDomain || !strings.Contains(e.Domain, ".") ||
+		!domainRE.MatchString(e.Domain) || strings.Contains(e.Domain, "..") {
 		return ""
 	}
 	return e.Domain

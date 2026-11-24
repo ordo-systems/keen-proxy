@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -34,7 +35,9 @@ func (e Entry) String() string {
 	return e.Domain
 }
 
-// ParseEntry accepts domains ("example.com", "*.example.com", ".example.com"),
+var singleDomainLabel = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// ParseEntry accepts domain suffixes (including "ru", ".ru", and "*.ru"),
 // IP addresses, and CIDR prefixes in kvas.list format. Country matching belongs
 // in Group.Countries rather than entries.
 func ParseEntry(s string) (Entry, error) {
@@ -58,10 +61,12 @@ func ParseEntry(s string) (Entry, error) {
 	d := strings.TrimPrefix(strings.TrimPrefix(s, "*"), ".")
 	d = strings.TrimSuffix(d, ".")
 	ascii, err := idna.Lookup.ToASCII(d)
-	if err != nil || !strings.Contains(ascii, ".") {
+	ascii = strings.ToLower(ascii)
+	if err != nil || (!strings.Contains(ascii, ".") &&
+		(!singleDomainLabel.MatchString(ascii) || strings.HasPrefix(s, "*") && !strings.HasPrefix(s, "*."))) {
 		return Entry{}, fmt.Errorf("not a domain, IP, or subnet: %q", s)
 	}
-	return Entry{Kind: EntryDomain, Domain: strings.ToLower(ascii)}, nil
+	return Entry{Kind: EntryDomain, Domain: ascii}, nil
 }
 
 // UpstreamKind selects the supported DNS wire transport.

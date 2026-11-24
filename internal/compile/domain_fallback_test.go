@@ -66,3 +66,26 @@ func TestFallbackGroupsReordered(t *testing.T) {
 		t.Fatal("changed group reused identity")
 	}
 }
+
+func TestDNSFallbackMatchesTopLevelSuffixAtLabelBoundary(t *testing.T) {
+	group := model.Group{Name: "tld", Target: "direct", Entries: []string{"*.ru"}}
+	cfg := &model.Config{Groups: []model.Group{group}}
+	matcher := NewDomainMatcher(cfg)
+	records := map[string][]string{
+		"ru":             {"203.0.113.1"},
+		"www.example.ru": {"203.0.113.2"},
+		"guru":           {"203.0.113.3"},
+		"example.ru.com": {"203.0.113.4"},
+	}
+	for name := range records {
+		want := name == "ru" || name == "www.example.ru"
+		if got := matcher.Match(name); got != want {
+			t.Errorf("Match(%q) = %t, want %t", name, got, want)
+		}
+	}
+	got := DNSRuleSets(cfg, records)[DomainTag(group)+".json"]
+	want := `{"rules":[{"ip_cidr":["203.0.113.1/32","203.0.113.2/32"]}],"version":3}`
+	if string(got) != want {
+		t.Fatalf("fallback rule-set = %s, want %s", got, want)
+	}
+}

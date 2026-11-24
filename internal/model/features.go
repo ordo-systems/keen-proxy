@@ -3,6 +3,7 @@ package model
 import (
 	"net/netip"
 	"net/url"
+	"strings"
 )
 
 // Preset records catalog provenance; Base preserves the installed entries for
@@ -128,7 +129,7 @@ func (c *Config) validateFeatures(add func(string, ...any)) {
 	}
 	for _, s := range c.Filters.Exceptions {
 		e, err := ParseEntry(s)
-		if err != nil || e.Kind != EntryDomain {
+		if err != nil || e.Kind != EntryDomain || !strings.Contains(e.Domain, ".") {
 			add("filters.exceptions: domain required: %s", s)
 		}
 	}

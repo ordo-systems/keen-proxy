@@ -17,7 +17,9 @@ export function canonicalEntry(raw: string): CanonicalEntry {
       const tail = '.invalid'
       const host = new URL(`http://${domain}${tail}`).hostname
       const ascii = host.endsWith(tail) ? host.slice(0, -tail.length) : ''
-      if (ascii.includes('.')) return { type: 'domain_suffix', value: ascii.toLowerCase() }
+      const singleLabel = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(ascii) &&
+        (!value.startsWith('*') || value.startsWith('*.'))
+      if (ascii.includes('.') || singleLabel) return { type: 'domain_suffix', value: ascii.toLowerCase() }
     } catch {
       // Keep an invalid value distinct until the backend validates the draft.
     }

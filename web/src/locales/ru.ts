@@ -125,6 +125,7 @@ const ru = {
     "ipCount": "{n} IP",
     "remove": "Удалить запись",
     "oneOnly": "Для изменения укажите одну запись",
+    "duplicateSuffix": "Суффикс {suffix} уже есть в этой группе",
     "error": "Ошибка DNS",
     "noDNS": "Для IP и подсетей DNS не требуется"
 },

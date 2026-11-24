@@ -87,6 +87,10 @@ func TestParseEntry(t *testing.T) {
 		{"Example.COM", EntryDomain, "example.com", ""},
 		{"*.example.com", EntryDomain, "example.com", ""},
 		{".example.com.", EntryDomain, "example.com", ""},
+		{"*.RU", EntryDomain, "ru", ""},
+		{".ru.", EntryDomain, "ru", ""},
+		{"ru", EntryDomain, "ru", ""},
+		{"*.\u0440\u0444", EntryDomain, "xn--p1ai", ""},
 		{"\u043f\u0440\u0438\u043c\u0435\u0440.\u0440\u0444", EntryDomain, "xn--e1afmkfd.xn--p1ai", ""},
 		{"1.2.3.4", EntryPrefix, "", "1.2.3.4/32"},
 		{"10.1.2.3/8", EntryPrefix, "", "10.0.0.0/8"},
@@ -103,7 +107,7 @@ func TestParseEntry(t *testing.T) {
 			t.Errorf("%q: got %+v", c.in, e)
 		}
 	}
-	for _, bad := range []string{"", "localhost", "# only comment", "http://x"} {
+	for _, bad := range []string{"", "*.", "*ru", "-ru", "ru-", "r_u", strings.Repeat("a", 64), "# only comment", "http://x"} {
 		if _, err := ParseEntry(bad); err == nil {
 			t.Errorf("%q must fail", bad)
 		}
@@ -142,6 +146,16 @@ func TestCountryGroup(t *testing.T) {
 		if _, err := Parse([]byte(base + bad)); err == nil {
 			t.Errorf("%q must fail", bad)
 		}
+	}
+}
+
+func TestDNSFilterExceptionsRequireDottedDomains(t *testing.T) {
+	base := "lan: {interface: br0}\ndns: {upstreams: [\"1.1.1.1\"]}\n"
+	if _, err := Parse([]byte(base + "filters: {exceptions: [example.x]}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse([]byte(base + "filters: {exceptions: [x]}\n")); err == nil || !strings.Contains(err.Error(), "filters.exceptions: domain required") {
+		t.Fatalf("single-label DNS filter exception: %v", err)
 	}
 }
 

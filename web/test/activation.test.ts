@@ -77,6 +77,26 @@ test('simulated routing keeps a numeric suffix distinct from the corresponding I
   assert.equal(simulatedRoute(config, '10.0.0.1')?.rule, prefix.name)
 })
 
+test('top-level suffix aliases share activation and match only at label boundaries', () => {
+  const group: Group = { name: 'top-level suffix', target: 'block', entries: ['*.RU'] }
+  const config = { connections: [], groups: [group] } as unknown as Config
+  for (const alias of ['ru', '.ru.', '*.RU']) {
+    assert.equal(entryIdentity(alias), 'domain_suffix:ru')
+  }
+  assert.equal(entryIdentity('*.\u0440\u0444'), 'domain_suffix:xn--p1ai')
+  for (const invalid of ['*.', '*ru', '-ru', 'ru-', 'r_u', 'a'.repeat(64)]) {
+    assert.equal(canonicalEntry(invalid).type, 'invalid', invalid)
+  }
+  for (const host of ['ru', 'example.ru', 'a.example.ru']) {
+    assert.equal(simulatedRoute(config, host)?.rule, group.name)
+  }
+  for (const host of ['guru', 'example.ru.com']) {
+    assert.equal(simulatedRoute(config, host), null)
+  }
+  setEntryEnabled(group, '.ru', false)
+  assert.equal(simulatedRoute(config, 'example.ru'), null)
+})
+
 test('explicit entry edits migrate flags and deletes remove only that flag', () => {
   const group: Group = { name: 'games', target: 'fi', entries: ['Example.COM', 'keep.example'] }
   setEntryEnabled(group, 'Example.COM', false)

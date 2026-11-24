@@ -324,7 +324,7 @@ trap 'exit 1' 1 2 15
 ACTIVATION_TMP=$(mktemp -d /tmp/keenproxy-activation.XXXXXX)
 api_get config >"$ACTIVATION_TMP/baseline.json"
 curl -fsS -m 10 -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/octet-stream' \
-	--data-binary '{"version":1,"entries":[{"type":"domain_suffix","value":"resource-list.test"},{"type":"domain_suffix","value":"resource-off.test","disabled":true}]}' \
+	--data-binary '{"version":1,"entries":[{"type":"domain_suffix","value":"*.suffix-test"},{"type":"domain_suffix","value":"resource-off.test","disabled":true}]}' \
 	'http://127.0.0.1:8086/api/resources/preview?format=json' >"$ACTIVATION_TMP/resources.json" || fail "resource preview"
 api_get config | cmp -s "$ACTIVATION_TMP/baseline.json" - || fail "resource preview changed applied configuration"
 resource_http() {
@@ -340,7 +340,7 @@ config = json.load(open(sys.argv[1]))
 preview = json.load(open(sys.argv[2]))
 assert preview["valid"], preview
 entries = preview["list"]["entries"]
-assert [entry["value"] for entry in entries] == ["resource-list.test", "resource-off.test"], entries
+assert [entry["value"] for entry in entries] == ["suffix-test", "resource-off.test"], entries
 preset = {
     "id": "imported-list", "name": "Imported resources",
     "entries": [entry["value"] for entry in entries],
@@ -353,12 +353,15 @@ config["groups"].append({k: v for k, v in preset.items() if k != "id"} | {"targe
 (root / "group.json").write_text(json.dumps(config))
 PY
 resource_apply "$ACTIVATION_TMP/local.json" || fail "local preset apply"
-resource_http child.resource-list.test || fail "local preset changed routing before group copy"
+resource_http child.suffix-test || fail "local preset changed routing before group copy"
 resource_apply "$ACTIVATION_TMP/group.json" || fail "imported group apply"
-if resource_http child.resource-list.test; then fail "imported suffix did not block a subdomain"; fi
+if resource_http suffix-test; then fail "imported TLD suffix did not block the apex"; fi
+if resource_http child.suffix-test; then fail "imported TLD suffix did not block a subdomain"; fi
+resource_http child.suffix-test.invalid || fail "imported TLD suffix matched a non-suffix"
+resource_http notsuffix-test || fail "imported TLD suffix matched without a label boundary"
 resource_http resource-off.test || fail "imported disabled entry was activated"
 resource_apply "$ACTIVATION_TMP/baseline.json" || fail "resource scenario restore"
-resource_http child.resource-list.test || fail "clearing imported group did not restore routing"
+resource_http child.suffix-test || fail "clearing imported group did not restore routing"
 ok "resource preview is read-only; local preset is inert; applied group honors suffix and disabled entry"
 
 activation_apply() {

@@ -18,7 +18,7 @@ func TestFormatsAndLastGood(t *testing.T) {
 	bad := false
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if bad {
-			w.Write([]byte("<html>broken</html>"))
+			w.Write([]byte("OK\n"))
 			return
 		}
 		w.Write([]byte("ads.test\nbad.test\n@@||safe.bad.test^\n"))

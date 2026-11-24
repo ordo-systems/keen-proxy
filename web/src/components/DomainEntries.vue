@@ -82,6 +82,12 @@ function open(index: number | null) {
 function toggleEntry(entry: string, enabled: boolean) {
   if (!applying.value) setEntryEnabled(props.group, entry, enabled)
 }
+
+function topLevelSuffix(line: string): string | undefined {
+  const entry = canonicalEntry(line)
+  return entry.type === 'domain_suffix' && !entry.value.includes('.') ? entry.value : undefined
+}
+
 // Validate a copied configuration before updating entries and requesting a domain preview.
 async function save() {
   const draft = store.state.config, group = props.group
@@ -96,9 +102,24 @@ async function save() {
     const cfg = JSON.parse(JSON.stringify(draft))
     const next = [...original]
     const previous = editing.value === null ? '' : original[editing.value]!
-    if (editing.value === null) next.push(...lines.filter(s => !next.includes(s)))
-    else next[editing.value] = lines[0]!
-    const flags = editing.value === null ? props.group.disabled_entries : migrateFlag(props.group.disabled_entries, previous, lines[0]!, entryIdentity)
+    if (editing.value === null) {
+      const seen = new Set(original.map(line => topLevelSuffix(line) ?? line))
+      for (const line of lines) {
+        const entry = topLevelSuffix(line) ?? line
+        if (seen.has(entry)) continue
+        seen.add(entry)
+        next.push(entry)
+      }
+    } else {
+      const line = lines[0]!
+      const suffix = topLevelSuffix(line)
+      if (suffix && original.some((other, index) => index !== editing.value && topLevelSuffix(other) === suffix)) {
+        error.value = t('domains.duplicateSuffix', { suffix })
+        return
+      }
+      next[editing.value] = suffix ?? line
+    }
+    const flags = editing.value === null ? props.group.disabled_entries : migrateFlag(props.group.disabled_entries, previous, next[editing.value]!, entryIdentity)
     cfg.groups[groupIndex].entries = next
     cfg.groups[groupIndex].disabled_entries = flags
     await api.validateConfig(cfg)

@@ -126,6 +126,7 @@ const en: Messages = {
     "ipCount": "{n} IPs",
     "remove": "Remove entry",
     "oneOnly": "Enter one entry to edit",
+    "duplicateSuffix": "The suffix {suffix} is already in this group",
     "error": "DNS error",
     "noDNS": "IP and subnet entries do not need DNS"
 },

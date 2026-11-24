@@ -138,6 +138,8 @@ When certificate verification is enabled, `custom_sni` must match the exported `
 
 Open **Rules → Whitelist**. Create a group, name it, select its target connection (or **Direct**/**Block**), and add domains or addresses. For example, direct `work.example.com` to the Netherlands profile. Review imported entries before confirming; country selectors express broader policies.
 
+Use `ru`, `.ru`, or `*.ru` to match the entire `.ru` domain suffix. All three match `ru` itself and names such as `example.ru`, but not `guru` or `example.ru.com`. This matches domain names, not the country of an IP address.
+
 To move several domain or country groups together, select their checkboxes, choose a target in **Change route**, and review the preview. Groups hidden by a filter can still be selected. Choose **Save to draft**, then **Apply** when ready.
 
 Expand an entry to see its current DNS observations and expiration. A resolved address alone does not prove that application traffic followed the intended tunnel.
@@ -175,7 +177,7 @@ Local presets are reusable resource lists, separate from the bundled catalog. Th
 
 Only equivalent sing-box rules can be imported. An exact domain by itself does not match subdomains, and a leading-dot suffix by itself does not match the apex. Both are rejected unless another imported rule covers the missing part without widening the result. Logical rules, inversion, regex, keywords, and source or port filters are unsupported. An existing SRS file may already have combined adjacent CIDRs; import recovers the encoded address set, not the original source text. KeenProxy's SRS export preserves separate editable prefixes. This is not a configuration backup: connection settings, routing targets, country/category selectors, and catalog provenance are not exported. Review conversion losses before downloading; a format without activation flags omits disabled resources.
 
-Files are limited to 2 MiB and 20,000 input entries; binary validation also bounds decompression and expansion. An export outside these limits is rejected rather than producing a file that KeenProxy cannot reimport. A local preset can hold up to 20,000 entries. The router stores up to 64 local presets and at most 40,000 combined values or 1 MiB of resource text, including disabled markers. Single-label suffixes such as `.cn` and suffixes that would be stored as IP addresses, such as `*.192.0.2.1`, are not representable.
+Files are limited to 2 MiB and 20,000 input entries; binary validation also bounds decompression and expansion. An export outside these limits is rejected rather than producing a file that KeenProxy cannot reimport. A local preset can hold up to 20,000 entries. The router stores up to 64 local presets and at most 40,000 combined values or 1 MiB of resource text, including disabled markers. Suffixes that would be stored as IP addresses, such as `*.192.0.2.1`, are not representable.
 
 ## 5. Choose devices and networks
 

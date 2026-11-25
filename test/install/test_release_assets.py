@@ -37,6 +37,9 @@ class ReleaseAssetsTest(unittest.TestCase):
                     (root / name).write_text('fixture notice\n')
                 if with_sources:
                     (root / 'PRESET_SOURCES.md').write_text('preset sources\n')
+                    pin = root / 'internal/catalog/presets.version'
+                    pin.parent.mkdir(parents=True)
+                    pin.write_bytes(b'v0.2.1\n')
                 for name in ('install.sh', 'S99keenproxy'):
                     (tools / name).write_text('fixture controller\n')
                 if native:
@@ -87,6 +90,8 @@ gh() {
                     expected_notices = {'LICENSE', 'THIRD_PARTY_NOTICES.md', 'LICENSES'}
                     if with_sources:
                         expected_notices.add('PRESET_SOURCES.md')
+                        expected_notices.add('internal/catalog/presets.version')
+                        self.assertEqual(notices.extractfile('internal/catalog/presets.version').read(), b'v0.2.1\n')
                     self.assertEqual(set(notices.getnames()), expected_notices)
                 checksums = {}
                 for line in (dist / 'SHA256SUMS').read_text().splitlines():

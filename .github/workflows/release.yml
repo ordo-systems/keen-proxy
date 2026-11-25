@@ -213,6 +213,10 @@ jobs:
           fi
           cp "${notices[@]}" dist/
           cp -R LICENSES dist/
+          if [ -f internal/catalog/presets.version ]; then
+            cp --parents internal/catalog/presets.version dist/
+            notices+=(internal/catalog/presets.version)
+          fi
           {
             printf 'Version: %s\nCommit: %s\n' "$RELEASE_TAG" "$(git rev-parse HEAD)"
             go version

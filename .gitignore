@@ -28,6 +28,7 @@ coverage.out
 # Private agent worktrees, plans, investigations and verification logs
 /.agents-work/
 /.agents-worktree/
+/.cache/
 # Keep old private reports excluded from publication during workspace migration.
 /docs-reports/
 

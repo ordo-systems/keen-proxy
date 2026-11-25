@@ -28,6 +28,6 @@ Custom databases added by URL or local file have their own terms.
 
 ## Domain presets and filter lists
 
-The embedded community preset snapshot is derived from an exported domain collection. The catalog stores domain collections and display metadata; it does not contain upstream license grants. A collection being community-maintained does not, by itself, establish a redistribution license. Do not assume that applying GPLv3 to KeenProxy relicenses third-party lists. Before public redistribution, establish the applicable license/permission or replace/remove data whose terms cannot be confirmed.
+The bundled catalog comes from [KeenProxy Presets](https://github.com/ordo-systems/keenproxy-presets/releases). See the [pinned version](internal/catalog/presets.version), [source attribution](PRESET_SOURCES.md), and [license texts](LICENSES/presets/).
 
 DNS blocklists are fetched from separately configured providers. Each provider's license and attribution requirements apply to its content. The ability to download a list is not a license grant.

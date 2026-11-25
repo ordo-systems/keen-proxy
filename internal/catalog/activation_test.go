@@ -22,3 +22,91 @@ func TestPresetReintroducedOffEntryIsNotDeleted(t *testing.T) {
 		t.Fatal("reintroduced off entry became active")
 	}
 }
+
+func TestPresetUpdateDoesNotReopenExcludedSuffixes(t *testing.T) {
+	g := model.Group{
+		Entries:         []string{"disabled.example", "manual.deleted.example"},
+		DisabledEntries: []string{"disabled.example"},
+		Preset: &model.Preset{
+			ID: "test", Base: []string{"disabled.example", "child.deleted.example"},
+		},
+	}
+	p := Preset{ID: "test", Domains: []string{
+		"disabled.example", "cdn.disabled.example", "child.deleted.example",
+		"deleted.example", "unrelated.example",
+	}}
+	g, diff := Update(g, p)
+	if !slices.Equal(g.Entries, []string{"disabled.example", "manual.deleted.example", "unrelated.example"}) {
+		t.Fatalf("entries = %v", g.Entries)
+	}
+	if !slices.Equal(diff.Added, []string{"unrelated.example"}) {
+		t.Fatalf("preview additions = %v", diff.Added)
+	}
+	g, diff = Update(g, p)
+	if len(diff.Added) != 0 || slices.Contains(g.Entries, "cdn.disabled.example") || slices.Contains(g.Entries, "deleted.example") {
+		t.Fatalf("repeated update reopened exclusions: %v (%+v)", g.Entries, diff)
+	}
+}
+
+func TestBundledPresetsDoNotRouteUnrelatedSuffixes(t *testing.T) {
+	for _, tc := range []struct {
+		id, retained string
+		rejected     []string
+	}{
+		{"ru-banks", "cbr.ru", []string{"centraluniversity.ru", "cu.ru", "prodcontest.com", "tinkoff-edu.ru", "jump.taxi"}},
+		{"ru-state", "zakupki.gov.ru", []string{"cbg.ru", "edu.ru", "marine.ru", "mospat.ru", "patriarchia.ru"}},
+		{"ru-video", "rutube.ru", []string{"cdnvideo.ru", "cdnvideohub.com", "kinescopecdn.net"}},
+		{"ru-essential", "avito.st", []string{"yandex.com", "yandex.net", "telemost.yandex.net"}},
+		{"ru-social", "st-ok.cdn-vk.ru", []string{"cdn-vk.ru", "skillbox.ru", "tarantool.io", "my.games"}},
+	} {
+		p, ok := Find(tc.id)
+		if !ok || !slices.Contains(p.Domains, tc.retained) {
+			t.Fatalf("%s lacks %s", tc.id, tc.retained)
+		}
+		for _, name := range tc.rejected {
+			if slices.Contains(p.Domains, name) {
+				t.Errorf("%s includes unrelated suffix %s", tc.id, name)
+			}
+		}
+	}
+}
+
+func TestUpgrade093PresetGroups(t *testing.T) {
+	// Representative 0.9.3 GitHub suffixes: one kept, one switched off, one removed.
+	saved := model.Group{
+		Name: "Dev", Target: "direct",
+		Entries:         []string{"github.com", "githubusercontent.com", "manual.example"},
+		DisabledEntries: []string{"githubusercontent.com"},
+		Preset: &model.Preset{
+			ID: "github", Version: "0.9.3-baseline",
+			Base: []string{"github.com", "github.io", "githubusercontent.com"},
+		},
+	}
+	optedIn := saved
+	withUpdates := *saved.Preset
+	withUpdates.AutoUpdate = true
+	optedIn.Preset = &withUpdates
+	config := model.Config{Groups: []model.Group{saved, optedIn}}
+	AutoUpdate(&config)
+
+	if got := config.Groups[0]; got.Preset.Version != saved.Preset.Version ||
+		!slices.Equal(got.Entries, saved.Entries) || !slices.Equal(got.DisabledEntries, saved.DisabledEntries) {
+		t.Fatalf("opted-out group changed: %+v", got)
+	}
+	got := config.Groups[1]
+	active := slices.Collect(got.ActiveEntries())
+	for _, domain := range []string{"github.com", "manual.example", "githubcopilot.com"} {
+		if !slices.Contains(active, domain) {
+			t.Errorf("opted-in group lost %s: %v", domain, active)
+		}
+	}
+	for _, domain := range []string{"github.io", "githubusercontent.com"} {
+		if slices.Contains(active, domain) {
+			t.Errorf("opted-in group reopened %s", domain)
+		}
+	}
+	if got.Preset.Version == saved.Preset.Version || got.Name != saved.Name || got.Target != saved.Target ||
+		!slices.Equal(got.DisabledEntries, saved.DisabledEntries) {
+		t.Fatalf("group settings or revision were not preserved as expected: %+v", got)
+	}
+}

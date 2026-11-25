@@ -1,0 +1,55 @@
+name: Update preset catalog
+
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency: update-preset-catalog
+
+jobs:
+  update:
+    if: github.ref == 'refs/heads/main' && github.repository == 'ordo-systems/keen-proxy'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: preset-updates
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Import latest stable catalog
+        id: catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/update-presets.py
+      - name: Create preset updater token
+        if: steps.catalog.outputs.version != ''
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.PRESET_BOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PRESET_BOT_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Open or update catalog PR
+        if: steps.catalog.outputs.version != ''
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8
+        with:
+          token: ${{ steps.app.outputs.token }}
+          base: main
+          branch: chore/update-preset-catalog
+          add-paths: |
+            internal/catalog/presets.json
+            internal/catalog/presets.sha256
+            internal/catalog/presets.version
+            PRESET_SOURCES.md
+            LICENSES/presets/
+          commit-message: 'chore(presets): update catalog to ${{ steps.catalog.outputs.version }}'
+          title: 'chore(presets): update catalog to ${{ steps.catalog.outputs.version }}'
+          body: |
+            Imports [catalog ${{ steps.catalog.outputs.version }}](https://github.com/ordo-systems/keenproxy-presets/releases/tag/${{ steps.catalog.outputs.version }}).
+            Release asset digests and SHA256SUMS were verified. Review the routing delta before merging.

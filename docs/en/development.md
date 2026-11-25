@@ -26,6 +26,14 @@ python3 -m http.server 8097 --directory site
 
 Open `http://localhost:8097/` for English, `/ru/` for Russian and `/demo/` for the independent demo. The server serves static files only. `npm run build` still builds the normal router UI in `web/dist`; `build:demo` writes to `web/dist-demo`.
 
+## Preset catalog
+
+Manage presets in [keenproxy-presets](https://github.com/ordo-systems/keenproxy-presets). KeenProxy embeds the complete catalog at `internal/catalog/presets.json`, pinned by `presets.version` and `presets.sha256` alongside it. Builds and routers do not download it. `make check-presets` verifies the vendored files offline.
+
+The **Update preset catalog** workflow checks for a newer stable release daily and supports manual runs on `main`. It verifies the release asset digests and checksums, then opens or updates one PR. It never merges the PR. Review additions and removals before merging.
+
+Configure the `preset-updates` environment to allow only `main`, without required reviewers if scheduled runs should be unattended. Install a dedicated GitHub App on this repository only, with **Contents: Read and write** and **Pull requests: Read and write**. Set the environment variable `PRESET_BOT_APP_CLIENT_ID` and secret `PRESET_BOT_APP_PRIVATE_KEY`. Do not reuse the release app. App-authored PRs trigger normal CI.
+
 ## Embedded engine modules
 
 Run `go mod download` after cloning; no Git submodules are required. Root `go.mod` keeps upstream import paths and pins sing-box-lx `v1.14.4-lx.35` plus the corresponding WireGuard/AWG, sing-tun, gVisor and uTLS forks through five versioned `replace` directives. Go does not inherit replacement directives from dependencies; keep all five pins in the root module and review them together when updating the engine.

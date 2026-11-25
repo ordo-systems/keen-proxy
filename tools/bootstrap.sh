@@ -197,9 +197,6 @@ hold_forwarding() {
             break
         fi
     done
-    if [ "$ipv6_forwarding" = 1 ] && [ ! -x "$guard6" ]; then
-        fail 'IPv6 forwarding is enabled; install ip6tables before updating'
-    fi
     if [ "$platform" = openwrt ]; then
         for option in flow_offloading flow_offloading_hw; do
             case "$(uci -q get "firewall.@defaults[0].$option" 2>/dev/null || :)" in
@@ -210,17 +207,23 @@ hold_forwarding() {
             fail 'reload the OpenWrt firewall with flow offloading disabled before updating'
         fi
     fi
+    check_routing=1
     if [ "$ipv6_forwarding" = 1 ] && [ "$held6" = 0 ]; then
-        guard_rule "$guard6" -I || fail 'could not block IPv6 forwarding; service left unchanged'
-        held6=1
-        if [ "$held4" = 0 ] && ! guard_rule "$guard4" -I; then
-            release_forwarding || :
-            fail 'could not block IPv4 forwarding; service left unchanged'
+        if [ ! -x "$guard6" ]; then
+            echo 'KeenProxy: warning: ip6tables unavailable; cannot check or block IPv6 forwarding. Continuing; restore ip6tables and rerun the bootstrap if an old guard remains.' >&2
+        elif guard_rule "$guard6" -I; then
+            held6=1
+        else
+            echo 'KeenProxy: warning: could not block IPv6 forwarding; continuing without a confirmed IPv6 guard' >&2
         fi
-    elif [ "$held4" = 0 ]; then
-        guard_rule "$guard4" -I || fail 'could not block IPv4 forwarding; service left unchanged'
     fi
-    held4=1
+    if [ "$held4" = 0 ]; then
+        if guard_rule "$guard4" -I; then
+            held4=1
+        else
+            echo 'KeenProxy: warning: could not block IPv4 forwarding; continuing without a confirmed IPv4 guard' >&2
+        fi
+    fi
 }
 
 release_forwarding() {
@@ -236,10 +239,15 @@ release_forwarding() {
 
 start_release() {
     service_action start || return 1
-    [ "$held4$held6" != 00 ] || return 0
+    [ "$check_routing$held4$held6" != 000 ] || return 0
+    wait_for_interception
+}
+
+wait_for_interception() {
     attempts=5
     while [ "$attempts" -gt 0 ]; do
-        if [ -r "$state/startup-state" ]; then
+        # Apply can restore routing without rewriting the startup marker.
+        if [ "${1:-}" != running ] && [ -r "$state/startup-state" ]; then
             case "$(cat "$state/startup-state")" in 'management-only '*) break ;; esac
         fi
         # Older controllers return at the DNS jump. The daemon restores the
@@ -471,6 +479,7 @@ guard4="$prefix/$firewall_path/iptables"
 guard6="$prefix/$firewall_path/ip6tables"
 held4=0
 held6=0
+check_routing=0
 trap finish EXIT
 trap 'exit 1' HUP INT TERM
 if [ "$platform" = openwrt ]; then
@@ -586,8 +595,10 @@ if [ "$changed" = 1 ]; then
     fi
     restart_previous=0
     replacing=0
-elif [ "$was_running" = 0 ] || [ "$held4$held6" != 00 ]; then
+elif [ "$was_running" = 0 ]; then
     start_release || fail 'service failed to start with routing'
+else
+    wait_for_interception running || fail 'running service does not have active routing'
 fi
 release_forwarding || fail 'could not release forwarding guard'
 printf 'KeenProxy %s (%s) installed. Configuration: %s\n' "$tag" "$asset" "$config"

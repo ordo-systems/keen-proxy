@@ -89,7 +89,9 @@ curl() {
 sh() {
     if [ "$#" = 2 ] && [ "$1" = /opt/etc/init.d/S99keenproxy ] &&
         [ "$2" = start ] && [ -f /tmp/check-forwarding ]; then
-        cmp -s "$1" /work/tools/S99keenproxy || return 1
+        # Rollback restores the controller shipped with the previous release.
+        cmp -s "$1" "/tmp/mirror/$(awk '$1 == "current" {print $2}' /opt/share/keenproxy/release)/S99keenproxy" ||
+            { echo 'FAIL: controller does not match the installed release' >&2; return 1; }
         if [ -e /var/run/keenproxy/pid ] || probe 198.51.100.2 || probe 2001:db8:2::2; then
             touch /tmp/forwarding-leak
             echo 'FAIL: gap has a stale daemon or direct WAN reachability' >&2

@@ -47,6 +47,19 @@
 - Keep public local `build`, `build-router`, and `build-router-lite` gated by both memory checks, including under parallel make. Tagged release assets run stress and comparison as separate steps, then `make -o memory-stress -o memory-regression` with the public router targets only after those steps succeed in the same job. The accepted `e6a1a1d` reference, thresholds, sample counts, 320 MiB soft budget, 384 MiB ceiling, and pre-AWG recovery boundary are unchanged.
 - Document the separate repository-rules change required to preserve **Tests and builds** and **Network integration** and to add the three new check names. The former combined check **Memory regression and builds** was not a required status, and this change does not update branch protection.
 
+## [0.10.0](https://github.com/ordo-systems/keen-proxy/compare/v0.9.3...v0.10.0) (2026-11-25)
+
+
+### Features
+
+* **presets:** embed the versioned catalog and automate updates ([#55](https://github.com/ordo-systems/keen-proxy/issues/55)) ([b3cdbc3](https://github.com/ordo-systems/keen-proxy/commit/b3cdbc3c87552455f5d91e85879080876ff4f31e))
+* support top-level domain routing suffixes ([#53](https://github.com/ordo-systems/keen-proxy/issues/53)) ([cb7a410](https://github.com/ordo-systems/keen-proxy/commit/cb7a4105c462afa3520a2c34a4b349e813050d0b))
+
+
+### Bug Fixes
+
+* **awg:** accept on and off in imported profiles ([#57](https://github.com/ordo-systems/keen-proxy/issues/57)) ([780c577](https://github.com/ordo-systems/keen-proxy/commit/780c5770fbb50135dec68dc1cc3094f32b274fcd))
+
 ## [0.9.3](https://github.com/ordo-systems/keen-proxy/compare/v0.9.2...v0.9.3) (2026-11-20)
 
 

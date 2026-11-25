@@ -68,10 +68,45 @@ func TestFirmwareModuleActionRequiresTokenAndSameOrigin(t *testing.T) {
 			t.Fatalf("%+v: status %d, loaded %q", tc, w.Code, stub.loaded)
 		}
 	}
-	w = do(t, h, "POST", base+"/guard/load", "", "secret", lan)
+	r := httptest.NewRequest("POST", base+"/guard/load", nil)
+	r.RemoteAddr = lan
+	r.AddCookie(&http.Cookie{Name: cookieName, Value: "secret"})
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
 	got = kernelModuleResponse{}
 	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Guard.State != "registered" || got.Guard.CanLoad || got.TokenRequired || stub.loaded != "guard" || fake.applied != nil {
 		t.Fatalf("verified load: %d %s, loaded=%q", w.Code, w.Body, stub.loaded)
+	}
+}
+
+func TestFirmwareModuleBearerDoesNotCreatePanelSession(t *testing.T) {
+	const base = "/api/diagnostics/kernel-modules"
+	s, fake := newServer()
+	fake.cfg.API.NoTokenFrom = []string{"192.168.7.0/24"}
+	stub := &moduleDiagnosticStub{fakeDaemon: fake}
+	s.D = stub
+	h := s.Handler()
+	for _, token := range []string{"wrong", "secret"} {
+		r := httptest.NewRequest("POST", "http://keenproxy.example"+base+"/guard/load", nil)
+		r.RemoteAddr = lan
+		r.Header.Set("Origin", "http://keenproxy.example")
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if token == "wrong" {
+			if w.Code != http.StatusForbidden || stub.loaded != "" {
+				t.Fatalf("invalid token authorized load: %d %s", w.Code, w.Body)
+			}
+			continue
+		}
+		var got kernelModuleResponse
+		if w.Code != http.StatusOK || w.Header().Get("Set-Cookie") != "" ||
+			json.Unmarshal(w.Body.Bytes(), &got) != nil || !got.TokenRequired || got.Guard.State != "registered" {
+			t.Fatalf("one-shot authorization leaked into the session: %d %s", w.Code, w.Body)
+		}
+	}
+	if w := do(t, h, "POST", "/api/updates/install", "", "", lan); w.Code != http.StatusForbidden {
+		t.Fatalf("trusted network alone authorized update install: %d %s", w.Code, w.Body)
 	}
 }
 

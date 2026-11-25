@@ -18,6 +18,7 @@ type kernelModuleDaemon interface {
 
 type kernelModuleResponse struct {
 	netfilter.KernelModules
+	// TokenRequired indicates that the browser has no authenticated session cookie.
 	TokenRequired bool `json:"token_required"`
 }
 
@@ -28,7 +29,7 @@ func (s *Server) kernelModules(w http.ResponseWriter, r *http.Request) {
 	if d, ok := s.D.(kernelModuleDaemon); ok {
 		status = d.KernelModuleDiagnostics(r.Context())
 	}
-	writeJSON(w, http.StatusOK, kernelModuleResponse{status, !s.tokenOK(r)})
+	writeJSON(w, http.StatusOK, kernelModuleResponse{status, !s.tokenCookieOK(r)})
 }
 
 func (s *Server) loadKernelModule(w http.ResponseWriter, r *http.Request) {

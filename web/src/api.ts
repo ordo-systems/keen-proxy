@@ -21,24 +21,28 @@ function httpError(status: number, text: string): ApiError {
   return new ApiError(status, message)
 }
 
+type RequestOptions = { fileType?: string; oneShotToken?: string }
+
 // Share cookie authentication and the login handler across JSON and file requests.
-async function send(method: string, path: string, body?: unknown, fileType = 'application/octet-stream'): Promise<Response> {
+async function send(method: string, path: string, body?: unknown, { fileType = 'application/octet-stream', oneShotToken }: RequestOptions = {}): Promise<Response> {
   const file = body instanceof Blob ? body : undefined
+  const contentHeaders = body === undefined ? undefined : { 'Content-Type': file ? fileType : 'application/json' }
   const res = await fetch(path, {
     method,
-    credentials: 'same-origin',
-    headers: body === undefined ? undefined : { 'Content-Type': file ? fileType : 'application/json' },
+    credentials: oneShotToken ? 'omit' : 'same-origin',
+    redirect: oneShotToken ? 'error' : 'follow',
+    headers: oneShotToken ? { ...contentHeaders, Authorization: `Bearer ${oneShotToken}` } : contentHeaders,
     body: file ?? (body === undefined ? undefined : JSON.stringify(body)),
   })
   if (!res.ok) {
-    if (res.status === 401 && path !== '/api/login') onUnauthorized()
+    if (res.status === 401 && path !== '/api/login' && !oneShotToken) onUnauthorized()
     throw httpError(res.status, await res.text())
   }
   return res
 }
 
-async function request<T>(method: string, path: string, body?: unknown, fileType?: string): Promise<T> {
-  const text = await (await send(method, path, body, fileType)).text()
+async function request<T>(method: string, path: string, body?: unknown, options?: RequestOptions): Promise<T> {
+  const text = await (await send(method, path, body, options)).text()
   return (text ? JSON.parse(text) : undefined) as T
 }
 
@@ -57,7 +61,8 @@ export const api = {
  diagnosticCheck:(connection:string)=>request<DiagnosticReport>('POST','/api/diagnostics/check',{connection}),
  diagnosticBundle,
  kernelModules:()=>request<KernelModuleDiagnostics>('GET','/api/diagnostics/kernel-modules'),
- loadKernelModule:(feature:KernelFeature)=>request<KernelModuleDiagnostics>('POST',`/api/diagnostics/kernel-modules/${feature}/load`),
+ loadKernelModule:(feature:KernelFeature, oneShotToken?:string)=>request<KernelModuleDiagnostics>(
+   'POST',`/api/diagnostics/kernel-modules/${feature}/load`,undefined,{ oneShotToken }),
  tproxyReadiness:()=>request<TProxyReadiness>('GET','/api/diagnostics/tproxy'),
  retryTProxy: async (): Promise<void> => { await send('POST', '/api/diagnostics/tproxy/retry') },
  catalog:()=>request<Catalog>('GET','/api/catalog'),
@@ -74,7 +79,7 @@ export const api = {
  lookupGeo:(ip:string,id='')=>request<GeoLookup>('POST','/api/geoip/lookup',{ip,id}),
  previousConfig:()=>request<Config>('GET','/api/config/previous'),
  importYAML: (yaml: string | Blob) => request<Config>('POST', '/api/config/import',
-   typeof yaml === 'string' ? new Blob([yaml]) : yaml, 'application/yaml'),
+   typeof yaml === 'string' ? new Blob([yaml]) : yaml, { fileType: 'application/yaml' }),
 
   domains: () => request<DomainStatus>('GET', '/api/domains'),
   resolveDomains: (names: string[], preview = false) => request<DomainStatus>('POST', '/api/domains/resolve', { names, preview }),

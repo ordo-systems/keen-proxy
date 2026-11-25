@@ -54,7 +54,7 @@ export const api = {
   kernelModules: async (): Promise<KernelModuleDiagnostics> => ({
     guard: { state: 'unknown' }, tproxy: { state: 'unknown' }, token_required: true,
   }),
-  loadKernelModule: async (_feature: KernelFeature): Promise<KernelModuleDiagnostics> => {
+  loadKernelModule: async (_feature: KernelFeature, _oneShotToken?: string): Promise<KernelModuleDiagnostics> => {
     throw new Error('Firmware module loading is available on the router only')
   },
   tproxyReadiness: async (): Promise<TProxyReadiness> => ({ state: 'ready' }),

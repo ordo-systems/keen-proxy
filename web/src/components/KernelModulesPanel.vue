@@ -63,8 +63,7 @@ async function load() {
   loadError.value = ''
   loadDetail.value = ''
   try {
-    if (showToken.value) await api.login(token.value)
-    status.value = await api.loadKernelModule(feature)
+    status.value = await api.loadKernelModule(feature, showToken.value ? token.value.trim() : undefined)
     if (status.value[feature].state === 'registered') {
       message.success(t('kernelModules.loaded', { module }))
     } else {
@@ -72,11 +71,9 @@ async function load() {
     }
     open.value = false
   } catch (err) {
-    loadError.value = err instanceof ApiError && err.status === 401
-      ? 'kernelModules.invalidToken'
-      : err instanceof ApiError && err.status === 403
-        ? 'kernelModules.loadDenied'
-        : 'kernelModules.loadFailed'
+    loadError.value = err instanceof ApiError && err.status === 403
+      ? 'kernelModules.loadDenied'
+      : 'kernelModules.loadFailed'
     if (err instanceof ApiError && (err.status === 409 || err.status === 422)) loadDetail.value = err.message
   } finally {
     token.value = ''

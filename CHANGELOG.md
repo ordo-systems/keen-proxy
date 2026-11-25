@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Publish stable releases only after verifying the complete asset set from a single tagged build. Bootstrap defaults to the latest published stable release instead of `main` version metadata.
 - Continue release updates when an IPv4 or IPv6 forwarding guard cannot be installed. Log the unprotected address family, keep any working guard, and still require interception to start or roll back.
 - Add a CLI-only `--require-guard` option to abort managed updates before replacing or restarting the service if a required forwarding guard cannot be installed.
 - Same-version bootstrap retries leave a running service alone but return an error if interception is inactive. Warn if missing `ip6tables` prevents checking for an existing IPv6 guard, including on retries.

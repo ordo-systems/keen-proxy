@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to retry missing assets (empty runs Release Please)
+        description: Existing release tag to resume or repair (empty runs Release Please)
         required: false
         type: string
 
@@ -20,18 +20,40 @@ concurrency:
 jobs:
   checks:
     uses: ./.github/workflows/ci.yml
+    needs: version
+    if: ${{ !cancelled() && (needs.version.result == 'success' || (needs.version.result == 'skipped' && github.ref != 'refs/heads/main')) }}
+    with:
+      # Recovery of pre-existing public tags retains the original main CI prerequisite.
+      source_ref: ${{ needs.version.outputs.recovery == 'true' && github.sha || needs.version.outputs.revision || github.sha }}
+      skip_payload_builds: ${{ needs.version.outputs.tag != '' && needs.version.outputs.recovery == 'false' }}
 
   version:
-    needs: checks
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: release
     permissions:
-      contents: read
+      # GitHub only lists drafts for callers with write access.
+      contents: write
     outputs:
-      tag: ${{ steps.release.outputs.tag_name || inputs.tag }}
+      tag: ${{ steps.identity.outputs.tag }}
+      revision: ${{ steps.identity.outputs.revision }}
+      id: ${{ steps.identity.outputs.id }}
+      recovery: ${{ steps.identity.outputs.recovery }}
     steps:
+      - name: Find the explicitly requested draft or published release
+        id: pending
+        if: inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$REQUESTED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]
+          id=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+            jq -r --arg tag "$REQUESTED_TAG" '
+              [.[][] | select(.tag_name == $tag)] |
+              if length == 1 then .[0].id else error("expected one matching release") end')
+          echo "id=$id" >> "$GITHUB_OUTPUT"
       - name: Create release app token
         if: inputs.tag == ''
         id: release-token
@@ -43,7 +65,7 @@ jobs:
           permission-contents: write
           permission-issues: write
           permission-pull-requests: write
-      - name: Propose or publish release
+      - name: Propose release or create draft
         if: inputs.tag == ''
         id: release
         uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
@@ -51,37 +73,98 @@ jobs:
           token: ${{ steps.release-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      - name: Pin release identity
+        id: identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.pending.outputs.id || steps.release.outputs.id }}
+          CREATED_SHA: ${{ steps.release.outputs.sha }}
+          CREATED: ${{ steps.release.outputs.releases_created }}
+        run: |
+          if [[ -z "$RELEASE_ID" ]]; then
+            [[ "$CREATED" != true ]]
+            exit
+          fi
+          [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]
+          release=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")
+          tag=$(jq -er .tag_name <<< "$release")
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]
+          revision=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$tag" --jq .sha)
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          if [[ -n "$CREATED_SHA" ]]; then
+            [[ "$revision" == "$CREATED_SHA" ]]
+            jq -e '.draft and (.prerelease | not)' <<< "$release" >/dev/null
+          fi
+          recovery=$(jq '.draft | not' <<< "$release")
+          if [[ "$recovery" == false ]]; then
+            [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            [[ "$(jq -er .target_commitish <<< "$release")" == "$revision" ]]
+            status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$revision...main" --jq .status)
+            [[ "$status" == ahead || "$status" == identical ]]
+          fi
+          printf 'tag=%s\nrevision=%s\nid=%s\nrecovery=%s\n' \
+            "$tag" "$revision" "$RELEASE_ID" "$recovery" >> "$GITHUB_OUTPUT"
 
   assets:
     needs: version
     if: needs.version.outputs.tag != ''
     runs-on: ubuntu-24.04
-    # Covers separate stress and comparison steps, cross-builds, and packaging.
+    # Only tagged recovery needs its own legacy verification contract.
     timeout-minutes: 60
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      native: ${{ steps.contract.outputs.native }}
+      entware_controller: ${{ steps.contract.outputs.entware_controller }}
+      architectures: ${{ steps.contract.outputs.architectures }}
     env:
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
+      RELEASE_REVISION: ${{ needs.version.outputs.revision }}
+      RECOVERY: ${{ needs.version.outputs.recovery }}
     steps:
-      - name: Validate tag and existing release
-        run: |
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
-          gh release view "$RELEASE_TAG" --repo "$GH_REPO"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_REVISION }}
           fetch-depth: 0
           persist-credentials: false
       - name: Check version and select verification contract
         id: contract
         run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_REVISION"
+          if [[ -f tools/keenproxy.openwrt ]]; then
+            echo 'native=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'native=false' >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -f tools/S99keenproxy ]]; then
+            echo 'entware_controller=true' >> "$GITHUB_OUTPUT"
+          else
+            test "$RECOVERY" = true
+            echo 'entware_controller=false' >> "$GITHUB_OUTPUT"
+          fi
+          # These commits introduced the four- and six-architecture layouts.
+          four=afcb24932126ee4a60e862dcce6e53978f740f92
+          six=e6a1a1df2730418cf9edc2a71df4cec3e99be255
+          git cat-file -e "$four^{commit}"
+          git cat-file -e "$six^{commit}"
+          architectures='arm64 mipsle'
+          if git merge-base --is-ancestor "$four" HEAD; then
+            architectures+=' armv5 mipsbe'
+          else
+            test "$?" -eq 1
+          fi
+          if git merge-base --is-ancestor "$six" HEAD; then
+            architectures+=' amd64 386'
+          else
+            test "$?" -eq 1
+          fi
+          echo "architectures=$architectures" >> "$GITHUB_OUTPUT"
           test "$(cat version.txt)" = "${RELEASE_TAG#v}"
           baseline=9d398fb3754036cbe35df1cf07098164ff62a9d5
           # Only immutable pre-AWG history qualifies; missing gates never select recovery.
           git cat-file -e "$baseline^{commit}"
           if git merge-base --is-ancestor HEAD "$baseline"; then
+            test "$RECOVERY" = true
             echo 'historical=true' >> "$GITHUB_OUTPUT"
             evidence=".agents-work/release-legacy/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
             mkdir -p "$evidence"
@@ -155,24 +238,24 @@ jobs:
           npm --prefix web test
           make integration
           make build-router build-router-lite RELEASE_VERSION="$RELEASE_TAG" RELEASE_REVISION="$(git rev-parse HEAD)"
-      # Current sources must provide both gates; a missing target is an error.
-      # -o below only acknowledges these successful same-job steps. It does not
-      # make a missing gate optional. Public build targets remain so older AWG
-      # tags without the CI-only names still compile.
+      - name: Build release binaries once
+        if: env.RECOVERY == 'false'
+        run: make build-router-ci build-router-lite-ci RELEASE_VERSION="$RELEASE_TAG" RELEASE_REVISION="$RELEASE_REVISION"
+      # Published older tags keep their original gate/build entry points.
       - name: AWG 320 stress
-        if: steps.contract.outputs.historical == 'false'
+        if: env.RECOVERY == 'true' && steps.contract.outputs.historical == 'false'
         run: make memory-stress
       - name: Memory regression
-        if: steps.contract.outputs.historical == 'false'
+        if: env.RECOVERY == 'true' && steps.contract.outputs.historical == 'false'
         run: make memory-regression
       - name: Build router binaries from tagged source
-        if: steps.contract.outputs.historical == 'false'
+        if: env.RECOVERY == 'true' && steps.contract.outputs.historical == 'false'
         run: |
           # -o only acknowledges both successful gate steps in this job.
           # Missing targets remain fatal; this is not a bypass.
           make -o memory-stress -o memory-regression build-router build-router-lite RELEASE_VERSION="$RELEASE_TAG" RELEASE_REVISION="$(git rev-parse HEAD)"
       - name: Preserve release verification evidence
-        if: always()
+        if: always() && env.RECOVERY == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-memory-regression-${{ github.run_id }}-${{ github.run_attempt }}
@@ -189,6 +272,8 @@ jobs:
             .agents-work/memory-regression/*/cleanup.log
             .agents-work/memory-regression/*/exit-code
       - name: Package source, notices, and build identity
+        env:
+          RELEASE_ARCHITECTURES: ${{ steps.contract.outputs.architectures }}
         run: |
           source_dir=$(mktemp -d)
           trap 'rm -rf "$source_dir"' EXIT
@@ -201,8 +286,11 @@ jobs:
             -C "$source_dir" "keenproxy-${RELEASE_TAG#v}" \
             | gzip -n > dist/keenproxy-source.tar.gz
           cp tools/install.sh dist/install.sh
-          cp tools/S99keenproxy dist/S99keenproxy
-          service_assets=(install.sh S99keenproxy)
+          service_assets=(install.sh)
+          if [ -f tools/S99keenproxy ]; then
+            cp tools/S99keenproxy dist/S99keenproxy
+            service_assets+=(S99keenproxy)
+          fi
           if [ -f tools/keenproxy.openwrt ]; then
             cp tools/keenproxy.openwrt dist/keenproxy.openwrt
             service_assets+=(keenproxy.openwrt)
@@ -230,27 +318,63 @@ jobs:
             -C dist "${notices[@]}" LICENSES \
             | gzip -n > dist/keenproxy-notices.tar.gz
           cd dist
-          sha256sum keenproxy-linux-* keenproxy-lite-linux-* keenproxy-source.tar.gz \
+          binaries=()
+          mapfile -t architectures < <(printf '%s\n' "$RELEASE_ARCHITECTURES" | tr ' ' '\n' | LC_ALL=C sort)
+          for variant in '' lite-; do
+            for arch in "${architectures[@]}"; do
+              binaries+=("keenproxy-${variant}linux-$arch")
+            done
+          done
+          actual=()
+          for file in keenproxy-linux-* keenproxy-lite-linux-*; do
+            case "$file" in keenproxy-linux-test) continue ;; esac
+            actual+=("$file")
+          done
+          test "$(printf '%s\n' "${actual[@]}" | LC_ALL=C sort)" = "$(printf '%s\n' "${binaries[@]}" | LC_ALL=C sort)"
+          sha256sum "${binaries[@]}" keenproxy-source.tar.gz \
             keenproxy-notices.tar.gz "${service_assets[@]}" BUILD_INFO.txt > SHA256SUMS
-      - name: Attach missing assets without overwriting published files
-        run: |
-          assets=(dist/keenproxy-linux-* dist/keenproxy-lite-linux-* \
-            dist/keenproxy-source.tar.gz dist/keenproxy-notices.tar.gz \
-            dist/install.sh dist/S99keenproxy dist/BUILD_INFO.txt dist/SHA256SUMS)
-          if [ -f tools/keenproxy.openwrt ]; then
-            assets+=(dist/keenproxy.openwrt)
-          fi
-          existing=$(mktemp -d)
-          gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' > "$existing/names"
-          for asset in "${assets[@]}"; do
-            name=$(basename "$asset")
-            if grep -Fxq "$name" "$existing/names"; then
-              gh release download "$RELEASE_TAG" --pattern "$name" --dir "$existing"
-              cmp "$asset" "$existing/$name"
-            fi
-          done
-          for asset in "${assets[@]}"; do
-            if ! grep -Fxq "$(basename "$asset")" "$existing/names"; then
-              gh release upload "$RELEASE_TAG" "$asset" --repo "$GH_REPO"
-            fi
-          done
+      - name: Retain the exact release payload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-payload-${{ github.run_id }}
+          overwrite: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+          path: |
+            dist/keenproxy-linux-*
+            dist/keenproxy-lite-linux-*
+            !dist/keenproxy-linux-test
+            dist/keenproxy-source.tar.gz
+            dist/keenproxy-notices.tar.gz
+            dist/install.sh
+            dist/S99keenproxy
+            dist/keenproxy.openwrt
+            dist/BUILD_INFO.txt
+            dist/SHA256SUMS
+
+  publish:
+    needs: [version, checks, assets]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      RELEASE_ID: ${{ needs.version.outputs.id }}
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
+      RELEASE_REVISION: ${{ needs.version.outputs.revision }}
+      RELEASE_NATIVE: ${{ needs.assets.outputs.native }}
+      RELEASE_ENTWARE_CONTROLLER: ${{ needs.assets.outputs.entware_controller }}
+      RELEASE_ARCHITECTURES: ${{ needs.assets.outputs.architectures }}
+      RELEASE_RECOVERY: ${{ needs.version.outputs.recovery }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-payload-${{ github.run_id }}
+          path: dist
+      - run: bash tools/publish-release-assets.sh dist

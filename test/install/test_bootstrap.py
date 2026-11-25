@@ -38,6 +38,7 @@ while [ "$#" -gt 0 ]; do
 done
 printf '%s\\n' "$url" >> "$REQUESTS"
 case "$url" in
+    */releases/latest) cat "$FIXTURES/latest"; exit ;;
     */main/version.txt) path=version.txt ;;
     */releases/download/*) path=${url#*/releases/download/} ;;
     *) exit 22 ;;
@@ -50,6 +51,11 @@ cp "$FIXTURES/$path" "$out"
             self.executable(self.prefix / 'sbin' / name, 'exit 0')
         self.executable(self.prefix / 'etc/init.d/rc.unslung', 'exit 0')
         (self.mirror / 'version.txt').write_text('1.2.3\n')
+        self.latest_release('v1.2.3')
+
+    def latest_release(self, tag):
+        (self.mirror / 'latest').write_text(
+            f'https://github.com/ordo-systems/keen-proxy/releases/tag/{tag}')
 
     def executable(self, path, script):
         path.write_text('#!/bin/sh\n' + script + '\n')
@@ -298,7 +304,7 @@ done
         token = self.config.with_name('token')
         token.write_text('test fixture\n')
         next_release = self.release('v1.2.4')
-        (self.mirror / 'version.txt').write_text('1.2.4\n')
+        self.latest_release('v1.2.4')
         for _ in range(2):
             result = self.install()
             self.assert_panel_access(result)
@@ -322,7 +328,7 @@ done
         self.assert_release('v1.2.3')
         self.assert_url_queries(1)
         self.release('v1.2.4', url=self.url_boundary('exit 0\n'))
-        (self.mirror / 'version.txt').write_text('1.2.4\n')
+        self.latest_release('v1.2.4')
         result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('could not determine the panel access URL', result.stderr)
@@ -370,6 +376,26 @@ done
         self.assertEqual(self.binary.read_bytes(), release.read_bytes())
         self.assert_release('v0.9.0', variant='lite')
         self.assertNotIn('/main/version.txt', self.requests.read_text())
+        self.assertNotIn('/releases/latest', self.requests.read_text())
+
+    def test_default_ignores_unpublished_main_version(self):
+        stable = self.release('v1.2.3')
+        (self.mirror / 'version.txt').write_text('1.2.4\n')
+
+        self.assert_panel_access(self.install())
+        self.assertEqual(self.binary.read_bytes(), stable.read_bytes())
+        self.assertNotIn('/main/version.txt', self.requests.read_text())
+        self.assertEqual(self.requests.read_text().count('/releases/latest'), 1)
+
+    def test_default_rejects_unexpected_latest_redirect(self):
+        self.release('v1.2.3')
+        (self.mirror / 'latest').write_text('https://example.com/releases/tag/v1.2.3')
+
+        result = self.install()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('unexpected latest release URL', result.stderr)
+        self.assertFalse(self.binary.exists())
 
     def test_bad_checksum_keeps_running_release(self):
         first = self.release('v1.2.3')

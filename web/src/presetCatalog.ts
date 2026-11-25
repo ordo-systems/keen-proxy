@@ -12,5 +12,5 @@ export function filterCatalog(catalog: readonly Preset[], category: string, quer
   const matches = (value: string) => value.toLowerCase().includes(needle)
   return catalog.filter(preset => (!category || preset.category === category) &&
     (!needle || matches(preset.name) || matches(preset.description) ||
-      preset.domains.some(matches) || preset.prefixes.some(matches)))
+      preset.domains.some(matches) || preset.prefixes?.some(matches)))
 }

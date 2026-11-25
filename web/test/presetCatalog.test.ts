@@ -19,3 +19,8 @@ test('search is case-insensitive, accepts IP ranges, and stays scoped to the sel
   assert.deepEqual(filterCatalog(catalog, 'AI', 'GitHub'), [])
   assert.deepEqual(filterCatalog(catalog, '', '192.0.2.0/24').map(preset => preset.id), ['github'])
 })
+
+test('a preset without IP ranges does not break search for other presets', () => {
+  const withoutPrefixes: Preset = { ...claude, prefixes: null }
+  assert.deepEqual(filterCatalog([withoutPrefixes, github], '', '192.0.2.0/24'), [github])
+})

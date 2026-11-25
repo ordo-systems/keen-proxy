@@ -218,7 +218,7 @@ onMounted(async () => {
          </div>
          <h3>{{ t('features.composition') }}</h3>
          <pre>{{ preset.domains.join('\n') }}</pre>
-         <template v-if="preset.prefixes.length">
+         <template v-if="preset.prefixes?.length">
           <h3>{{ t('features.presetPrefixes') }}</h3>
           <pre>{{ preset.prefixes.join('\n') }}</pre>
          </template>

@@ -125,7 +125,7 @@ On a managed Entware or native OpenWrt installation, **Settings → Updates** sh
 
 Automatic installation is off by default. The panel still checks for releases. Enable automatic installation and save a time to install available releases during that minute in the router's local time, once per day while the service is running. Installation briefly restarts KeenProxy.
 
-The published `v0.9.3` and `v0.10.0` panels still use the older installer. If an update from either panel fails because forwarding cannot be blocked, turn off automatic installation and run the [bootstrap from `main`](#install-or-update-from-github) over SSH with `--version` set to the desired release, plus `--lite` if installed. The bootstrap from the `v0.10.0` tag does not include this fix.
+The published `v0.9.3` and `v0.10.0` panels still use the older installer. If an update fails because forwarding cannot be blocked, follow the [0.10.1 SSH recovery instructions](releases/0.10.1.md#entware-update-recovery) on Keenetic or Netcraze with Entware. On native OpenWrt, use the [separate OpenWrt bootstrap command](#native-openwrt-installation). The bootstrap from the `v0.10.0` tag does not include the fix.
 
 Before stopping the old service, the installer tries to block forwarded IPv4 traffic and, if IPv6 forwarding is enabled, IPv6 traffic. The router remains reachable from the LAN. If a rule cannot be installed (for example, `ip6tables` is missing or the kernel rejects the rule), the installer logs a warning and continues. It keeps any rule it did install. Traffic in an unprotected address family may bypass KeenProxy during the restart. The installer still requires working interception after the restart and rolls back if the new release cannot restore it.
 

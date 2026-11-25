@@ -6,8 +6,8 @@ umask 077
 
 fail() { printf 'KeenProxy: %s\n' "$*" >&2; exit 1; }
 usage() {
-    printf '%s\n' 'Usage: sh -s -- [--version vX.Y.Z] [--lite]' \
-        '       sh -s -- --version vX.Y.Z --expect-current vX.Y.Z [--lite]' \
+    printf '%s\n' 'Usage: sh -s -- [--version vX.Y.Z] [--lite] [--require-guard]' \
+        '       sh -s -- --version vX.Y.Z --expect-current vX.Y.Z [--lite] [--require-guard]' \
         '       sh -s -- --uninstall'
 }
 
@@ -59,12 +59,14 @@ version=
 expected_current=
 variant=full
 uninstall=0
+require_guard=0
 legacy_optout=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --version) [ "$#" -ge 2 ] && [ -n "$2" ] || fail 'missing --version value'; version=$2; shift ;;
         --expect-current) [ "$#" -ge 2 ] && [ -n "$2" ] || fail 'missing --expect-current value'; expected_current=$2; shift ;;
         --lite) variant=lite ;;
+        --require-guard) require_guard=1 ;;
         # Preserve the old updater/CLI input without installing a separate client.
         --without-trusttunnel) legacy_optout=1 ;;
         --uninstall) uninstall=1 ;;
@@ -73,7 +75,8 @@ while [ "$#" -gt 0 ]; do
     esac
     shift
 done
-if [ "$uninstall" = 1 ] && { [ -n "$version$expected_current" ] || [ "$variant" = lite ] || [ "$legacy_optout" = 1 ]; }; then
+if [ "$uninstall" = 1 ] && { [ -n "$version$expected_current" ] || [ "$variant" = lite ] ||
+    [ "$legacy_optout" = 1 ] || [ "$require_guard" = 1 ]; }; then
     fail '--uninstall cannot be combined with installation options'
 fi
 if [ -n "$expected_current" ] && [ -z "$version" ]; then
@@ -186,7 +189,11 @@ guard_rule() {
 
 find_forwarding_guard() {
     if [ -x "$guard4" ] && guard_rule "$guard4" -C >/dev/null 2>&1; then held4=1; fi
-    if [ -x "$guard6" ] && guard_rule "$guard6" -C >/dev/null 2>&1; then held6=1; fi
+    if [ ! -x "$guard6" ]; then
+        echo 'KeenProxy: warning: ip6tables unavailable; cannot check for an existing IPv6 forwarding guard. If an old guard remains, restore ip6tables and rerun the bootstrap.' >&2
+    elif guard_rule "$guard6" -C >/dev/null 2>&1; then
+        held6=1
+    fi
 }
 
 hold_forwarding() {
@@ -208,11 +215,13 @@ hold_forwarding() {
         fi
     fi
     check_routing=1
+    added6=0
     if [ "$ipv6_forwarding" = 1 ] && [ "$held6" = 0 ]; then
-        if [ ! -x "$guard6" ]; then
-            echo 'KeenProxy: warning: ip6tables unavailable; cannot check or block IPv6 forwarding. Continuing; restore ip6tables and rerun the bootstrap if an old guard remains.' >&2
-        elif guard_rule "$guard6" -I; then
+        if [ -x "$guard6" ] && guard_rule "$guard6" -I; then
             held6=1
+            added6=1
+        elif [ "$require_guard" = 1 ]; then
+            fail 'could not block IPv6 forwarding; service left unchanged'
         else
             echo 'KeenProxy: warning: could not block IPv6 forwarding; continuing without a confirmed IPv6 guard' >&2
         fi
@@ -220,6 +229,12 @@ hold_forwarding() {
     if [ "$held4" = 0 ]; then
         if guard_rule "$guard4" -I; then
             held4=1
+        elif [ "$require_guard" = 1 ]; then
+            # Undo only the IPv6 guard installed by this attempt.
+            if [ "$added6" = 1 ]; then
+                release_forwarding || fail 'could not block IPv4 forwarding or remove the new IPv6 guard; service left unchanged'
+            fi
+            fail 'could not block IPv4 forwarding; service left unchanged'
         else
             echo 'KeenProxy: warning: could not block IPv4 forwarding; continuing without a confirmed IPv4 guard' >&2
         fi

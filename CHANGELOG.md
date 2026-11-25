@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Continue release updates when an IPv4 or IPv6 forwarding guard cannot be installed. Log the unprotected address family, keep any working guard, and still require interception to start or roll back.
+- Add a CLI-only `--require-guard` option to abort managed updates before replacing or restarting the service if a required forwarding guard cannot be installed.
+- Same-version bootstrap retries leave a running service alone but return an error if interception is inactive. Warn if missing `ip6tables` prevents checking for an existing IPv6 guard, including on retries.
 - Accept `on`/`off` in AmneziaWG profiles alongside `true`/`false` and `1`/`0`.
 - Embed the complete preset catalog from a pinned KeenProxy Presets release; no downloads at build time or on the router.
 - Present presets as a searchable rules-style list with a category sidebar, inline rule controls, and a separate section for local presets.

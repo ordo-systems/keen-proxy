@@ -125,17 +125,17 @@ On a managed Entware or native OpenWrt installation, **Settings → Updates** sh
 
 Automatic installation is off by default. The panel still checks for releases. Enable automatic installation and save a time to install available releases during that minute in the router's local time, once per day while the service is running. Installation briefly restarts KeenProxy.
 
-For an upgrade from 0.9.2 or earlier that must stop if forwarding cannot be blocked, run the bootstrap from the `v0.9.3` tag over SSH with `--version v0.9.3` (and `--lite` if installed). Older versions embed their own installer in the panel and in scheduled updates, so turn off automatic installation before this first upgrade.
-
-The published `v0.9.3` and `v0.10.0` panels still use the older installer. If either panel rejects an update because it cannot block forwarding, run a bootstrap that includes the fix over SSH with the desired `--version` (and `--lite` if installed). The `v0.10.0` tag's bootstrap is not the fixed installer.
+The published `v0.9.3` and `v0.10.0` panels still use the older installer. If an update from either panel fails because forwarding cannot be blocked, turn off automatic installation and run the [bootstrap from `main`](#install-or-update-from-github) over SSH with `--version` set to the desired release, plus `--lite` if installed. The bootstrap from the `v0.10.0` tag does not include this fix.
 
 Before stopping the old service, the installer tries to block forwarded IPv4 traffic and, if IPv6 forwarding is enabled, IPv6 traffic. The router remains reachable from the LAN. If a rule cannot be installed (for example, `ip6tables` is missing or the kernel rejects the rule), the installer logs a warning and continues. It keeps any rule it did install. Traffic in an unprotected address family may bypass KeenProxy during the restart. The installer still requires working interception after the restart and rolls back if the new release cannot restore it.
+
+For a strict command-line update, add `--require-guard` to the `main` bootstrap command. When replacing or starting an existing managed installation, this stops the update before stopping the service or replacing files if the IPv4 rule, or the IPv6 rule when forwarding is enabled, cannot be installed. It does not change panel or scheduled updates.
 
 Installed guard rules are removed once interception is active in the new or restored release. If neither restores interception, those rules stay in place. To restore access, rerun the bootstrap from the LAN with a working release and configuration. On OpenWrt, disable software and hardware flow offloading and reload the firewall before updating. The guard covers traffic that passes through the router's Netfilter forwarding chains.
 
 If `ip6tables` is unavailable, the installer cannot tell whether an earlier update left an IPv6 guard in place. If the guard remains, restore working `ip6tables` and rerun the bootstrap from the LAN.
 
-If the service starts in `management-only` mode, for example because TPROXY is unavailable, the panel can be reachable while the installer still considers interception unavailable. If the restored release also starts in this mode, fix and apply the interception settings from the LAN and then rerun the protected bootstrap with the working release. Applying the settings alone does not remove a guard left by the installer.
+Rerunning the bootstrap with the same release while KeenProxy is running does not restart it. If interception is inactive, the command exits with `running service does not have active routing`. The panel may still be reachable in `management-only` mode, for example when TPROXY is unavailable. From the LAN, fix and apply the interception settings, then rerun the bootstrap with the working release. Applying settings alone does not remove a guard left by the installer.
 
 **Roll back** reinstalls the previous published version and switches off automatic installation. It needs access to GitHub and keeps the existing configuration and token. The installer rejects an incompatible configuration before restarting the service. Rolling back to a version released before panel updates also restores that version's earlier panel. Use the command-line installer to upgrade again.
 

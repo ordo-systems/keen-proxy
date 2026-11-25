@@ -140,6 +140,51 @@ esac
         self.assertTrue((self.prefix / 'forwarding-exposed').exists())
         self.assertFalse(any(rule.exists() for rule in self.blocked.values()))
 
+    def test_require_guard_aborts_before_restart_and_releases_new_ipv6_guard(self) -> None:
+        self.release('v1.2.4')
+        (self.prefix / 'firewall-failure-4').touch()
+
+        result = self.install('--version', 'v1.2.4', '--require-guard')
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('could not block IPv4 forwarding', result.stderr)
+        self.assertEqual(self.binary.read_bytes(), self.old)
+        self.assertTrue(self.running.exists())
+        self.assertEqual((self.prefix / 'starts').read_text().splitlines(), ['v1.2.3'])
+        self.assert_released()
+
+    def test_require_guard_retains_preexisting_ipv6_guard_on_failure(self) -> None:
+        self.require_ipv6_forwarding()
+        self.release('v1.2.4')
+        self.blocked[6].touch()
+        (self.prefix / 'firewall-failure-4').touch()
+
+        result = self.install('--version', 'v1.2.4', '--require-guard')
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('could not block IPv4 forwarding', result.stderr)
+        self.assertEqual(self.binary.read_bytes(), self.old)
+        self.assertTrue(self.blocked[6].exists())
+
+    def test_require_guard_rejects_unavailable_ipv6_guard(self) -> None:
+        self.require_ipv6_forwarding()
+        candidate = self.release('v1.2.4')
+        tool = self.prefix / 'sbin/ip6tables'
+        tool.chmod(0o644)
+
+        result = self.install('--version', 'v1.2.4', '--require-guard')
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('could not block IPv6 forwarding', result.stderr)
+        self.assertEqual(self.binary.read_bytes(), self.old)
+        self.assertTrue(self.running.exists())
+        self.assert_released()
+
+        tool.chmod(0o755)
+        self.assert_panel_access(self.install('--version', 'v1.2.4', '--require-guard'))
+        self.assertEqual(self.binary.read_bytes(), candidate.read_bytes())
+        self.assert_released()
+
     def test_ipv6_guard_failure_preserves_ipv4_protection(self) -> None:
         self.require_ipv6_forwarding()
         candidate = self.release('v1.2.4')
@@ -177,10 +222,22 @@ esac
         result = self.install('--version', 'v1.2.4')
 
         self.assert_panel_access(result)
-        self.assertIn('cannot check or block IPv6 forwarding', result.stderr)
+        self.assertIn('cannot check for an existing IPv6 forwarding guard', result.stderr)
         self.assertIn('restore ip6tables and rerun the bootstrap', result.stderr)
         self.assertEqual(self.binary.read_bytes(), candidate.read_bytes())
         self.assertFalse(self.blocked[4].exists())
+        self.assertTrue(self.blocked[6].exists())
+
+    def test_same_version_warns_if_previous_ipv6_guard_cannot_be_checked(self) -> None:
+        self.blocked[6].touch()
+        (self.prefix / 'sbin/ip6tables').unlink()
+
+        result = self.install('--version', 'v1.2.3')
+
+        self.assert_panel_access(result)
+        self.assertIn('cannot check for an existing IPv6 forwarding guard', result.stderr)
+        self.assertIn('restore ip6tables and rerun the bootstrap', result.stderr)
+        self.assertEqual((self.prefix / 'starts').read_text().splitlines(), ['v1.2.3'])
         self.assertTrue(self.blocked[6].exists())
 
     def require_ipv6_forwarding(self) -> None:

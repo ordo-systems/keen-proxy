@@ -337,12 +337,12 @@ func parseRange(value string, bits int) (any, error) {
 
 func boolean(value string) (bool, error) {
 	switch strings.ToLower(value) {
-	case "true", "1":
+	case "true", "1", "on":
 		return true, nil
-	case "false", "0":
+	case "false", "0", "off":
 		return false, nil
 	default:
-		return false, fmt.Errorf("expected true or false")
+		return false, fmt.Errorf("expected true/false, on/off, or 1/0")
 	}
 }
 

@@ -35,6 +35,26 @@ func TestParsePreservesProfileValues(t *testing.T) {
 	}
 }
 
+func TestParseBooleanAliases(t *testing.T) {
+	for _, pair := range [][2]string{{"on", "off"}, {"ON", "OFF"}, {"true", "false"}, {"1", "0"}} {
+		t.Run(pair[0]+"/"+pair[1], func(t *testing.T) {
+			for i, trailers := range pair {
+				cookies := pair[1-i]
+				input := strings.NewReplacer("RandomTrailers = true", "RandomTrailers = "+trailers,
+					"DisableCookies = false", "DisableCookies = "+cookies).Replace(profile)
+				ep, err := Parse(input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if ep["random_trailers"] != (i == 0) || ep["disable_cookies"] != (i == 1) {
+					t.Fatalf("RandomTrailers=%s parsed as %v; DisableCookies=%s parsed as %v",
+						trailers, ep["random_trailers"], cookies, ep["disable_cookies"])
+				}
+			}
+		})
+	}
+}
+
 func TestParseRejectsInvalidProfiles(t *testing.T) {
 	cases := map[string]string{
 		"missing interface":       strings.Replace(profile, "[Interface]", "", 1),

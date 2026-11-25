@@ -6,6 +6,7 @@ const en: Messages = {
   browserDemo: {
     notice: 'Demo · synthetic data · changes reset on reload · no network checks.',
     documentation: 'Documentation',
+    releaseHistory: 'Release history',
   },
   ui: redesignEn,
   kernelModules: {

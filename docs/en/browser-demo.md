@@ -6,6 +6,8 @@ The demo is built from this repository's real Vue components, styles, translatio
 
 The initial footer and build details show the planned release preview from `web/src/demo/release.json`, not a claim that its binaries are published. Release Please keeps this preview identity synchronized when preparing a release. The update and rollback actions remain synthetic examples.
 
+The banner links to the [release history](releases/index.md). For an older router panel that cannot update, follow the [0.10.1 SSH recovery instructions](releases/0.10.1.md#entware-update-recovery); the demo's simulated update is not a recovery procedure.
+
 Try editing a group, inspecting a connection, previewing a sample preset, selecting client policies, Apply/Discard, or running simulated diagnostics. Switch English/Russian and the theme from the toolbar.
 
 - Configuration is kept in this page's memory and resets on reload.

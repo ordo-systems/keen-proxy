@@ -11,6 +11,7 @@ const browserDemo = import.meta.env.MODE === 'demo'
   <aside v-if="browserDemo" class="browser-demo" aria-label="Browser demo">
     {{ t('browserDemo.notice') }}
     <a :href="locale === 'ru' ? '../ru/' : '../'">{{ t('browserDemo.documentation') }}</a>
+    <a :href="locale === 'ru' ? '../ru/releases/' : '../releases/'">{{ t('browserDemo.releaseHistory') }}</a>
   </aside>
   <NConfigProvider :theme="naiveTheme" :theme-overrides="overrides" :locale="naiveLocale" :date-locale="naiveDateLocale">
     <NGlobalStyle />

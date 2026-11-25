@@ -3,6 +3,14 @@ name: CI
 on:
   pull_request:
   workflow_call:
+    inputs:
+      source_ref:
+        type: string
+        description: Exact commit to verify in a release run
+      skip_payload_builds:
+        type: boolean
+        default: false
+        description: The release workflow builds the frontend and router payload on the same commit
   workflow_dispatch:
 
 permissions:
@@ -18,6 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
       - name: Read pinned Go version
         id: go-version
@@ -37,12 +46,15 @@ jobs:
         run: make test
       - name: Go vet
         run: make vet
-      - name: Frontend tests and production build
+      - name: Frontend tests
         working-directory: web
         run: |
           npm ci --no-audit --no-fund
           npm test
-          npm run build
+      - name: Frontend production build
+        if: ${{ !inputs.skip_payload_builds }}
+        working-directory: web
+        run: npm run build
 
   presets:
     name: Preset catalog
@@ -51,6 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
       - run: make check-presets
 
@@ -64,6 +77,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Read pinned Go version
@@ -104,6 +118,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
       - name: Read pinned Go version
         id: go-version
@@ -135,6 +150,7 @@ jobs:
 
   router:
     name: Router builds
+    if: ${{ !inputs.skip_payload_builds }}
     runs-on: ubuntu-24.04
     # Compilation only. Do not call memory gates or make -o in this job.
     timeout-minutes: 60
@@ -143,6 +159,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
       - name: Read pinned Go version
         id: go-version
@@ -168,6 +185,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
       - name: Read pinned Go version
         id: go-version
@@ -187,6 +205,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
       - name: Read pinned Go version
         id: go-version
@@ -234,6 +253,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Scan every commit reachable from main

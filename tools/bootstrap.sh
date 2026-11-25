@@ -53,8 +53,8 @@ else
     PATH="$prefix/bin:$prefix/sbin:$PATH"
 fi
 export PATH
-main=https://raw.githubusercontent.com/ordo-systems/keen-proxy/main
-releases=https://github.com/ordo-systems/keen-proxy/releases/download
+release_page=https://github.com/ordo-systems/keen-proxy/releases
+releases="$release_page/download"
 version=
 expected_current=
 variant=full
@@ -528,8 +528,15 @@ if [ -f "$prefix/etc/ssl/certs/ca-certificates.crt" ]; then
     export CURL_CA_BUNDLE="$prefix/etc/ssl/certs/ca-certificates.crt"
 fi
 if [ -z "$version" ]; then
-    fetch "$main/version.txt" "$work/version.txt"
-    version=$(cat "$work/version.txt")
+    latest=$(curl --proto '=https' --proto-redir '=https' -fsSL --connect-timeout 20 \
+        --max-time 30 --retry 2 "$release_page/latest" -o /dev/null -w '%{url_effective}') ||
+        fail 'could not find the latest published release'
+    case "$latest" in
+        "$release_page/tag/"*) version=${latest#"$release_page/tag/"} ;;
+        *) fail 'unexpected latest release URL' ;;
+    esac
+    printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' ||
+        fail 'latest release is not a stable version'
 fi
 tag="v${version#v}"
 valid_release_tag "$tag" || fail 'invalid release version'

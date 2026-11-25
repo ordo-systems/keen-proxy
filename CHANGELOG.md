@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Embed the complete preset catalog from a pinned KeenProxy Presets release; no downloads at build time or on the router.
+- Present presets as a searchable rules-style list with a category sidebar, inline rule controls, and a separate section for local presets.
 - Keep preset updates from reopening disabled routing suffixes; limit imported government, social, and operator lists to relevant routing scopes.
 - Add verified Docker Hardened Images, GitHub Copilot, and ChatGPT endpoints without replacing historical entries; keep catalog generation and publishing in the dedicated repository.
 - Record sanitized iptables-restore failure locations in diagnostic archives, distinguishing a rejected Apply from a failed rollback.

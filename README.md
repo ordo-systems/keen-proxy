@@ -110,7 +110,7 @@ opkg update && opkg install curl ca-bundle ca-certificates
 curl -fsSL https://raw.githubusercontent.com/ordo-systems/keen-proxy/main/tools/bootstrap.sh | /opt/bin/sh
 ```
 
-The bootstrap reads `version.txt` from `main`, selects the matching full/lite asset for one of the six release architectures, and verifies release files against `SHA256SUMS`. On Entware it installs missing `iptables` tools and registers and starts `/opt/etc/init.d/S99keenproxy`. TrustTunnel runs inside the embedded engine; no separate client is downloaded or supervised. The first start enables LAN DNS interception even with an empty routing policy. Stop any competing interceptor first.
+The bootstrap defaults to GitHub's latest published stable release, selects the matching full/lite asset for one of the six release architectures, and verifies release files against `SHA256SUMS`. On Entware it installs missing `iptables` tools and registers and starts `/opt/etc/init.d/S99keenproxy`. TrustTunnel runs inside the embedded engine; no separate client is downloaded or supervised. The first start enables LAN DNS interception even with an empty routing policy. Stop any competing interceptor first.
 
 After successful installation or command-line update, the bootstrap prints the panel URL when available. Run `keenproxy --url` to display it again and `keenproxy --key` to print the current login token from the configured token file. These commands do not start the service or generate a token; use `--config /path/to/config.yaml` for a non-default configuration. Keep token output private. See [panel access](docs/en/user-guide.md#access-the-panel).
 

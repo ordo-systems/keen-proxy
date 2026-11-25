@@ -48,9 +48,13 @@ The error `iptables-restore: line N failed` does not necessarily mean TPROXY is 
 
 In **Settings → Network → Interception mode**, KeenProxy reports whether TPROXY passed the preliminary check, was found unavailable, or could not be verified. Select **Check again** after correcting the reported problem. An unknown result does not block Apply. On OpenWrt with `iptables-nft`, the absence of a target from the legacy iptables list does not prove that TPROXY is unavailable.
 
-If the saved TPROXY mode is found unavailable at startup, the panel stays accessible without starting interception. KeenProxy neither loads the module explicitly nor switches to compatible mode automatically. To recover, correct the reported problem, select **Check again**, then **Apply again**. This retry uses the saved settings without rewriting the configuration or its backup. To change modes instead, select **Compatible** and apply the draft. A successful preliminary check is not a traffic test.
+If the saved TPROXY mode is found unavailable at startup, the panel stays accessible without starting interception. KeenProxy does not load modules or switch to compatible mode automatically. After correcting the problem, select **Check again**, then **Apply again**. This retry uses the saved settings without rewriting the configuration or its backup. To change modes instead, select **Compatible** and apply the draft. A successful preliminary check is not a traffic test.
 
 In the KeeneticOS component list, check **Open Package support (OPKG)** and **Kernel modules for Netfilter**. Entware supplies the `iptables` commands separately. Even with Netfilter and Xtables-addons installed, the TPROXY module may be present on disk but not loaded.
+
+On Keenetic with legacy iptables, **Diagnostics → Kernel modules** checks for the `comment` match (`xt_comment`) for the temporary forwarding block during updates, and for registration of the IPv4 `TPROXY` target (`xt_TPROXY`). It reports IPv4 and IPv6 separately for the forwarding block and checks IPv6 registration only when IPv6 forwarding is enabled. For TPROXY readiness, see **Settings → Network → Interception mode**.
+
+**Load module** appears only for an eligible module found in the running firmware. If you are not signed in with a token, enter it for this load, even on a trusted network. This does not sign you in or save the token. Wait for any managed update to finish first. Loading does not download modules, change firewall rules, apply settings, or persist after reboot. If the kernel rejects the module or misses a dependency, check the firmware components and use the SSH checks below. After a successful TPROXY load, use **Apply** (or **Apply again** for saved settings), then test UDP from a client.
 
 **Kernel and iptables checks.** Save as `test1.sh` and run `sh test1.sh` in an Entware SSH session. This does not apply rules or explicitly load modules.
 

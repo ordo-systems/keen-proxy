@@ -142,12 +142,12 @@ func hasExactLine(path, want string) bool {
 	return false
 }
 
-func (m *Manager) lock() (*os.File, error) {
+func (m *Manager) lock(mode int) (*os.File, error) {
 	f, err := os.OpenFile(filepath.Join(m.dir, "job.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}
-	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+	if err := unix.Flock(int(f.Fd()), mode|unix.LOCK_NB); err != nil {
 		f.Close()
 		if errors.Is(err, unix.EWOULDBLOCK) {
 			return nil, ErrBusy
@@ -157,9 +157,23 @@ func (m *Manager) lock() (*os.File, error) {
 	return f, nil
 }
 
+// WithoutInstall runs a maintenance action only while no managed installer holds
+// the update lock. A nil manager represents an installation without managed updates.
+func (m *Manager) WithoutInstall(action func() error) error {
+	if m == nil {
+		return action()
+	}
+	lock, err := m.lock(unix.LOCK_SH)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	return action()
+}
+
 func (m *Manager) job() *Job {
 	// If we can take the lock, no installer can change the state while we read it.
-	f, lockErr := m.lock()
+	f, lockErr := m.lock(unix.LOCK_SH)
 	if f != nil {
 		defer f.Close()
 	}
@@ -205,7 +219,7 @@ func (m *Manager) launch(current installState, target string) error {
 }
 
 func (m *Manager) startWorker(current installState, target string, installer []byte) error {
-	lock, err := m.lock()
+	lock, err := m.lock(unix.LOCK_EX)
 	if err != nil {
 		return err
 	}

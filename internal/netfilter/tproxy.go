@@ -53,24 +53,24 @@ func iptablesVersion(ctx context.Context, name string) ([]byte, error) {
 
 func (f *Firewall) probeTProxy(ctx context.Context, readFile func(string) ([]byte, error), stat func(string) (os.FileInfo, error), version func(context.Context, string) ([]byte, error)) TProxyReadiness {
 	unknown := TProxyReadiness{State: TProxyUnknown, Reason: TProxyProbeFailed}
+	if f == nil || f.IPTables == "" {
+		return unknown
+	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	release, err := readFile(kernelRelease)
-	release = bytes.TrimSpace(release)
-	if err != nil {
-		return unknown
-	}
-	if !keeneticRelease.Match(release) {
-		return TProxyReadiness{State: TProxyUnknown}
-	}
-	ver, err := version(ctx, f.IPTables)
+	release, err := f.legacyKeenetic(ctx, readFile, version)
 	if err != nil || ctx.Err() != nil {
 		return unknown
 	}
-	if !legacyVersion.Match(bytes.TrimSpace(ver)) {
+	if release == "" {
 		return TProxyReadiness{State: TProxyUnknown}
 	}
+	return probeTProxyInventory(ctx, release, readFile, stat)
+}
+
+func probeTProxyInventory(ctx context.Context, release string, readFile func(string) ([]byte, error), stat func(string) (os.FileInfo, error)) TProxyReadiness {
+	unknown := TProxyReadiness{State: TProxyUnknown, Reason: TProxyProbeFailed}
 	// Empty and unreadable inventories are not evidence that a target is absent.
 	targets, err := readFile(ipv4Targets)
 	if err != nil || len(bytes.TrimSpace(targets)) == 0 || ctx.Err() != nil {
@@ -78,7 +78,7 @@ func (f *Firewall) probeTProxy(ctx context.Context, readFile func(string) ([]byt
 	}
 	if !inventoryContains(targets, "TPROXY") {
 		reason := "target_not_registered"
-		if info, err := stat(filepath.Join("/lib/modules", string(release), "xt_TPROXY.ko")); err == nil && info.Mode().IsRegular() {
+		if info, err := stat(filepath.Join("/lib/modules", release, "xt_TPROXY.ko")); err == nil && info.Mode().IsRegular() {
 			if modules, err := readFile(kernelModules); err == nil && !moduleListed(modules, "xt_TPROXY") {
 				reason = "module_not_loaded"
 			}

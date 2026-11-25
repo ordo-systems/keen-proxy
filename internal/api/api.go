@@ -102,6 +102,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("POST /api/diagnostics/check", s.auth(s.diagnosticCheck))
 	mux.Handle("GET /api/diagnostics/bundle", s.auth(s.supportBundle))
+	mux.Handle("GET /api/diagnostics/kernel-modules", s.auth(s.kernelModules))
+	mux.HandleFunc("POST /api/diagnostics/kernel-modules/{feature}/load", s.loadKernelModule)
 	mux.Handle("GET /api/diagnostics/tproxy", s.auth(s.tproxyReadiness))
 	mux.Handle("POST /api/diagnostics/tproxy/retry", s.auth(s.retryTProxy))
 	mux.Handle("GET /api/catalog", s.auth(s.catalog))
@@ -155,13 +157,15 @@ func (s *Server) lanOnly(next http.Handler) http.Handler {
 
 // tokenOK compares the bearer token or session cookie without trusting URL parameters.
 func (s *Server) tokenOK(r *http.Request) bool {
-	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if got == "" {
-		if c, err := r.Cookie(cookieName); err == nil {
-			got = c.Value
-		}
+	if got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "); got != "" {
+		return subtle.ConstantTimeCompare([]byte(got), []byte(s.Token)) == 1
 	}
-	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(s.Token)) == 1
+	return s.tokenCookieOK(r)
+}
+
+func (s *Server) tokenCookieOK(r *http.Request) bool {
+	c, err := r.Cookie(cookieName)
+	return err == nil && c.Value != "" && subtle.ConstantTimeCompare([]byte(c.Value), []byte(s.Token)) == 1
 }
 
 // trustedNet finds the configured token-exempt network containing the peer.

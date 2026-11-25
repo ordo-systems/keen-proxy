@@ -49,3 +49,17 @@ test('static demo never calls the router archive endpoint', async (t) => {
   await assert.rejects(demoAPI.diagnosticBundle(), /router/)
   assert.equal(fetch.mock.callCount(), 0)
 })
+
+test('module confirmation sends a token only on the load request, without a browser session', async (t) => {
+  const status = { guard: { state: 'registered' }, tproxy: { state: 'unknown' }, token_required: true }
+  const fetch = t.mock.method(globalThis, 'fetch', async () => Response.json(status))
+
+  assert.deepEqual(await api.loadKernelModule('guard', 'fixture-token'), status)
+  assert.equal(fetch.mock.calls.length, 1)
+  const [url, init] = fetch.mock.calls[0]!.arguments as unknown as [string, RequestInit]
+  assert.equal(url, '/api/diagnostics/kernel-modules/guard/load')
+  assert.equal(init.method, 'POST')
+  assert.equal(init.credentials, 'omit')
+  assert.equal(init.redirect, 'error')
+  assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer fixture-token')
+})

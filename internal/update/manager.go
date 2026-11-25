@@ -25,7 +25,7 @@ var (
 	ErrUnavailable = errors.New("updates require a managed installation")
 	ErrPreferences = errors.New("expected a router-local time in HH:MM format")
 	ErrTarget      = errors.New("the requested release is no longer available")
-	ErrBusy        = errors.New("an update is already running")
+	ErrBusy        = errors.New("update operation is busy; try again")
 )
 
 // Preferences schedules optional daily installation in the router's local time.

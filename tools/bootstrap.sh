@@ -6,8 +6,8 @@ umask 077
 
 fail() { printf 'KeenProxy: %s\n' "$*" >&2; exit 1; }
 usage() {
-    printf '%s\n' 'Usage: sh -s -- [--version vX.Y.Z] [--lite]' \
-        '       sh -s -- --version vX.Y.Z --expect-current vX.Y.Z [--lite]' \
+    printf '%s\n' 'Usage: sh -s -- [--version vX.Y.Z] [--lite] [--require-guard]' \
+        '       sh -s -- --version vX.Y.Z --expect-current vX.Y.Z [--lite] [--require-guard]' \
         '       sh -s -- --uninstall'
 }
 
@@ -59,12 +59,14 @@ version=
 expected_current=
 variant=full
 uninstall=0
+require_guard=0
 legacy_optout=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --version) [ "$#" -ge 2 ] && [ -n "$2" ] || fail 'missing --version value'; version=$2; shift ;;
         --expect-current) [ "$#" -ge 2 ] && [ -n "$2" ] || fail 'missing --expect-current value'; expected_current=$2; shift ;;
         --lite) variant=lite ;;
+        --require-guard) require_guard=1 ;;
         # Preserve the old updater/CLI input without installing a separate client.
         --without-trusttunnel) legacy_optout=1 ;;
         --uninstall) uninstall=1 ;;
@@ -73,7 +75,8 @@ while [ "$#" -gt 0 ]; do
     esac
     shift
 done
-if [ "$uninstall" = 1 ] && { [ -n "$version$expected_current" ] || [ "$variant" = lite ] || [ "$legacy_optout" = 1 ]; }; then
+if [ "$uninstall" = 1 ] && { [ -n "$version$expected_current" ] || [ "$variant" = lite ] ||
+    [ "$legacy_optout" = 1 ] || [ "$require_guard" = 1 ]; }; then
     fail '--uninstall cannot be combined with installation options'
 fi
 if [ -n "$expected_current" ] && [ -z "$version" ]; then
@@ -186,7 +189,11 @@ guard_rule() {
 
 find_forwarding_guard() {
     if [ -x "$guard4" ] && guard_rule "$guard4" -C >/dev/null 2>&1; then held4=1; fi
-    if [ -x "$guard6" ] && guard_rule "$guard6" -C >/dev/null 2>&1; then held6=1; fi
+    if [ ! -x "$guard6" ]; then
+        echo 'KeenProxy: warning: ip6tables unavailable; cannot check for an existing IPv6 forwarding guard. If an old guard remains, restore ip6tables and rerun the bootstrap.' >&2
+    elif guard_rule "$guard6" -C >/dev/null 2>&1; then
+        held6=1
+    fi
 }
 
 hold_forwarding() {
@@ -197,9 +204,6 @@ hold_forwarding() {
             break
         fi
     done
-    if [ "$ipv6_forwarding" = 1 ] && [ ! -x "$guard6" ]; then
-        fail 'IPv6 forwarding is enabled; install ip6tables before updating'
-    fi
     if [ "$platform" = openwrt ]; then
         for option in flow_offloading flow_offloading_hw; do
             case "$(uci -q get "firewall.@defaults[0].$option" 2>/dev/null || :)" in
@@ -210,17 +214,31 @@ hold_forwarding() {
             fail 'reload the OpenWrt firewall with flow offloading disabled before updating'
         fi
     fi
+    check_routing=1
+    added6=0
     if [ "$ipv6_forwarding" = 1 ] && [ "$held6" = 0 ]; then
-        guard_rule "$guard6" -I || fail 'could not block IPv6 forwarding; service left unchanged'
-        held6=1
-        if [ "$held4" = 0 ] && ! guard_rule "$guard4" -I; then
-            release_forwarding || :
-            fail 'could not block IPv4 forwarding; service left unchanged'
+        if [ -x "$guard6" ] && guard_rule "$guard6" -I; then
+            held6=1
+            added6=1
+        elif [ "$require_guard" = 1 ]; then
+            fail 'could not block IPv6 forwarding; service left unchanged'
+        else
+            echo 'KeenProxy: warning: could not block IPv6 forwarding; continuing without a confirmed IPv6 guard' >&2
         fi
-    elif [ "$held4" = 0 ]; then
-        guard_rule "$guard4" -I || fail 'could not block IPv4 forwarding; service left unchanged'
     fi
-    held4=1
+    if [ "$held4" = 0 ]; then
+        if guard_rule "$guard4" -I; then
+            held4=1
+        elif [ "$require_guard" = 1 ]; then
+            # Undo only the IPv6 guard installed by this attempt.
+            if [ "$added6" = 1 ]; then
+                release_forwarding || fail 'could not block IPv4 forwarding or remove the new IPv6 guard; service left unchanged'
+            fi
+            fail 'could not block IPv4 forwarding; service left unchanged'
+        else
+            echo 'KeenProxy: warning: could not block IPv4 forwarding; continuing without a confirmed IPv4 guard' >&2
+        fi
+    fi
 }
 
 release_forwarding() {
@@ -236,20 +254,30 @@ release_forwarding() {
 
 start_release() {
     service_action start || return 1
-    [ "$held4$held6" != 00 ] || return 0
+    [ "$check_routing$held4$held6" != 000 ] || return 0
+    wait_for_interception
+}
+
+wait_for_interception() {
     attempts=5
     while [ "$attempts" -gt 0 ]; do
-        if [ -r "$state/startup-state" ]; then
+        # Apply can restore routing without rewriting the startup marker.
+        if [ "${1:-}" != running ] && [ -r "$state/startup-state" ]; then
             case "$(cat "$state/startup-state")" in 'management-only '*) break ;; esac
         fi
         # Older controllers return at the DNS jump. The daemon restores the
         # UDP chain before attaching any jumps, and attaches its jump last.
         if "$guard4" -w -t nat -C PREROUTING -j KEENPROXY_DNS >/dev/null 2>&1 &&
-            "$guard4" -w -t nat -C PREROUTING -j KEENPROXY_TCP >/dev/null 2>&1 &&
-            mangle=$("$guard4" -w -t mangle -S 2>/dev/null); then
-            if ! printf '%s\n' "$mangle" | grep -Fxq -- '-N KEENPROXY_UDP' ||
-                printf '%s\n' "$mangle" | grep -Fxq -- '-A PREROUTING -j KEENPROXY_UDP'; then
-                return 0
+            "$guard4" -w -t nat -C PREROUTING -j KEENPROXY_TCP >/dev/null 2>&1; then
+            if [ "${1:-}" = running ] && [ "$planned_udp" = 0 ]; then return 0; fi
+            if mangle=$("$guard4" -w -t mangle -S 2>/dev/null); then
+                if printf '%s\n' "$mangle" | grep -Fxq -- '-A PREROUTING -j KEENPROXY_UDP'; then
+                    return 0
+                fi
+                if { [ "${1:-}" != running ] || [ "$planned_udp" = unknown ]; } &&
+                    ! printf '%s\n' "$mangle" | grep -Fxq -- '-N KEENPROXY_UDP'; then
+                    return 0
+                fi
             fi
         fi
         attempts=$((attempts - 1))
@@ -471,6 +499,8 @@ guard4="$prefix/$firewall_path/iptables"
 guard6="$prefix/$firewall_path/ip6tables"
 held4=0
 held6=0
+check_routing=0
+planned_udp=unknown
 trap finish EXIT
 trap 'exit 1' HUP INT TERM
 if [ "$platform" = openwrt ]; then
@@ -526,8 +556,19 @@ if [ ! -f "$config" ]; then
     config_source="$work/config.yaml"
 fi
 chmod 755 "$work/$asset"
-# Dry-run output can contain connection credentials. Keep it off the console.
-"$work/$asset" -dry-run -config "$config_source" >/dev/null 2>&1 || fail 'candidate binary or configuration failed validation'
+# Inspect only the plan's jump list. Dry-run can print connection credentials,
+# so do not log or save it. The last line carries the exit status across POSIX sh.
+planned_udp=$(
+    { "$work/$asset" -dry-run -config "$config_source" 2>/dev/null && printf '\n# KeenProxy validation complete\n'; } |
+        awk '
+            $0 == "# jumps" { jumps = 1 }
+            jumps && /^iptables[[:space:]].*[[:space:]]-j[[:space:]]+KEENPROXY_UDP[[:space:]]*$/ { udp = 1 }
+            END {
+                if ($0 != "# KeenProxy validation complete") exit 1
+                if (jumps) print udp + 0
+                else print "unknown"
+            }'
+) || fail 'candidate binary or configuration failed validation'
 
 if [ -e "$service" ] || [ -L "$service" ]; then
     managed_service || fail 'existing init script is not managed by this installer'
@@ -586,8 +627,10 @@ if [ "$changed" = 1 ]; then
     fi
     restart_previous=0
     replacing=0
-elif [ "$was_running" = 0 ] || [ "$held4$held6" != 00 ]; then
+elif [ "$was_running" = 0 ]; then
     start_release || fail 'service failed to start with routing'
+else
+    wait_for_interception running || fail 'running service does not have active routing'
 fi
 release_forwarding || fail 'could not release forwarding guard'
 printf 'KeenProxy %s (%s) installed. Configuration: %s\n' "$tag" "$asset" "$config"

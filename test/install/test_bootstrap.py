@@ -449,6 +449,12 @@ done
         self.assertIn('failed validation', result.stderr)
         self.assertNotIn('synthetic-password', result.stdout + result.stderr)
 
+    def test_successful_dry_run_does_not_print_credentials(self):
+        self.release('v1.2.3', dry_run='echo synthetic-password; echo "# jumps"; exit 0')
+        result = self.install()
+        self.assert_panel_access(result)
+        self.assertNotIn('synthetic-password', result.stdout + result.stderr)
+
     def test_upgrade_refuses_to_replace_files_during_service_action(self):
         first = self.release('v1.2.3')
         self.assertEqual(self.install().returncode, 0)

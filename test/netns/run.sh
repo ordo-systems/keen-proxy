@@ -541,6 +541,7 @@ ip -n wan addr add 2001:db8:2::2/64 dev eth0 nodad
 ip -n client -6 route add default via 2001:db8:1::1
 ip -n wan -6 route add default via 2001:db8:2::1
 echo 1 >/proc/sys/net/ipv6/conf/all/forwarding
+PYTHONPATH=/work/test/install python3 -B -m unittest test_update_guard
 PYTHONPATH=/work/test/install python3 -B /work/test/netns/update_guard.py
 ok "release replacement and rollback protect IPv4 and IPv6 forwarding"
 

@@ -5,6 +5,7 @@ const ru = {
   browserDemo: {
     notice: 'Демо · синтетические данные · изменения сбрасываются при перезагрузке · сетевые проверки не выполняются.',
     documentation: 'Документация',
+    releaseHistory: 'История релизов',
   },
   ui: redesignRu,
   features: {

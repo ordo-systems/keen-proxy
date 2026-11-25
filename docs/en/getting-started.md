@@ -135,7 +135,7 @@ Installed guard rules are removed once interception is active in the new or rest
 
 If `ip6tables` is unavailable, the installer cannot tell whether an earlier update left an IPv6 guard in place. If the guard remains, restore working `ip6tables` and rerun the bootstrap from the LAN.
 
-Rerunning the bootstrap with the same release while KeenProxy is running does not restart it. If interception is inactive, the command exits with `running service does not have active routing`. The panel may still be reachable in `management-only` mode, for example when TPROXY is unavailable. From the LAN, fix and apply the interception settings, then rerun the bootstrap with the working release. Applying settings alone does not remove a guard left by the installer.
+Rerunning the bootstrap with the same release and build variant does not restart a running service if the installed files are unchanged. If interception is inactive, the command exits with `running service does not have active routing`. The panel may still be reachable in `management-only` mode, for example when TPROXY is unavailable. From the LAN, fix and apply the interception settings, then rerun the bootstrap with the working release. Applying settings alone does not remove a guard left by the installer.
 
 **Roll back** reinstalls the previous published version and switches off automatic installation. It needs access to GitHub and keeps the existing configuration and token. The installer rejects an incompatible configuration before restarting the service. Rolling back to a version released before panel updates also restores that version's earlier panel. Use the command-line installer to upgrade again.
 

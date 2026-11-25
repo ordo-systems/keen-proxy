@@ -21,11 +21,11 @@ jobs:
   checks:
     uses: ./.github/workflows/ci.yml
     needs: version
-    if: ${{ !cancelled() && (needs.version.result == 'success' || (needs.version.result == 'skipped' && github.ref != 'refs/heads/main')) }}
+    if: ${{ !cancelled() }}
     with:
-      # Recovery of pre-existing public tags retains the original main CI prerequisite.
-      source_ref: ${{ needs.version.outputs.recovery == 'true' && github.sha || needs.version.outputs.revision || github.sha }}
-      skip_payload_builds: ${{ needs.version.outputs.tag != '' && needs.version.outputs.recovery == 'false' }}
+      # Keep full event-commit CI when no new draft was selected successfully.
+      source_ref: ${{ needs.version.result == 'success' && needs.version.outputs.recovery == 'false' && needs.version.outputs.revision || github.sha }}
+      skip_payload_builds: ${{ needs.version.result == 'success' && needs.version.outputs.tag != '' && needs.version.outputs.recovery == 'false' }}
 
   version:
     if: github.ref == 'refs/heads/main'

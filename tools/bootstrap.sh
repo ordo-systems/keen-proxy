@@ -253,11 +253,16 @@ wait_for_interception() {
         # Older controllers return at the DNS jump. The daemon restores the
         # UDP chain before attaching any jumps, and attaches its jump last.
         if "$guard4" -w -t nat -C PREROUTING -j KEENPROXY_DNS >/dev/null 2>&1 &&
-            "$guard4" -w -t nat -C PREROUTING -j KEENPROXY_TCP >/dev/null 2>&1 &&
-            mangle=$("$guard4" -w -t mangle -S 2>/dev/null); then
-            if ! printf '%s\n' "$mangle" | grep -Fxq -- '-N KEENPROXY_UDP' ||
-                printf '%s\n' "$mangle" | grep -Fxq -- '-A PREROUTING -j KEENPROXY_UDP'; then
-                return 0
+            "$guard4" -w -t nat -C PREROUTING -j KEENPROXY_TCP >/dev/null 2>&1; then
+            if [ "${1:-}" = running ] && [ "$planned_udp" = 0 ]; then return 0; fi
+            if mangle=$("$guard4" -w -t mangle -S 2>/dev/null); then
+                if printf '%s\n' "$mangle" | grep -Fxq -- '-A PREROUTING -j KEENPROXY_UDP'; then
+                    return 0
+                fi
+                if { [ "${1:-}" != running ] || [ "$planned_udp" = unknown ]; } &&
+                    ! printf '%s\n' "$mangle" | grep -Fxq -- '-N KEENPROXY_UDP'; then
+                    return 0
+                fi
             fi
         fi
         attempts=$((attempts - 1))
@@ -480,6 +485,7 @@ guard6="$prefix/$firewall_path/ip6tables"
 held4=0
 held6=0
 check_routing=0
+planned_udp=unknown
 trap finish EXIT
 trap 'exit 1' HUP INT TERM
 if [ "$platform" = openwrt ]; then
@@ -535,8 +541,19 @@ if [ ! -f "$config" ]; then
     config_source="$work/config.yaml"
 fi
 chmod 755 "$work/$asset"
-# Dry-run output can contain connection credentials. Keep it off the console.
-"$work/$asset" -dry-run -config "$config_source" >/dev/null 2>&1 || fail 'candidate binary or configuration failed validation'
+# Inspect only the plan's jump list. Dry-run can print connection credentials,
+# so do not log or save it. The last line carries the exit status across POSIX sh.
+planned_udp=$(
+    { "$work/$asset" -dry-run -config "$config_source" 2>/dev/null && printf '\n# KeenProxy validation complete\n'; } |
+        awk '
+            $0 == "# jumps" { jumps = 1 }
+            jumps && /^iptables[[:space:]].*[[:space:]]-j[[:space:]]+KEENPROXY_UDP[[:space:]]*$/ { udp = 1 }
+            END {
+                if ($0 != "# KeenProxy validation complete") exit 1
+                if (jumps) print udp + 0
+                else print "unknown"
+            }'
+) || fail 'candidate binary or configuration failed validation'
 
 if [ -e "$service" ] || [ -L "$service" ]; then
     managed_service || fail 'existing init script is not managed by this installer'

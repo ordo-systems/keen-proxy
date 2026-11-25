@@ -20,7 +20,7 @@ case "$*" in
         [ -f "$running" ] && ! grep -Fxq '# parked' "$KEENPROXY_PREFIX/bin/keenproxy" ;;
     *'-t mangle -S')
         if grep -Fxq '# unreadable mangle' "$KEENPROXY_PREFIX/bin/keenproxy"; then exit 4; fi
-        if [ -f "$KEENPROXY_PREFIX/tproxy" ]; then
+        if [ -f "$KEENPROXY_PREFIX/tproxy" ] || [ -f "$KEENPROXY_PREFIX/detached-udp" ]; then
             echo '-N KEENPROXY_UDP'
             if [ -f "$KEENPROXY_PREFIX/udp-ready" ]; then echo '-A PREROUTING -j KEENPROXY_UDP'; fi
         fi ;;
@@ -31,7 +31,10 @@ case "$*" in
     *'-D FORWARD '*'-j DROP')
         if [ ! -f "$running" ] ||
             { [ -f "$KEENPROXY_PREFIX/tproxy" ] && [ ! -f "$KEENPROXY_PREFIX/udp-ready" ]; }; then
-            touch "$KEENPROXY_PREFIX/forwarding-exposed"
+            case "$family" in
+                4) touch "$KEENPROXY_PREFIX/forwarding-exposed" ;;
+                6) touch "$KEENPROXY_PREFIX/forwarding-exposed-6" ;;
+            esac
         fi
         rm -f "$blocked" ;;
     *) exit 2 ;;
@@ -40,9 +43,16 @@ esac
         for name in ('iptables', 'ip6tables'):
             self.executable(self.prefix / 'sbin' / name, firewall)
         self.command('sleep', 'touch "$KEENPROXY_PREFIX/udp-ready"')
-        self.old_asset = self.release('v1.2.3', stop='''
+        self.old_asset = self.release('v1.2.3', dry_run='''
+        echo '# jumps'
+        if [ -f "$KEENPROXY_PREFIX/planned-tproxy" ]; then
+            echo 'iptables -t mangle -I PREROUTING 1 -j KEENPROXY_UDP'
+        fi
+        ''', stop='''
         [ -f "$KEENPROXY_PREFIX/forwarding-blocked-4" ] ||
             touch "$KEENPROXY_PREFIX/forwarding-exposed"
+        [ -f "$KEENPROXY_PREFIX/forwarding-blocked-6" ] ||
+            touch "$KEENPROXY_PREFIX/forwarding-exposed-6"
         rm -f "$state"
         ''')
         self.record_starts(self.old_asset)
@@ -143,6 +153,21 @@ esac
         self.assertEqual(self.binary.read_bytes(), candidate.read_bytes())
         self.assert_released()
 
+    def test_ipv4_guard_failure_preserves_ipv6_protection(self) -> None:
+        self.require_ipv6_forwarding()
+        candidate = self.release('v1.2.4')
+        (self.prefix / 'firewall-failure-4').touch()
+
+        result = self.install('--version', 'v1.2.4')
+
+        self.assert_panel_access(result)
+        self.assertIn('could not block IPv4 forwarding', result.stderr)
+        self.assertNotIn('could not block IPv6 forwarding', result.stderr)
+        self.assertEqual(self.binary.read_bytes(), candidate.read_bytes())
+        self.assertTrue((self.prefix / 'forwarding-exposed').exists())
+        self.assertFalse((self.prefix / 'forwarding-exposed-6').exists())
+        self.assertFalse(any(rule.exists() for rule in self.blocked.values()))
+
     def test_missing_ip6tables_warns_that_previous_guard_cannot_be_checked(self) -> None:
         self.require_ipv6_forwarding()
         candidate = self.release('v1.2.4')
@@ -186,9 +211,27 @@ esac
     def test_same_version_retry_accepts_routing_restored_after_startup(self) -> None:
         state = self.prefix / 'var/run/keenproxy/startup-state'
         state.write_text('management-only 1234\n')
+        (self.prefix / 'detached-udp').touch()
+        self.command('sleep', 'exit 0')
+        self.blocked[4].touch()  # Left behind by a previous failed rollback.
 
         self.assert_panel_access(self.install('--version', 'v1.2.3'))
 
+        self.assertEqual((self.prefix / 'starts').read_text().splitlines(), ['v1.2.3'])
+        self.assert_released()
+
+    def test_same_version_retry_requires_planned_tproxy_jump(self) -> None:
+        (self.prefix / 'planned-tproxy').touch()
+
+        result = self.install('--version', 'v1.2.3')
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('running service does not have active routing', result.stderr)
+        self.assertEqual((self.prefix / 'starts').read_text().splitlines(), ['v1.2.3'])
+
+        (self.prefix / 'tproxy').touch()
+        (self.prefix / 'udp-ready').touch()
+        self.assert_panel_access(self.install('--version', 'v1.2.3'))
         self.assertEqual((self.prefix / 'starts').read_text().splitlines(), ['v1.2.3'])
 
     def test_update_still_rolls_back_without_guard_if_routing_fails(self) -> None:

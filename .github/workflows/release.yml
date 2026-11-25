@@ -207,8 +207,16 @@ jobs:
             cp tools/keenproxy.openwrt dist/keenproxy.openwrt
             service_assets+=(keenproxy.openwrt)
           fi
-          cp LICENSE THIRD_PARTY_NOTICES.md dist/
+          notices=(LICENSE THIRD_PARTY_NOTICES.md)
+          if [ -f PRESET_SOURCES.md ]; then
+            notices+=(PRESET_SOURCES.md)
+          fi
+          cp "${notices[@]}" dist/
           cp -R LICENSES dist/
+          if [ -f internal/catalog/presets.version ]; then
+            cp --parents internal/catalog/presets.version dist/
+            notices+=(internal/catalog/presets.version)
+          fi
           {
             printf 'Version: %s\nCommit: %s\n' "$RELEASE_TAG" "$(git rev-parse HEAD)"
             go version
@@ -219,7 +227,7 @@ jobs:
           } > dist/BUILD_INFO.txt
           tar --sort=name --mtime="$(git show -s --format=%cI HEAD)" \
             --owner=0 --group=0 --numeric-owner -cf - \
-            -C dist LICENSE THIRD_PARTY_NOTICES.md LICENSES \
+            -C dist "${notices[@]}" LICENSES \
             | gzip -n > dist/keenproxy-notices.tar.gz
           cd dist
           sha256sum keenproxy-linux-* keenproxy-lite-linux-* keenproxy-source.tar.gz \

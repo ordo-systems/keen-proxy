@@ -157,11 +157,15 @@ See [Country rules](routing.md#country-rules) for an illustrated setup, country 
 
 ## 4. Try a preset
 
-Open **Rules → Presets**, select a target, then preview a collection. Inspect the added/removed entries and accept it into the draft. Presets can be enabled, disabled, or removed. The static demo includes one original example collection; it does not redistribute the full community catalog.
+Open **Rules → Presets**. Pick a category on the left (in the selector on phones), or search the current category by service, domain, or IP range. Click a preset name to inspect its entries. Personal lists are under **Local presets**.
 
-The catalog shows domain lists without resolving them. KeenProxy resolves IPs for enabled presets after **Apply**. Enable **Update with new app versions** to adopt changes to the bundled preset after upgrading KeenProxy. To block ads or other domains through DNS, see [DNS filters](routing.md#dns-filters).
+Choose a route for new rules, click **Preview**, inspect the changes, then load them into the draft. For a preset already in the draft's rules, **Open rule** reveals its route, switches, and update preview. Nothing changes on the router until you click **Apply**. The static demo includes one original example collection, not the full catalog.
 
-Updating a preset preserves per-entry off states separately from deletions, including entries that disappear from one preset revision and return later. Disabling a rule does not remove it from the preset or discard your saved value.
+The catalog shows domain lists without resolving them. KeenProxy resolves IPs for enabled presets after **Apply**. Enable **Update with new app versions** to adopt changes to the bundled preset after upgrading KeenProxy. Rebuilt presets record their pinned sources and licenses in `PRESET_SOURCES.md`. To block ads or other domains through DNS, see [DNS filters](routing.md#dns-filters).
+
+Updating a preset preserves per-entry off states separately from deletions, including entries that disappear from one preset revision and return later. New suffixes that would overlap a disabled or removed entry are not added to the group. Disabling a rule does not remove it from the preset or discard your saved value.
+
+Upgrading from 0.9.3 does not require editing YAML or fetching a catalog on the router. Existing preset IDs are retained. Groups with automatic preset updates turned off keep their entries; opted-in groups adopt the new bundled contents while preserving manual entries and exclusions.
 
 ### Exchange resource lists { #resource-lists }
 

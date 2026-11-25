@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Accept `on`/`off` in AmneziaWG profiles alongside `true`/`false` and `1`/`0`.
 - Embed the complete preset catalog from a pinned KeenProxy Presets release; no downloads at build time or on the router.
 - Present presets as a searchable rules-style list with a category sidebar, inline rule controls, and a separate section for local presets.
 - Keep preset updates from reopening disabled routing suffixes; limit imported government, social, and operator lists to relevant routing scopes.

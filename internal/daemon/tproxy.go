@@ -26,6 +26,35 @@ func (d *Daemon) TProxyReadiness(ctx context.Context) TProxyDiagnostic {
 	return TProxyDiagnostic{TProxyReadiness: readiness, StartupBlocked: d.startupBlocked != nil}
 }
 
+// KernelModuleDiagnostics reports firmware capabilities without changing routing.
+func (d *Daemon) KernelModuleDiagnostics(ctx context.Context) netfilter.KernelModules {
+	return d.opt.Firewall.KernelModuleDiagnostics(ctx)
+}
+
+// FirmwareModuleLoadAction identifies module load attempts in local and exported audits.
+const FirmwareModuleLoadAction = "Firmware module load"
+
+// LoadKernelModule serializes an explicit recovery action with Apply and shutdown.
+// The kernel's synchronous module initialization cannot be canceled.
+func (d *Daemon) LoadKernelModule(ctx context.Context, feature string) error {
+	if netfilter.FirmwareModuleName(feature) == "" {
+		return netfilter.ErrModuleNotLoadable
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := d.applyAdmissionLocked(ctx); err != nil {
+		return err
+	}
+	err := d.opt.Firewall.LoadKernelModule(ctx, feature)
+	by, from := applyActor(ctx)
+	if err != nil {
+		d.audit(by, FirmwareModuleLoadAction, feature, "error", err.Error()+from)
+	} else {
+		d.audit(by, FirmwareModuleLoadAction, feature, "ok", from)
+	}
+	return err
+}
+
 // RetrySavedTProxy activates the configuration retained at blocked startup,
 // without saving the configuration or rotating its backup.
 func (d *Daemon) RetrySavedTProxy(ctx context.Context) error {

@@ -1,5 +1,6 @@
 import type { Connection, DiagnosticReport, Catalog, FeatureStatus, DNSCheck, Config, GeoLookup, GeoStatus, Device, DomainStatus, Session, HostStat, JournalKind, JournalPage, LinkPreview, StatsSnapshot, Status } from './types'
 import type { TProxyReadiness, UpdatePreferences, UpdateSelection, UpdateStatus } from './types'
+import type { KernelFeature, KernelModuleDiagnostics } from './types'
 import type { ResourceExport, ResourceFormat, ResourceList, ResourcePreview } from './resourceExchange'
 import { ApiError } from './apiError.ts'
 
@@ -55,6 +56,8 @@ async function diagnosticBundle(): Promise<Blob> {
 export const api = {
  diagnosticCheck:(connection:string)=>request<DiagnosticReport>('POST','/api/diagnostics/check',{connection}),
  diagnosticBundle,
+ kernelModules:()=>request<KernelModuleDiagnostics>('GET','/api/diagnostics/kernel-modules'),
+ loadKernelModule:(feature:KernelFeature)=>request<KernelModuleDiagnostics>('POST',`/api/diagnostics/kernel-modules/${feature}/load`),
  tproxyReadiness:()=>request<TProxyReadiness>('GET','/api/diagnostics/tproxy'),
  retryTProxy: async (): Promise<void> => { await send('POST', '/api/diagnostics/tproxy/retry') },
  catalog:()=>request<Catalog>('GET','/api/catalog'),

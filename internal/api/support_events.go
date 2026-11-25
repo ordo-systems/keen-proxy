@@ -5,7 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ordo-systems/keen-proxy/internal/daemon"
 	"github.com/ordo-systems/keen-proxy/internal/journal"
+	"github.com/ordo-systems/keen-proxy/internal/netfilter"
 )
 
 func known(value string, allowed ...string) string {
@@ -35,12 +37,17 @@ func supportEntry(kind journal.Kind, e journal.Entry, alias supportAlias) journa
 			"Configuration applied but not saved", "Device addresses updated", "Interception rules restored",
 			"Interception rules not restored", "Direct DNS fallback", "Restore selected DNS route",
 			"IP database updated", "IP database update failed", "DNS query blocked",
-			"Switch to fallback", "No working connection", "Return to primary", "Return to higher priority")
+			"Switch to fallback", "No working connection", "Return to primary", "Return to higher priority",
+			daemon.FirmwareModuleLoadAction)
 		if safe.Action == "" {
 			safe.Action = "Other audit event"
 		}
 		safe.Result = known(e.Result, "ok", "info", "warn", "error")
-		safe.Target = supportAuditTarget(e.Target, alias)
+		if safe.Action != daemon.FirmwareModuleLoadAction {
+			safe.Target = supportAuditTarget(e.Target, alias)
+		} else if netfilter.FirmwareModuleName(e.Target) != "" {
+			safe.Target = e.Target
+		}
 		safe.Details = failureClass(e.Details)
 		safe.Firewall = supportFirewall(e)
 		safe.FirewallApply = supportFirewallApply(e)

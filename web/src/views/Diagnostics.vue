@@ -24,6 +24,7 @@ import { diagnosticErrorKey, sameAppliedConnection, safeDiagnosticsReport } from
 import type { DiagnosticReport, FeatureStatus } from '../types'
 import ConnectionHealth from '../components/ConnectionHealth.vue'
 import ConnectionChecks from '../components/ConnectionChecks.vue'
+import KernelModulesPanel from '../components/KernelModulesPanel.vue'
 const { t, locale } = useI18n(),
   route = useRoute()
 const cfg = computed(() => store.state.config!)
@@ -280,6 +281,7 @@ async function downloadBundle() {
         {{ t('ui.bundleFailed') }}
       </NAlert>
     </section>
+    <KernelModulesPanel v-if="features && !demo" />
     <div class="split-view">
       <section>
         <div class="section-head">

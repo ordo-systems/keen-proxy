@@ -324,6 +324,18 @@ export interface TProxyReadiness {
   startup_blocked?: boolean
 }
 
+export type KernelFeature = 'guard' | 'tproxy'
+export interface KernelModuleStatus {
+  state: 'registered' | 'unloaded' | 'not_found' | 'loaded_unregistered' | 'unknown'
+  can_load?: boolean
+}
+type GuardFamilyStatus = 'registered' | 'unregistered' | 'unknown' | 'not_required'
+export interface KernelModuleDiagnostics {
+  guard: KernelModuleStatus & { ipv4?: GuardFamilyStatus; ipv6?: GuardFamilyStatus }
+  tproxy: KernelModuleStatus
+  token_required: boolean
+}
+
 // Country database entry: a built-in referenced by ID, or a custom HTTPS URL or local MMDB.
 // List order is lookup priority; the first enabled database that knows an address wins.
 // kind 'category' marks a custom database of labels used by group categories.

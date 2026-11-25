@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestEntwareUpdaterRequiresSupportedManagedPaths(t *testing.T) {
@@ -77,6 +79,12 @@ exit 1
 	if err := m.startWorker(current, "v0.4.0", script); !errors.Is(err, ErrBusy) {
 		t.Fatalf("second install should be blocked, got %v", err)
 	}
+	if err := restarted.WithoutInstall(func() error {
+		t.Error("maintenance action ran concurrently with detached installer")
+		return nil
+	}); !errors.Is(err, ErrBusy) {
+		t.Fatalf("maintenance action should be blocked, got %v", err)
+	}
 	if err := os.WriteFile(gate, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +96,30 @@ exit 1
 	awaitWorkerResult(t, restarted, "failed", "v0.5.0")
 }
 
+func TestMaintenanceReservationExcludesWorkerAndReleasesOnError(t *testing.T) {
+	m := &Manager{dir: t.TempDir(), shell: "/bin/sh"}
+	current := installState{Current: "v0.3.0", Variant: "lite"}
+	failed := errors.New("maintenance failed")
+	if err := os.WriteFile(filepath.Join(m.dir, "job"), []byte("running v0.4.0\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.WithoutInstall(func() error {
+		if job := m.job(); job == nil || job.State != "failed" {
+			t.Errorf("interrupted update appeared active while maintenance held the lock: %+v", job)
+		}
+		if err := m.startWorker(current, "v0.4.0", []byte("exit 0\n")); !errors.Is(err, ErrBusy) {
+			t.Errorf("installer should be blocked during maintenance, got %v", err)
+		}
+		return failed
+	}); !errors.Is(err, failed) {
+		t.Fatalf("expected maintenance error, got %v", err)
+	}
+	if err := m.startWorker(current, "v0.4.0", []byte("exit 0\n")); err != nil {
+		t.Fatalf("maintenance reservation leaked: %v", err)
+	}
+	awaitWorkerResult(t, m, "success", "v0.4.0")
+}
+
 func awaitWorkerResult(t *testing.T, m *Manager, want, target string) {
 	t.Helper()
 	until := time.Now().Add(4 * time.Second)
@@ -95,7 +127,7 @@ func awaitWorkerResult(t *testing.T, m *Manager, want, target string) {
 		job := m.job()
 		if job != nil && job.State == want && job.Target == target {
 			// The status write precedes the outer shell closing its lock.
-			if f, err := m.lock(); err == nil {
+			if f, err := m.lock(unix.LOCK_SH); err == nil {
 				f.Close()
 				return
 			}

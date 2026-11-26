@@ -140,6 +140,36 @@ esac
         self.assertTrue((self.prefix / 'forwarding-exposed').exists())
         self.assertFalse(any(rule.exists() for rule in self.blocked.values()))
 
+    def test_fallback_update_still_obeys_forwarding_guard_policy(self) -> None:
+        candidate = self.release('v0.10.2', dry_run='''
+if [ -f "$KEENPROXY_PREFIX/preflight-tried" ]; then exit 0; fi
+touch "$KEENPROXY_PREFIX/preflight-tried"
+exit 1
+''')
+        (candidate.parent / 'bootstrap.sh').write_bytes(self.bootstrap_script.read_bytes())
+        self.record_starts(candidate)
+        self.reject_guards()
+
+        args = ('--version', 'v0.10.2', '--expect-current', 'v1.2.3')
+        denied = self.install(*args, '--require-guard')
+        self.assertNotEqual(denied.returncode, 0)
+        self.assertIn('retrying with the bootstrap from release v0.10.2', denied.stderr)
+        self.assertRegex(denied.stderr, r'could not block IPv[46] forwarding; service left unchanged')
+        self.assertEqual(self.binary.read_bytes(), self.old)
+        self.assertTrue(self.running.exists())
+        self.assertEqual((self.prefix / 'starts').read_text().splitlines(), ['v1.2.3'])
+        self.assert_released()
+
+        (self.prefix / 'preflight-tried').unlink()
+        continued = self.install(*args)
+        self.assert_panel_access(continued)
+        self.assertIn('retrying with the bootstrap from release v0.10.2', continued.stderr)
+        self.assertIn('could not block IPv4 forwarding', continued.stderr)
+        self.assertEqual(self.binary.read_bytes(), candidate.read_bytes())
+        self.assertEqual((self.prefix / 'starts').read_text().splitlines(), ['v1.2.3', 'v0.10.2'])
+        self.assertTrue(self.running.exists())
+        self.assertFalse(any(rule.exists() for rule in self.blocked.values()))
+
     def test_require_guard_aborts_before_restart_and_releases_new_ipv6_guard(self) -> None:
         self.release('v1.2.4')
         (self.prefix / 'firewall-failure-4').touch()

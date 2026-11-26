@@ -25,6 +25,35 @@ def release_step(name):
     return textwrap.dedent('\n'.join(lines[start:end]))
 
 
+class ReleaseBootstrapContractTest(unittest.TestCase):
+    def test_first_tag_with_bootstrap_is_v0_10_2(self):
+        boundary = r'''
+git() {
+    case "$1" in
+        rev-parse) printf '%s\n' "$RELEASE_REVISION" ;;
+        cat-file) return 0 ;;
+        merge-base) return 1 ;;
+        *) return 2 ;;
+    esac
+}
+'''
+        contract = release_step('Check version and select verification contract')
+        for tag, expected in (('v0.10.1', 'false'), ('v0.10.2', 'true'), ('v0.11.0', 'true')):
+            with self.subTest(tag=tag), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / 'tools').mkdir()
+                for name in ('bootstrap.sh', 'S99keenproxy'):
+                    (root / 'tools' / name).touch()
+                (root / 'version.txt').write_text(tag[1:] + '\n')
+                output = root / 'outputs'
+                result = subprocess.run(['bash', '-ec', boundary + contract], cwd=root,
+                                        env=dict(os.environ, RELEASE_TAG=tag, RELEASE_REVISION='a' * 40,
+                                                 RECOVERY='false', GITHUB_OUTPUT=str(output)),
+                                        capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('bootstrap=' + expected, output.read_text().splitlines())
+
+
 @unittest.skipUnless(sys.platform == 'linux', 'release packaging requires GNU tar')
 class ReleaseAssetsTest(unittest.TestCase):
     def test_release_package_preserves_platform_asset_boundary(self):
@@ -50,6 +79,9 @@ class ReleaseAssetsTest(unittest.TestCase):
                 else:
                     # An old source tag must not publish a stale native output.
                     (dist / 'keenproxy.openwrt').write_text('stale output\n')
+                (tools / 'bootstrap.sh').write_text('tagged bootstrap\n')
+                if not with_sources:
+                    (dist / 'bootstrap.sh').write_text('stale output\n')
                 binaries = {f'keenproxy-{variant}linux-{arch}'
                             for variant in ('', 'lite-')
                             for arch in ('amd64', '386', 'armv5', 'arm64', 'mipsle', 'mipsbe')}
@@ -78,6 +110,7 @@ make() { printf 'fixture protocol tags\n'; }
 '''
                 package = release_step('Package source, notices, and build identity')
                 result = subprocess.run(['bash', '-ec', boundary + '\n' + package],
+                                        env=dict(os.environ, RELEASE_BOOTSTRAP=str(with_sources).lower()),
                                         cwd=root, capture_output=True, text=True, timeout=20)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 with tarfile.open(dist / 'keenproxy-notices.tar.gz') as notices:
@@ -96,6 +129,11 @@ make() { printf 'fixture protocol tags\n'; }
                                        'keenproxy-notices.tar.gz', 'BUILD_INFO.txt'}
                 if native:
                     expected.add('keenproxy.openwrt')
+                if with_sources:
+                    expected.add('bootstrap.sh')
+                    self.assertEqual((dist / 'bootstrap.sh').read_bytes(), (tools / 'bootstrap.sh').read_bytes())
+                else:
+                    self.assertFalse((dist / 'bootstrap.sh').exists())
                 self.assertEqual(set(checksums), expected)
 
 
@@ -115,7 +153,7 @@ class ReleasePublicationTest(unittest.TestCase):
             for variant in ('', 'lite-')
             for arch in ('amd64', '386', 'armv5', 'arm64', 'mipsle', 'mipsbe')
         } | {'keenproxy-source.tar.gz', 'keenproxy-notices.tar.gz', 'install.sh',
-             'S99keenproxy', 'keenproxy.openwrt', 'BUILD_INFO.txt'}
+             'S99keenproxy', 'keenproxy.openwrt', 'bootstrap.sh', 'BUILD_INFO.txt'}
         self.revision = 'a' * 40
         for name in self.names:
             (self.local / name).write_text(name + '\n')
@@ -175,6 +213,7 @@ source "$PUBLISH_SCRIPT" "$TEST_ROOT/dist"
         env = dict(os.environ, PUBLISH_SCRIPT=str(PUBLISH), TEST_ROOT=str(self.root),
                    RELEASE_REVISION=self.revision, RELEASE_RECOVERY=str(recovery).lower(),
                    RELEASE_NATIVE=str(not historical).lower(),
+                   RELEASE_BOOTSTRAP=str(not historical).lower(),
                    RELEASE_ENTWARE_CONTROLLER=str(not historical).lower(),
                    RELEASE_ARCHITECTURES='arm64 mipsle' if historical else 'amd64 386 armv5 arm64 mipsle mipsbe',
                    FAILED_UPLOAD=failed_upload, TAG_MOVED=str(tag_moved).lower(),
@@ -216,6 +255,7 @@ source "$PUBLISH_SCRIPT" "$TEST_ROOT/dist"
         historical = {name for name in self.names
                       if not name.endswith(('-386', '-amd64', '-armv5', '-mipsbe', '.openwrt'))}
         historical.remove('S99keenproxy')
+        historical.remove('bootstrap.sh')
         checksums = self.local / 'SHA256SUMS'
         checksums.write_text(''.join(line + '\n' for line in checksums.read_text().splitlines()
                                      if line.split()[1] in historical))

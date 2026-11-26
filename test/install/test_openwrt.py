@@ -86,6 +86,25 @@ native_action() {
 
 
 class OpenWrtTest(NativeFixture):
+    def test_incompatible_controller_delegates_before_touching_service(self):
+        first = self.release('v1.2.3')
+        self.assert_panel_access(self.install())
+        actions = (self.prefix / 'actions').read_bytes()
+        folder = self.release('v0.10.2').parent
+        (folder / 'keenproxy.openwrt').write_text('# Different controller format\n')
+        (folder / 'bootstrap.sh').write_text('''
+set -eu
+test "$KEENPROXY_PLATFORM" = openwrt
+test "$*" = '--version v0.10.2 --expect-current v1.2.3'
+touch "$KEENPROXY_PREFIX/fallback"
+''')
+        self.write_checksums(folder)
+        result = self.install('--version', 'v0.10.2', '--expect-current', 'v1.2.3')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.prefix / 'fallback').exists())
+        self.assertEqual((self.prefix / 'actions').read_bytes(), actions)
+        self.assert_installed(first)
+
     def test_install_update_downgrade_uninstall_preserves_config_and_token(self):
         first = self.release('v1.2.3')
         self.assert_panel_access(self.install())

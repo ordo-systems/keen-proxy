@@ -113,9 +113,9 @@ esac''')
     def install(self, *args):
         return self.bootstrap(*args)
 
-    def bootstrap(self, *args):
+    def bootstrap(self, *args, shell='sh'):
         with self.bootstrap_script.open('rb') as script:
-            return subprocess.run(['sh', '-s', '--', *args],
+            return subprocess.run([shell, '-s', '--', *args],
                                   stdin=script, env=self.env, capture_output=True,
                                   text=True, timeout=20)
 
@@ -158,6 +158,84 @@ class BootstrapTest(BootstrapFixture):
         self.assertEqual(self.release_record.read_text(),
                          f'current {current}\nprevious {previous}\nvariant {variant}\n')
         self.assertEqual(self.release_record.stat().st_mode & 0o777, 0o600)
+
+    def test_release_bootstrap_recovers_staging_failure_once(self):
+        self.release('v1.2.3')
+        self.assertEqual(self.install().returncode, 0)
+        asset = self.release('v0.10.2', lite=True)
+        folder = asset.parent
+        (folder / 'install.sh').write_text('exit 17\n')
+        (folder / 'bootstrap.sh').write_text('''
+set -eu
+test "$*" = '--version v0.10.2 --expect-current v1.2.3 --lite --require-guard --without-trusttunnel'
+test -f "$KEENPROXY_PREFIX/running"
+test ! -e "$KEENPROXY_PREFIX/var/lock/keenproxy-install.lock"
+printf '%s\\n' "$*" >> "$KEENPROXY_PREFIX/fallback"
+''')
+        self.write_checksums(folder)
+        result = self.bootstrap('--version', 'v0.10.2', '--expect-current', 'v1.2.3',
+                                '--lite', '--require-guard', '--without-trusttunnel', shell='bash')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len((self.prefix / 'fallback').read_text().splitlines()), 1)
+        self.assert_release('v1.2.3')
+
+    def test_unsupported_architecture_delegates_to_release_bootstrap(self):
+        folder = self.release('v0.10.2').parent
+        (folder / 'bootstrap.sh').write_text('test "$*" = "--version v0.10.2"\n')
+        self.write_checksums(folder)
+        self.env['CPU'] = 'unsupported'
+        # An inherited asset name must not act as a cleanup path.
+        self.env['asset'] = 'bootstrap.sh'
+        result = self.install('--version', 'v0.10.2')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        requests = self.requests.read_text().splitlines()
+        self.assertEqual(len(requests), 2)
+        self.assertTrue(requests[-1].endswith('/v0.10.2/bootstrap.sh'))
+
+    def test_checked_release_bootstrap_completes_install(self):
+        folder = self.release(
+            'v0.10.2', dry_run='''
+if [ -f "$KEENPROXY_PREFIX/preflight-attempted" ]; then
+    test -z "${KEENPROXY_BOOTSTRAP_RETRY+x}" &&
+        test "$(find "$KEENPROXY_PREFIX/tmp" -name keenproxy-linux-arm64 | wc -l)" -eq 1
+    exit $?
+fi
+touch "$KEENPROXY_PREFIX/preflight-attempted"
+exit 1
+''').parent
+        (folder / 'bootstrap.sh').write_bytes(self.bootstrap_script.read_bytes())
+        self.write_checksums(folder)
+        result = self.install('--version', 'v0.10.2')
+        self.assert_panel_access(result)
+        self.assert_release('v0.10.2')
+        self.assertTrue((self.prefix / 'running').exists())
+        self.assertFalse((self.prefix / 'var/lock/keenproxy-install.lock').exists())
+
+    def test_bad_fallback_checksum_is_not_executed(self):
+        folder = self.release('v0.10.2', dry_run='exit 1').parent
+        script = folder / 'bootstrap.sh'
+        script.write_text('exit 0\n')
+        self.write_checksums(folder)
+        script.write_text('touch "$KEENPROXY_PREFIX/unverified-script-ran"\n')
+        result = self.install('--version', 'v0.10.2')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('SHA256 mismatch for bootstrap.sh', result.stderr)
+        self.assertFalse((self.prefix / 'unverified-script-ran').exists())
+        self.assertFalse(self.binary.exists())
+
+    def test_fallback_failure_does_not_loop_or_mask_error(self):
+        folder = self.release('v0.10.2', dry_run='exit 1').parent
+        (folder / 'bootstrap.sh').write_bytes(self.bootstrap_script.read_bytes())
+        self.write_checksums(folder)
+        self.latest_release('v0.10.2')
+        result = self.install()
+        self.assertNotEqual(result.returncode, 0)
+        requests = self.requests.read_text().splitlines()
+        self.assertEqual(sum(url.endswith('/v0.10.2/bootstrap.sh') for url in requests), 1)
+        self.assertEqual(sum(url.endswith('/releases/latest') for url in requests), 1)
+        self.assertFalse((self.prefix / 'var/lock/keenproxy-install.lock').exists())
+        self.assertEqual(list((self.prefix / 'tmp').glob('keenproxy-release.*')), [])
+        self.assertFalse(self.binary.exists())
 
     def test_uninstall_stops_service_and_preserves_settings_without_network(self):
         self.release('v1.2.3')
@@ -401,10 +479,13 @@ done
         first = self.release('v1.2.3')
         self.assertEqual(self.install().returncode, 0)
         corrupt = self.release('v1.2.4')
+        (corrupt.parent / 'bootstrap.sh').write_text('exit 0\n')
+        self.write_checksums(corrupt.parent)
         corrupt.write_text('bad download')
         result = self.install('--version', 'v1.2.4')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('SHA256', result.stderr)
+        self.assertNotIn('/bootstrap.sh', self.requests.read_text())
         self.assertEqual(self.binary.read_bytes(), first.read_bytes())
         self.assertTrue((self.prefix / 'running').exists())
 
@@ -413,9 +494,12 @@ done
         installed = self.install()
         self.assert_panel_access(installed)
         before = (self.prefix / 'url-invocations').read_text()
-        self.release('v1.2.4', start=False)
+        folder = self.release('v1.2.4', start=False).parent
+        (folder / 'bootstrap.sh').write_text('exit 0\n')
+        self.write_checksums(folder)
         result = self.install('--version', 'v1.2.4')
         self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('/bootstrap.sh', self.requests.read_text())
         self.assertNotIn('Access URL:', result.stdout)
         self.assertNotIn('Retrieve existing panel token:', result.stdout)
         self.assertEqual((self.prefix / 'url-invocations').read_text(), before)

@@ -8,6 +8,7 @@ cd "$1"
 [[ "$RELEASE_REVISION" =~ ^[0-9a-f]{40}$ ]]
 [[ "$RELEASE_NATIVE" == true || "$RELEASE_NATIVE" == false ]]
 [[ "$RELEASE_ENTWARE_CONTROLLER" == true || "$RELEASE_ENTWARE_CONTROLLER" == false ]]
+[[ "$RELEASE_BOOTSTRAP" == true || "$RELEASE_BOOTSTRAP" == false ]]
 [[ "$RELEASE_RECOVERY" == true || "$RELEASE_RECOVERY" == false ]]
 endpoint="repos/$GH_REPO/releases/$RELEASE_ID"
 
@@ -26,6 +27,7 @@ check_identity() {
 }
 
 assets=(keenproxy-source.tar.gz keenproxy-notices.tar.gz install.sh BUILD_INFO.txt)
+if [[ "$RELEASE_BOOTSTRAP" == true ]]; then assets+=(bootstrap.sh); fi
 if [[ "$RELEASE_ENTWARE_CONTROLLER" == true ]]; then assets+=(S99keenproxy); fi
 read -ra architectures <<< "$RELEASE_ARCHITECTURES"
 for arch in "${architectures[@]}"; do

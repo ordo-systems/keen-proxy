@@ -4,6 +4,10 @@
 set -eu
 umask 077
 
+# Consume this marker before a restarted service can inherit it.
+bootstrap_retry=${KEENPROXY_BOOTSTRAP_RETRY:-0}
+unset KEENPROXY_BOOTSTRAP_RETRY
+
 fail() { printf 'KeenProxy: %s\n' "$*" >&2; exit 1; }
 usage() {
     printf '%s\n' 'Usage: sh -s -- [--version vX.Y.Z] [--lite] [--require-guard]' \
@@ -146,6 +150,33 @@ verify() {
     [ "${#expected}" -eq 64 ] || fail "missing or invalid SHA256 entry for $1"
     actual=$(sha256sum "$work/$1")
     [ "${actual%% *}" = "$expected" ] || fail "SHA256 mismatch for $1"
+}
+
+# Retry only from preflight, before touching service state or installed files.
+retry_release_bootstrap() {
+    printf 'KeenProxy: %s\n' "$1" >&2
+    [ "$bootstrap_retry" != 1 ] || exit 1
+    # Older releases do not ship a separately checksummed bootstrap.
+    awk '$2 == "bootstrap.sh" {found = 1} END {exit !found}' "$work/SHA256SUMS" || exit 1
+    printf 'KeenProxy: retrying with the bootstrap from release %s\n' "$tag" >&2
+    fetch "$base/bootstrap.sh" "$work/bootstrap.sh"
+    verify bootstrap.sh
+    # Free candidate space before the child downloads and stages its own files.
+    rm -rf "$work/payload" || fail 'could not remove the first staged payload'
+    if [ -n "$asset" ]; then
+        rm -f "$work/$asset" || fail 'could not remove the first candidate binary'
+    fi
+
+    set -- --version "$tag"
+    if [ -n "$expected_current" ]; then set -- "$@" --expect-current "$expected_current"; fi
+    if [ "$variant" = lite ]; then set -- "$@" --lite; fi
+    if [ "$require_guard" = 1 ]; then set -- "$@" --require-guard; fi
+    if [ "$legacy_optout" = 1 ]; then set -- "$@" --without-trusttunnel; fi
+    # The fallback takes its own installer lock and revalidates installed state.
+    rmdir "$lock" || fail 'could not release installer lock for fallback'
+    lock=
+    KEENPROXY_BOOTSTRAP_RETRY=1 sh -s -- "$@" < "$work/bootstrap.sh"
+    exit $?
 }
 
 ensure_firewall_tools() {
@@ -417,7 +448,7 @@ finish() {
         rmdir "$service_lock" || :
     fi
     if [ -n "$work" ] && [ "$keep_work" = 0 ]; then rm -rf "$work"; fi
-    rmdir "$lock" || :
+    if [ -n "$lock" ]; then rmdir "$lock" || :; fi
     exit "$result"
 }
 
@@ -521,9 +552,6 @@ fi
 for tool in curl sha256sum; do
     command -v "$tool" >/dev/null 2>&1 || fail "missing dependency: $tool"
 done
-arch=$(architecture)
-asset="keenproxy-linux-$arch"
-if [ "$variant" = lite ]; then asset="keenproxy-lite-linux-$arch"; fi
 if [ -f "$prefix/etc/ssl/certs/ca-certificates.crt" ]; then
     export CURL_CA_BUNDLE="$prefix/etc/ssl/certs/ca-certificates.crt"
 fi
@@ -542,6 +570,10 @@ tag="v${version#v}"
 valid_release_tag "$tag" || fail 'invalid release version'
 base="$releases/$tag"
 fetch "$base/SHA256SUMS" "$work/SHA256SUMS"
+asset=
+arch=$(architecture) || retry_release_bootstrap 'could not select the release architecture'
+asset="keenproxy-linux-$arch"
+if [ "$variant" = lite ]; then asset="keenproxy-lite-linux-$arch"; fi
 names="$asset $controller"
 if [ "$platform" = entware ]; then names="$names install.sh"; fi
 for name in $names; do
@@ -549,7 +581,7 @@ for name in $names; do
     verify "$name"
 done
 if [ "$platform" = openwrt ]; then
-    grep -Fxq "$marker" "$work/$controller" || fail 'native controller is not managed by this installer'
+    grep -Fxq "$marker" "$work/$controller" || retry_release_bootstrap 'native controller is not managed by this installer'
 fi
 
 config="$prefix/etc/keenproxy/config.yaml"
@@ -575,17 +607,16 @@ planned_udp=$(
                 if (jumps) print udp + 0
                 else print "unknown"
             }'
-) || fail 'candidate binary or configuration failed validation'
+) || retry_release_bootstrap 'candidate binary or configuration failed validation'
 
 if [ -e "$service" ] || [ -L "$service" ]; then
     managed_service || fail 'existing init script is not managed by this installer'
 fi
-ensure_firewall_tools
 
 if [ "$platform" = entware ]; then
     # Historical release installers default to fetching the external client.
-    set -- --prefix "$work/payload" --binary "$work/$asset" --without-trusttunnel
-    sh "$work/install.sh" "$@" || fail 'could not stage release files'
+    sh "$work/install.sh" --prefix "$work/payload" --binary "$work/$asset" --without-trusttunnel ||
+        retry_release_bootstrap 'could not stage release files'
 else
     mkdir -p "$work/payload/${binary_path%/*}"
     cp "$work/$asset" "$work/payload/$binary_path"
@@ -595,6 +626,7 @@ mkdir -p "$work/payload/etc/init.d"
 chmod 755 "$work/$controller"
 cp -p "$work/$controller" "$work/payload/$service_path"
 
+ensure_firewall_tools
 lock_service
 if [ -f "$service" ]; then save_autostart; fi
 if [ -f "$service" ] && service_action check; then was_running=1; fi

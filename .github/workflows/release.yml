@@ -116,6 +116,7 @@ jobs:
     outputs:
       native: ${{ steps.contract.outputs.native }}
       entware_controller: ${{ steps.contract.outputs.entware_controller }}
+      bootstrap: ${{ steps.contract.outputs.bootstrap }}
       architectures: ${{ steps.contract.outputs.architectures }}
     env:
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
@@ -141,6 +142,15 @@ jobs:
           else
             test "$RECOVERY" = true
             echo 'entware_controller=false' >> "$GITHUB_OUTPUT"
+          fi
+          # Keep older published payloads byte-compatible during repair.
+          version=${RELEASE_TAG#v}
+          IFS=. read -r major minor patch <<< "${version%%-*}"
+          if (( 10#$major > 0 || 10#$minor > 10 || (10#$minor == 10 && 10#$patch >= 2) )); then
+            test -f tools/bootstrap.sh
+            echo 'bootstrap=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'bootstrap=false' >> "$GITHUB_OUTPUT"
           fi
           # These commits introduced the four- and six-architecture layouts.
           four=afcb24932126ee4a60e862dcce6e53978f740f92
@@ -274,6 +284,7 @@ jobs:
       - name: Package source, notices, and build identity
         env:
           RELEASE_ARCHITECTURES: ${{ steps.contract.outputs.architectures }}
+          RELEASE_BOOTSTRAP: ${{ steps.contract.outputs.bootstrap }}
         run: |
           source_dir=$(mktemp -d)
           trap 'rm -rf "$source_dir"' EXIT
@@ -287,6 +298,12 @@ jobs:
             | gzip -n > dist/keenproxy-source.tar.gz
           cp tools/install.sh dist/install.sh
           service_assets=(install.sh)
+          if [[ "$RELEASE_BOOTSTRAP" == true ]]; then
+            cp tools/bootstrap.sh dist/bootstrap.sh
+            service_assets+=(bootstrap.sh)
+          else
+            rm -f dist/bootstrap.sh
+          fi
           if [ -f tools/S99keenproxy ]; then
             cp tools/S99keenproxy dist/S99keenproxy
             service_assets+=(S99keenproxy)
@@ -348,6 +365,7 @@ jobs:
             dist/keenproxy-source.tar.gz
             dist/keenproxy-notices.tar.gz
             dist/install.sh
+            dist/bootstrap.sh
             dist/S99keenproxy
             dist/keenproxy.openwrt
             dist/BUILD_INFO.txt
@@ -365,6 +383,7 @@ jobs:
       RELEASE_REVISION: ${{ needs.version.outputs.revision }}
       RELEASE_NATIVE: ${{ needs.assets.outputs.native }}
       RELEASE_ENTWARE_CONTROLLER: ${{ needs.assets.outputs.entware_controller }}
+      RELEASE_BOOTSTRAP: ${{ needs.assets.outputs.bootstrap }}
       RELEASE_ARCHITECTURES: ${{ needs.assets.outputs.architectures }}
       RELEASE_RECOVERY: ${{ needs.version.outputs.recovery }}
       GH_TOKEN: ${{ github.token }}

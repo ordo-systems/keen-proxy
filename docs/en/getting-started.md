@@ -109,6 +109,8 @@ On a clean install, the bootstrap creates `/opt/etc/keenproxy/config.yaml` with 
 
 Run the same command to update. Your configuration and token are preserved. The installer stages and validates the candidate before stopping the managed service. If the new service fails its startup check, it attempts to restore the previous files and restart the previous service. A manually started instance must be stopped before the installer can take over.
 
+For releases from `v0.10.2`, the installer can retry once with the selected release's `bootstrap.sh` if architecture detection, candidate validation, an OpenWrt service-script compatibility check, or payload staging fails before changing the installation. It verifies the script against the same release's `SHA256SUMS` and keeps the selected version and options. It does not retry on a checksum failure or after a failed service start. A panel on an older release uses its embedded installer and does not gain this fallback until upgraded; use the current command-line bootstrap if it cannot update.
+
 To choose a release, replace `vX.Y.Z` with a published tag. The optional `--lite` flag selects the smaller build without QUIC/HTTP/3. `--without-trusttunnel` remains accepted for existing updaters and scripts, but no longer changes the payload: TrustTunnel is embedded. `--trusttunnel-only` is no longer accepted.
 
 ```sh

@@ -4,6 +4,8 @@ import { test } from 'node:test'
 import { api, setUnauthorizedHandler } from '../src/demo/api.ts'
 import release from '../src/demo/release.json' with { type: 'json' }
 import { demoRevision, demoVersion } from '../src/demo/updates.ts'
+import { manualConnection } from '../src/connectionDraft.ts'
+import { routerInterfaceName } from '../src/routerInterface.ts'
 import { snapshotBundledPreset, stageBundledPreset } from '../src/presetDraft.ts'
 test('demo API drives the UI without HTTP or EventSource operations', async () => {
   const original = globalThis.fetch
@@ -85,6 +87,31 @@ test('demo API drives the UI without HTTP or EventSource operations', async () =
       URL.revokeObjectURL(url)
     }
   } finally { globalThis.fetch = original }
+})
+
+test('demo validates then applies an interface profile without altering raw profiles', async (t) => {
+  const original = await api.config()
+  t.after(async () => { await api.saveConfig(original) })
+  const devices = await api.interfaces()
+  assert.deepEqual(devices.map(device => device.name), ['eth0', 'nwg0', 'wg0'])
+  const labeled = devices[1]!
+  assert.equal(routerInterfaceName(labeled), 'Home WireGuard')
+  assert.deepEqual(devices[2], { name: 'wg0', up: false })
+  assert.equal(routerInterfaceName(devices[2]!), 'wg0')
+
+  const draft = structuredClone(original)
+  const connection = manualConnection({
+    protocol: 'router-interface', id: 'home-wg', name: routerInterfaceName(labeled), routerDevice: labeled.name,
+  })
+  const raw = {
+    id: 'raw-options', name: 'Raw direct', type: 'singbox' as const,
+    outbound: { type: 'direct', bind_interface: 'eth0', routing_mark: 7 },
+  }
+  draft.connections = [...(draft.connections ?? []), raw, connection]
+  assert.equal((await api.validateConfig(draft)).ok, true)
+  assert.deepEqual(await api.config(), original)
+  await api.saveConfig(draft)
+  assert.deepEqual((await api.config()).connections, draft.connections)
 })
 
 test('demo Apply validates explicit DNS source bypasses without changing the saved config on failure', async (t) => {

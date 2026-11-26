@@ -17,6 +17,7 @@ import {
 import { store, targetLabel } from '../store'
 import { api } from '../api'
 import { protocolOf } from '../conn'
+import { boundRouterInterface } from '../routerInterface'
 import { duration } from '../format'
 import { formatBuild } from '../buildIdentity'
 import { saveDownload } from '../download'
@@ -312,7 +313,7 @@ async function downloadBundle() {
         >
           <Server :size="22" /><span
             ><b>{{ c.name }}</b
-            ><small>{{ protocolOf(c) }} <span v-if="appliedConnectionOff(c.id)" class="pill dim">{{ t('conn.disabled') }}</span></small></span
+            ><small>{{ boundRouterInterface(c) ? t('ui.routerConnection') : protocolOf(c) }} <span v-if="appliedConnectionOff(c.id)" class="pill dim">{{ t('conn.disabled') }}</span></small></span
           ><ConnectionHealth :id="c.id" compact />
         </button>
         <p v-if="!cfg.connections?.length" class="muted">
@@ -322,7 +323,7 @@ async function downloadBundle() {
       <aside class="detail-pane">
         <template v-if="conn"
           ><h2>{{ conn.name }}</h2>
-          <p class="muted">{{ protocolOf(conn) }}</p>
+          <p class="muted">{{ boundRouterInterface(conn) ? t('ui.routerConnection') : protocolOf(conn) }}</p>
           <p v-if="st?.failover?.[conn.id]">
             {{ t('ui.activeExit') }}:
             {{ targetLabel(st.failover[conn.id]!.active) }}

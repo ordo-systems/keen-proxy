@@ -8,6 +8,7 @@ import {
   copyConnection,
   editedConnection,
 } from '../src/connectionDraft.ts'
+import { boundRouterInterface, editRouterInterface, routerInterfaceID, routerInterfaceName } from '../src/routerInterface.ts'
 import type { Connection } from '../src/types.ts'
 const base = {
   protocol: 'vless',
@@ -52,6 +53,51 @@ test('manual protocols have specific fields and no accidental credentials', () =
   })
   assert.equal(c.wireguard?.peer.endpoint, 'vpn.example.test:51820')
 })
+
+test('router interface outbound persists the kernel device, not its label or state', () => {
+  const device = { name: 'nwg0', label: '\u042A\u044C', up: false }
+  const name = routerInterfaceName(device)
+  const fields = { protocol: 'router-interface', id: routerInterfaceID(name, device.name, []), name, routerDevice: device.name }
+  const profile = manualConnection(fields)
+  assert.deepEqual(JSON.parse(JSON.stringify(profile)), {
+    type: 'singbox',
+    id: 'nwg0',
+    name: device.label,
+    outbound: { type: 'direct', bind_interface: 'nwg0' },
+  })
+  assert.equal(boundRouterInterface(profile), 'nwg0')
+  assert.equal(routerInterfaceID(name, device.name, [profile]), 'nwg0-2')
+  assert.equal(routerInterfaceID('Direct', device.name, []), 'direct-2')
+  assert.throws(() => manualConnection({ ...fields, routerDevice: '' }), /routerDevice/)
+})
+
+test('router interface names fall back to the kernel name without a firmware label', () => {
+  const device = { name: 'wg0', up: true }
+  assert.equal(routerInterfaceName(device), 'wg0')
+  assert.equal(routerInterfaceName({ ...device, label: '  ' }), 'wg0')
+  assert.equal(routerInterfaceName({ ...device, label: ' Home VPN ' }), 'Home VPN')
+})
+
+test('only exact bind-interface direct profiles use the simple editor', () => {
+  const direct = { type: 'direct', bind_interface: 'wg0' }
+  const profile: Connection = { id: 'raw', name: 'Raw', type: 'singbox', outbound: direct }
+  assert.equal(boundRouterInterface(profile), 'wg0')
+  assert.equal(boundRouterInterface({ ...profile, outbound: { ...direct, routing_mark: 7 } }), undefined)
+  assert.equal(boundRouterInterface({ ...profile, outbound: { type: 'direct' } }), undefined)
+  assert.equal(boundRouterInterface({ ...profile, outbound: { ...direct, type: 'socks' } }), undefined)
+  assert.equal(boundRouterInterface({ ...profile, outbound: undefined, endpoint: direct }), undefined)
+})
+
+test('editing a router-interface connection keeps legacy routing references intact', () => {
+  const profile: Connection = {
+    id: ' WG.EU ', name: 'Office', type: 'singbox', fallback: 'backup', disabled: true,
+    outbound: { type: 'direct', bind_interface: 'nwg0' },
+  }
+  const edited = editRouterInterface(profile, 'Office VPN', 'wg0')
+  assert.deepEqual(edited, { ...profile, name: 'Office VPN', outbound: { type: 'direct', bind_interface: 'wg0' } })
+  assert.equal(profile.outbound?.bind_interface, 'nwg0')
+})
+
 test('file import selects outbounds without importing global routing', () => {
   const profiles = importConnections(
     JSON.stringify({

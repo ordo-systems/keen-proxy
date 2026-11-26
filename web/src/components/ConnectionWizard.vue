@@ -18,11 +18,12 @@ import {
   Shield,
   Network,
   FileText,
+  Router,
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { store } from '../store'
 import { api } from '../api'
-import type { Connection } from '../types'
+import type { Connection, RouterInterface } from '../types'
 import {
   classifyConnectionImport,
   connectionErrorKey,
@@ -37,6 +38,8 @@ import {
 } from '../connectionDraft'
 import { slugify } from '../wgconf'
 import { protocolOf, serverOf } from '../conn'
+import { boundRouterInterface, routerInterfaceID, routerInterfaceName } from '../routerInterface'
+import RouterInterfaceSelect from './RouterInterfaceSelect.vue'
 // Owns unsaved input; only a validated selected profile is added to the shared draft.
 const emit = defineEmits<{ close: []; saved: [id: string] }>()
 const { t } = useI18n(),
@@ -49,6 +52,8 @@ const step = ref(0),
   error = ref(''),
   fieldError = ref(''),
   advanced = ref(false)
+const routerDevice = ref<string | null>(null)
+const isRouterInterface = computed(() => protocol.value === 'router-interface')
 const fields = reactive<ManualFields>({
   id: '',
   name: '',
@@ -85,7 +90,7 @@ const link = ref(''),
   saved = ref(false)
 let fileSequence = 0
 let alive = true
-const protocols = [
+const protocols = computed(() => [
   { id: 'wireguard', name: 'WireGuard', hint: '.conf', icon: Network },
   { id: 'amneziawg', name: 'AmneziaWG', hint: '.conf / vpn://', icon: Network },
   { id: 'vless', name: 'VLESS', hint: 'TLS / REALITY', icon: Shield },
@@ -93,9 +98,14 @@ const protocols = [
   { id: 'trojan', name: 'Trojan', hint: 'TLS', icon: LockKeyhole },
   { id: 'hysteria2', name: 'Hysteria2', hint: 'QUIC', icon: Network },
   { id: 'socks', name: 'SOCKS', hint: '5 / 4a', icon: Server },
-]
+  { id: 'router-interface', name: t('ui.routerConnection'), hint: t('ui.routerTileHint'), icon: Router },
+])
+const protocolName = computed(() => protocol.value === 'raw'
+  ? 'sing-box'
+  : protocols.value.find((p) => p.id === protocol.value)?.name ?? '')
+const reviewedDevice = computed(() => validated.value && boundRouterInterface(validated.value))
 const methods = computed(() =>
-  protocol.value === 'raw'
+  isRouterInterface.value ? [] : protocol.value === 'raw'
     ? [
         { value: 'file', label: t('ui.byFile') },
         { value: 'json', label: 'JSON' },
@@ -121,11 +131,19 @@ function selectProtocol(value: string) {
   const changed = protocol.value !== value
   protocol.value = value
   fields.protocol = value
-  if (!methods.value.some((m) => m.value === method.value))
+  if (isRouterInterface.value) method.value = 'manual'
+  else if (!methods.value.some((m) => m.value === method.value))
     method.value = methods.value[0]!.value
-  if (changed) resetImport(true)
+  if (changed) {
+    routerDevice.value = null
+    fileSequence++
+    resetImport(true)
+  }
   error.value = ''
   validated.value = null
+}
+function chooseRouterDevice(device: RouterInterface) {
+  applyImportedName(routerInterfaceName(device))
 }
 let importedName = ''
 let previousName = ''
@@ -158,7 +176,7 @@ watch(chosen, (index) => {
   applyImportedName(suggestedConnectionName(candidates.value, index, filename.value))
 })
 watch(
-  [fields, link, fileText, chosen, method, protocol],
+  [fields, link, fileText, chosen, method, protocol, routerDevice],
   () => {
     if (step.value > 1) step.value = 1
     validated.value = null
@@ -178,6 +196,7 @@ const dirty = computed(
     !!fileText.value ||
     !!fields.server ||
     !!fields.privateKey ||
+    !!routerDevice.value ||
     !!fields.amneziawg,
 )
 function askLeave(): Promise<boolean> {
@@ -285,6 +304,7 @@ const inputFields = computed<FormField[]>(() => {
     { key: 'name', label: t('dialog.name') },
     { key: 'id', label: t('dialog.id') },
   ]
+  if (isRouterInterface.value) return common.slice(0, 1)
   if (method.value !== 'manual') return common
   if (protocol.value === 'amneziawg') return common
   if (protocol.value === 'wireguard')
@@ -377,7 +397,11 @@ function report(cause: unknown, fallback = 'ui.invalid') {
 // Validate the candidate in a copied full config without saving or starting the engine.
 async function build(): Promise<Connection> {
   let candidate: Connection
-  if (method.value === 'manual' && protocol.value === 'amneziawg' && fields.amneziawg?.trim().startsWith('vpn://'))
+  if (isRouterInterface.value) {
+    const device = routerDevice.value ?? ''
+    const id = routerInterfaceID(fields.name ?? '', device, store.state.config?.connections ?? [])
+    candidate = manualConnection({ ...fields, id, routerDevice: device })
+  } else if (method.value === 'manual' && protocol.value === 'amneziawg' && fields.amneziawg?.trim().startsWith('vpn://'))
     candidate = await pastedAmnezia()
   else if (method.value === 'manual') candidate = manualConnection(fields)
   else if (method.value === 'link') {
@@ -392,10 +416,12 @@ async function build(): Promise<Connection> {
   } else {
     candidate = selectAmneziaProfile(candidates.value, chosen.value)
   }
-  candidate = {
-    ...candidate,
-    id: fields.id!.trim(),
-    name: fields.name!.trim() || fields.id!.trim(),
+  if (!isRouterInterface.value) {
+    candidate = {
+      ...candidate,
+      id: fields.id!.trim(),
+      name: fields.name!.trim() || fields.id!.trim(),
+    }
   }
   validateIdentity(candidate)
   const config = store.state.config
@@ -510,7 +536,7 @@ async function save() {
             :aria-pressed="protocol === p.id"
             @click="selectProtocol(p.id)"
           >
-            <component :is="p.icon" :size="28" /><span
+            <component :is="p.icon" :size="28" aria-hidden="true" /><span
               ><b>{{ p.name }}</b
               ><small>{{ p.hint }}</small></span
             >
@@ -521,14 +547,10 @@ async function save() {
         }}</NButton>
       </section>
       <aside class="detail-pane">
-        <h2>
-          {{ t('ui.method') }}
-          {{
-            protocol === 'raw'
-              ? 'sing-box'
-              : protocols.find((p) => p.id === protocol)?.name
-          }}
-        </h2>
+        <h2>{{ isRouterInterface ? protocolName : `${t('ui.method')} ${protocolName}` }}</h2>
+        <p v-if="isRouterInterface">
+          {{ t('ui.routerUseExisting') }}<br /><span class="muted">{{ t('ui.routerSelectNext') }}</span>
+        </p>
         <label v-for="m in methods" :key="m.value" class="method"
           ><input
             v-model="method"
@@ -543,15 +565,18 @@ async function save() {
       </aside>
     </div>
     <div v-else-if="step === 1" class="split-view">
-      <section>
-        <h2>
-          {{
-            protocol === 'raw'
-              ? 'sing-box'
-              : protocols.find((p) => p.id === protocol)?.name
-          }}
-          · {{ methods.find((m) => m.value === method)?.label }}
-        </h2>
+      <section v-if="isRouterInterface">
+        <h2>{{ protocolName }}</h2>
+        <div class="router-fields">
+          <label class="field">
+            <span>{{ t('dialog.name') }}</span>
+            <NInput v-model:value="fields.name" size="large" :disabled="busy" />
+          </label>
+          <RouterInterfaceSelect v-model:value="routerDevice" :disabled="busy" @choose="chooseRouterDevice" />
+        </div>
+      </section>
+      <section v-else>
+        <h2>{{ protocolName }} · {{ methods.find((m) => m.value === method)?.label }}</h2>
         <div
           v-if="method === 'file'"
           class="dropzone"
@@ -705,19 +730,27 @@ async function save() {
         <p v-if="protocol === 'socks'" class="muted">{{ t('ui.socksNote') }}</p>
       </section>
       <aside class="detail-pane">
-        <h2>{{ t('ui.fields') }}</h2>
-        <p class="muted">{{ t('ui.protected') }}</p>
-        <p>{{ t('ui.connectivityLater') }}</p>
-        <p v-if="method === 'file' || method === 'json'" class="muted">
-          {{ t('ui.importOnly') }}
-        </p>
+        <template v-if="isRouterInterface">
+          <h2>{{ t('ui.routerHowItWorks') }}</h2>
+          <p>{{ t('ui.routerSetup') }}<br />{{ t('ui.routerAssignedTraffic') }}</p>
+          <div class="router-check-note">
+            <strong>{{ t('ui.connectivityLater') }}</strong>
+            <p class="muted">{{ t('ui.routerCheckOnly') }}</p>
+          </div>
+        </template>
+        <template v-else>
+          <h2>{{ t('ui.fields') }}</h2>
+          <p class="muted">{{ t('ui.protected') }}</p>
+          <p>{{ t('ui.connectivityLater') }}</p>
+          <p v-if="method === 'file' || method === 'json'" class="muted">{{ t('ui.importOnly') }}</p>
+        </template>
       </aside>
-      <div class="wizard-actions">
+      <div class="wizard-actions" :class="{ 'router-actions': isRouterInterface }">
         <NButton :disabled="busy" @click="step = 0">{{ t('ui.back') }}</NButton
         ><NButton
           type="primary"
           :loading="busy"
-          :disabled="!fields.id || busy"
+          :disabled="busy || (isRouterInterface ? !routerDevice || !fields.name?.trim() : !fields.id)"
           @click="validate"
           >{{ t('ui.formatCheck') }}</NButton
         >
@@ -736,9 +769,12 @@ async function save() {
         </div>
         <div class="data-row">
           <span>{{ t('ui.typeMethod') }}</span
-          ><b>{{ protocolOf(validated) }}</b>
+          ><b>{{ reviewedDevice ? t('ui.routerConnection') : protocolOf(validated) }}</b>
         </div>
-        <div v-if="serverOf(validated).host || serverOf(validated).port" class="data-row">
+        <div v-if="reviewedDevice" class="data-row">
+          <span>{{ t('ui.routerDevice') }}</span><b class="mono">{{ reviewedDevice }}</b>
+        </div>
+        <div v-else-if="serverOf(validated).host || serverOf(validated).port" class="data-row">
           <span>{{ t('ui.server') }}</span
           ><b>{{ [serverOf(validated).host, serverOf(validated).port].filter(Boolean).join(':') }}</b>
         </div>
@@ -746,7 +782,7 @@ async function save() {
           <span>{{ t('ui.address') }}</span
           ><b>{{ validated.wireguard.address.join(', ') }}</b>
         </div>
-        <div class="data-row">
+        <div v-if="!reviewedDevice" class="data-row">
           <LockKeyhole :size="20" /><span>{{ t('ui.protected') }}</span>
         </div>
       </section>
@@ -816,7 +852,7 @@ h2 {
 }
 .protocols {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 .protocols button {
@@ -835,6 +871,13 @@ h2 {
 .protocols button.selected {
   border: 2px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.protocols button > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.protocols button > svg {
+  flex: none;
 }
 .protocols b {
   font-size: 22px;
@@ -876,6 +919,26 @@ h2 {
   gap: 0 24px;
   margin-top: 20px;
 }
+.router-fields {
+  max-width: 620px;
+}
+.router-fields .field {
+  margin-bottom: 24px;
+}
+.router-fields .field > span {
+  font-weight: 600;
+  color: var(--text);
+}
+.router-check-note {
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+.router-check-note p {
+  margin: 6px 0 0;
+}
 .wizard-actions {
   grid-column: 1/-1;
   display: flex;
@@ -883,6 +946,12 @@ h2 {
   padding-top: 20px;
   border-top: 1px solid var(--line);
   gap: 16px;
+}
+.router-actions {
+  grid-column: 1;
+  border-top: 0;
+  padding-top: 0;
+  justify-content: flex-start;
 }
 .dropzone {
   display: flex;

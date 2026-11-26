@@ -2,7 +2,7 @@ import { catalog, createDemo } from './model.ts'
 import { DEMO_JOURNAL_LIMIT, DEMO_TICK_MS } from './telemetry.ts'
 import { createDemoUpdates, demoRevision } from './updates.ts'
 import type { Config, Connection, JournalKind, LinkPreview, Status, TProxyReadiness, UpdatePreferences, UpdateSelection } from '../types'
-import type { KernelFeature, KernelModuleDiagnostics } from '../types'
+import type { KernelFeature, KernelModuleDiagnostics, RouterInterface } from '../types'
 import type { ResourceExport, ResourceFormat, ResourceList, ResourcePreview } from '../resourceExchange'
 import { activeExit } from '../activation.ts'
 
@@ -99,6 +99,11 @@ export const api = {
     { mac: 'aa:bb:cc:dd:ee:01', ip: '192.168.7.20', client: 'TV', mode: 'split' as const },
     { mac: 'aa:bb:cc:dd:ee:02', ip: '192.168.7.30', client: 'Work laptop', mode: 'off' as const },
     { mac: '02:00:00:00:00:40', ip: '192.168.7.40', hostname: 'nas.local', hostname_source: 'dns' as const },
+  ],
+  interfaces: async (): Promise<RouterInterface[]> => [
+    { name: 'eth0', label: 'Internet', up: true },
+    { name: 'nwg0', label: 'Home WireGuard', up: true },
+    { name: 'wg0', up: false },
   ],
   parseLink: async (link: string) => parseLink(link),
   importAmnezia: async (_uri: string): Promise<{ profiles: Connection[] }> => { throw new Error('amnezia_demo_unavailable') },

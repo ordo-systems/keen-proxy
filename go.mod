@@ -195,5 +195,5 @@ replace (
 	github.com/sagernet/gvisor => github.com/Leadaxe/gvisor-lx v0.0.0-20260805115331-117243aa02fa
 	github.com/sagernet/sing-box => github.com/Leadaxe/sing-box-lx v1.14.4-lx.35
 	github.com/sagernet/sing-tun => github.com/Leadaxe/sing-tun-lx v0.0.0-20261114124402-513871512fb3
-	github.com/sagernet/wireguard-go => github.com/ordo-systems/wireguard-go-awg2-lx v0.0.0-20261118153623-392d8d3c948b
+	github.com/sagernet/wireguard-go => github.com/ordo-systems/wireguard-go-awg2-lx v0.0.0-20261127084158-382fa3bbd7ac
 )

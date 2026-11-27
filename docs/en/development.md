@@ -40,6 +40,8 @@ Run `go mod download` after cloning; no Git submodules are required. Root `go.mo
 
 The WireGuard/AWG replacement pins a commit of [the Ordo Systems fork](https://github.com/ordo-systems/wireguard-go-awg2-lx), not a moving branch. On router builds, its receive queue uses packet-sized buffers while UDP/GRO read slots keep their original capacity. This adds a receive copy without changing transmission. Platforms with a bounded receive pool retain their original receive path.
 
+On Linux, unbounded receivers share the cache of full-size UDP/GRO buffers so a replacement tunnel can reuse buffers returned by the old one. Concurrent receive loops still own separate slots, and platforms with a bounded receive pool keep per-device accounting.
+
 Makefile and CI select Go **1.27.3** from the root `go.mod` `go` directive, preserving main's language floor. For direct commands, use `GOTOOLCHAIN=go1.27.3 go …` when your PATH selects a different compiler. Do not copy the entire upstream `LX_TAGS`: KeenProxy owns a smaller full/lite feature set and does not enable the tags requiring `-checklinkname=0`.
 
 Release source archives contain the module manifests and build scripts. Rebuilding fetches the exact versions verified by `go.sum`; it does not require Git submodule initialization. Do not replace pins with `@latest`.

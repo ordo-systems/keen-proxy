@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Add router-interface connections to the wizard, using Keenetic interface descriptions when they match and kernel interface names on OpenWrt.
+- Reuse WireGuard and AmneziaWG UDP receive buffers across Linux tunnel restarts to reduce memory growth during repeated Apply.
 - Retry eligible installer preflight failures once with the checksummed bootstrap from the selected release, without retrying failed service starts or checksum errors.
 - Add Keenetic legacy firewall module checks and token-confirmed temporary firmware module loading to Diagnostics. A token entered here authorizes only that load; it does not create a panel session.
 - Publish stable releases only after verifying the complete asset set from a single tagged build. Bootstrap defaults to the latest published stable release instead of `main` version metadata.

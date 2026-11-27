@@ -39,6 +39,8 @@ import (
 	"github.com/ordo-systems/keen-proxy/internal/stats"
 )
 
+var errPolicyRouteAcquisition = errors.New("acquire TPROXY policy route")
+
 // Options supplies local paths, runtime dependencies, and watchdog settings.
 type Options struct {
 	ConfigPath    string
@@ -214,7 +216,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	return nil
 }
 
-func (d *Daemon) startLocked(ctx context.Context, activate func(context.Context, *model.Config) error) (<-chan struct{}, error) {
+func (d *Daemon) startLocked(ctx context.Context, activate func(context.Context, *model.Config, bool) error) (<-chan struct{}, error) {
 	if ctx.Err() != nil {
 		return nil, nil
 	}
@@ -239,11 +241,11 @@ func (d *Daemon) startLocked(ctx context.Context, activate func(context.Context,
 	d.reloadGeoLocked(cfg)
 	d.neighbors = d.readNeighbors(cfg)
 	if blocked == nil {
-		if err := activate(ctx, cfg); err != nil {
-			// Module registration does not guarantee that the kernel will accept
-			// TPROXY rules. Preserve recovery when installing the plan fails;
-			// unrelated core, DNS, and routing failures still fail startup.
-			if !tproxyEnrolled || !d.planPending {
+		if err := activate(ctx, cfg, tproxyEnrolled); err != nil {
+			// Registration alone does not guarantee usable interception.
+			// Keep management access after a route conflict or rule rejection
+			// on opted-in startup; unrelated core and DNS errors stay fatal.
+			if !tproxyEnrolled || (!d.planPending && !errors.Is(err, errPolicyRouteAcquisition)) {
 				return nil, err
 			}
 			blocked = err
@@ -329,7 +331,7 @@ func (d *Daemon) applyConfigLocked(ctx context.Context, cfg *model.Config, save 
 	changes := configChanges(prev, cfg)
 	activation := d.startupBlocked
 	neighbors := d.neighbors
-	if err := d.applyLocked(ctx, cfg); err != nil {
+	if err := d.applyLocked(ctx, cfg, activation != nil); err != nil {
 		details := err.Error()
 		restore := journalRestoreFailure(err)
 		var rollbackRestore *journal.RestoreDiagnostic
@@ -340,7 +342,7 @@ func (d *Daemon) applyConfigLocked(ctx context.Context, cfg *model.Config, save 
 			details += "; interception remains inactive"
 		} else if prev != nil {
 			d.log.Error("new configuration failed to apply, restoring previous configuration", "err", err)
-			if rbErr := d.applyLocked(ctx, prev); rbErr != nil {
+			if rbErr := d.applyLocked(ctx, prev, false); rbErr != nil {
 				d.log.Error("rollback also failed", "err", rbErr)
 				details += "; rollback also failed: " + rbErr.Error()
 				rollbackRestore = journalRestoreFailure(rbErr)
@@ -498,7 +500,7 @@ func stageRecoveryFile(path string, data []byte) (string, error) {
 }
 
 // applyLocked reconciles runtime state with cfg while d.mu is held.
-func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config) error {
+func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config, preserveRoutes bool) error {
 	prev := d.cfg
 	if d.startupBlocked != nil {
 		d.neighbors = d.readNeighbors(cfg)
@@ -553,8 +555,11 @@ func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config) error {
 	}
 	if wantRoute && !d.routeOn {
 		var err error
-		if d.startupBlocked != nil {
+		if preserveRoutes {
 			d.routeRelease, err = newRoute.Acquire()
+			if err != nil {
+				return fmt.Errorf("%w: %w", errPolicyRouteAcquisition, err)
+			}
 		} else {
 			err = newRoute.Apply()
 		}

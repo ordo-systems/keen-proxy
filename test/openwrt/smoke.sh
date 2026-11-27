@@ -6,7 +6,10 @@ opkg update
 opkg install iptables-nft iptables-mod-tproxy curl
 iptables --version | grep -F '(nf_tables)'
 
-cat >/tmp/config.yaml <<'YAML'
+umask 077
+mkdir -m 700 /tmp/keenproxy-config
+config=/tmp/keenproxy-config/config.yaml
+cat >"$config" <<'YAML'
 lan: {interface: eth0}
 api: {listen: '127.0.0.1:8086', token_file: /tmp/token}
 dns: {listen: '127.0.0.1:5354', upstreams: ['udp://192.0.2.53:53']}
@@ -14,7 +17,9 @@ intercept: {mode: tproxy}
 networks:
   - {name: LAN, cidr: 192.0.2.0/24, mode: split}
 YAML
-umask 077
+# A trusted setting left by a different firmware must not park nftables at startup.
+marker=$config.autoload-tproxy
+: >"$marker"
 cat /proc/sys/kernel/random/uuid >/tmp/token
 IFS= read -r token </tmp/token
 cleanup() {
@@ -28,7 +33,7 @@ cleanup() {
     exit "$rc"
 }
 trap cleanup EXIT
-/work/keenproxy -config /tmp/config.yaml -rule-sets /tmp/rules \
+/work/keenproxy -config "$config" -rule-sets /tmp/rules \
     -iptables "$(command -v iptables)" -iptables-restore "$(command -v iptables-restore)" >/tmp/daemon.log 2>&1 &
 pid=$!
 
@@ -55,6 +60,12 @@ apply() { api -X PUT -H 'Content-Type: application/json' --data-binary "@$1" "$b
 # The legacy IPv4 inventory is not authoritative for this backend.
 readiness=$(api "$base/diagnostics/tproxy")
 printf 'TPROXY readiness: %s\n' "$readiness"
+assert_active tproxy
+test -f "$marker"
+api -X PUT -H 'Content-Type: application/json' -d '{"enabled":false}' \
+    "$base/diagnostics/kernel-modules/tproxy/autoload" >/dev/null
+test ! -e "$marker"
+echo 'PASS: stale Keenetic opt-in does not block OpenWrt TPROXY startup'
 printf '%s\n' "$readiness" | grep -Eq '"state"[[:space:]]*:[[:space:]]*"unknown"'
 modules=$(api "$base/diagnostics/kernel-modules")
 case "$modules" in *'"autoload"'*|*'"can_autoload"'*) exit 1 ;; esac
@@ -62,7 +73,7 @@ code=$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' -X PUT \
     -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
     -d '{"enabled":true}' "$base/diagnostics/kernel-modules/tproxy/autoload")
 test "$code" = 409
-test ! -e /tmp/config.yaml.autoload-tproxy
+test ! -e "$marker"
 echo 'PASS: OpenWrt nftables rejects Keenetic firmware autoload enrollment'
 assert_active tproxy
 assert_tproxy_rule

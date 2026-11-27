@@ -200,7 +200,10 @@ func TestStartupRecoversIfEnrolledTProxyRulesAreRejected(t *testing.T) {
 	d.opt.OnStartupBlocked = func() { reported = true }
 	ctx := t.Context()
 	d.mu.Lock()
-	blocked, err := d.startLocked(ctx, func(ctx context.Context, cfg *model.Config) error {
+	blocked, err := d.startLocked(ctx, func(ctx context.Context, cfg *model.Config, preserveRoutes bool) error {
+		if !preserveRoutes {
+			t.Error("enrolled startup may replace unrelated policy routing")
+		}
 		// Exercise the real firewall installation without a platform-specific
 		// transparent socket or a privileged policy route.
 		d.plan = netfilter.Plan{Mode: cfg.Intercept.Mode}
@@ -212,6 +215,29 @@ func TestStartupRecoversIfEnrolledTProxyRulesAreRejected(t *testing.T) {
 	}
 	if runner.attempts != 1 || len(runner.jumps) != 0 || d.Config().Intercept.Mode != model.InterceptTProxy {
 		t.Fatalf("startup did not remove partially applied interception: attempts=%d jumps=%v", runner.attempts, runner.jumps)
+	}
+}
+
+func TestStartupKeepsManagementOnEnrolledTProxyRouteConflict(t *testing.T) {
+	holdMemoryLimit(t)
+	cfg := quietConfig(t)
+	cfg.Intercept.Mode = model.InterceptTProxy
+	path := writeSavedConfig(t, cfg)
+	writeAutoloadFixture(t, path+".autoload-tproxy", "")
+	runner := &recoveryFirewall{jumps: make(map[[3]string]bool)}
+	d := newMemoryDaemon(t, path, runner)
+	t.Cleanup(d.shutdown)
+	d.moduleAutoload = func(context.Context, string) (bool, error) { return true, nil }
+	d.tproxyProbe = func(context.Context) netfilter.TProxyReadiness {
+		return netfilter.TProxyReadiness{State: netfilter.TProxyReady}
+	}
+	d.mu.Lock()
+	blocked, err := d.startLocked(t.Context(), func(context.Context, *model.Config, bool) error {
+		return errors.Join(errPolicyRouteAcquisition, errors.New("conflicting policy rule already exists"))
+	})
+	d.mu.Unlock()
+	if err != nil || blocked == nil || !d.TProxyReadiness(t.Context()).StartupBlocked || runner.attempts != 0 {
+		t.Fatalf("route conflict did not preserve management: blocked=%t restores=%d err=%v", blocked != nil, runner.attempts, err)
 	}
 }
 

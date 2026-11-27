@@ -182,6 +182,9 @@ func (d *Daemon) autoloadKernelModulesLocked(ctx context.Context, tproxy bool) (
 			continue
 		}
 		enrolled, verified, err := loadSavedKernelModule(ctx, d.opt.ConfigPath, feature, d.moduleAutoload)
+		if errors.Is(err, netfilter.ErrModuleAutoloadUnsupported) {
+			continue
+		}
 		if feature == "tproxy" {
 			tproxyEnrolled = enrolled
 		}

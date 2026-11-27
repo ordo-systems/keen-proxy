@@ -151,6 +151,30 @@ func TestKernelModuleAutoloadEnrollmentRequiresRegistrationAndFirmware(t *testin
 	}
 }
 
+func TestUpdateGuardReportsFirmwareWhenOneFamilyIsKnownUnregistered(t *testing.T) {
+	for _, tc := range []struct {
+		families     GuardFamilies
+		firmwareErr  error
+		wantFirmware bool
+	}{
+		{families: GuardFamilies{IPv4: moduleUnregistered, IPv6: ModuleUnknown}, wantFirmware: true},
+		{families: GuardFamilies{IPv4: ModuleUnknown, IPv6: moduleUnregistered}, wantFirmware: true},
+		{families: GuardFamilies{IPv4: moduleUnregistered, IPv6: ModuleUnknown}, firmwareErr: fs.ErrNotExist},
+		{families: GuardFamilies{IPv4: moduleRegistered, IPv6: ModuleUnknown}},
+	} {
+		open := func(string, string) (*os.File, error) {
+			if tc.firmwareErr != nil {
+				return nil, tc.firmwareErr
+			}
+			return os.Open(os.DevNull)
+		}
+		status := guardModuleStatus(nil, "4.9-ndm-5", tc.families, open, func() bool { return true })
+		if status.State != ModuleUnknown || status.CanLoad || status.CanAutoload || status.FirmwarePresent != tc.wantFirmware {
+			t.Errorf("%+v: unexpected diagnostic evidence %+v", tc, status)
+		}
+	}
+}
+
 func TestGuardKernelModuleBootWithMissingFilterInventory(t *testing.T) {
 	for _, tc := range []struct {
 		name         string

@@ -91,7 +91,7 @@ const updateVersion = ref('')
 const managedUpdates = ref(false)
 const modules = ref<KernelModuleDiagnostics | null>(null)
 const moduleWarnings = computed(() =>
-  features.value?.demo ? [] : kernelModuleWarnings(modules.value, store.applied.value?.intercept.mode, managedUpdates.value),
+  features.value?.demo ? [] : kernelModuleWarnings(modules.value, st.value?.mode, managedUpdates.value),
 )
 let timer: ReturnType<typeof setInterval> | undefined
 let updateTimer: ReturnType<typeof setInterval> | undefined

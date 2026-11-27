@@ -54,11 +54,13 @@ In the KeeneticOS component list, check **Open Package support (OPKG)** and **Ke
 
 On Keenetic with legacy iptables, **Diagnostics → Kernel modules** checks for the `comment` match (`xt_comment`) for the temporary forwarding block during updates, and for registration of the IPv4 `TPROXY` target (`xt_TPROXY`). It reports IPv4 and IPv6 separately for the forwarding block and checks IPv6 registration only when IPv6 forwarding is enabled. For TPROXY readiness, see **Settings → Network → Interception mode**.
 
-The Overview shows a warning when KeenProxy confirms a firmware module is present but unregistered and the saved TPROXY mode or managed updates need it. **Open diagnostics** shows the module details. An inconclusive probe does not raise this warning.
+The Overview shows a warning when KeenProxy confirms a firmware module is present but unregistered and the applied TPROXY mode or managed updates need it. For the forwarding guard, a confirmed missing match in either required IP family is enough, even if the other family could not be checked. **Open diagnostics** shows the module details.
 
 **Load module** appears only for an eligible module found in the running firmware. If you are not signed in with a token, enter it for this load, even on a trusted network. This does not sign you in or save the token. Wait for any managed update to finish first. Loading does not download modules, change firewall rules, apply settings, or persist after reboot. If the kernel rejects the module or misses a dependency, check the firmware components and use the SSH checks below. After a successful TPROXY load, use **Apply** (or **Apply again** for saved settings), then test UDP from a client.
 
 Once the module's capability is registered and its file is verified, you can opt in to automatic loading in the same panel. This is separate from **Load module**, requires the same token authorization, and does not need **Apply**. KeenProxy uses the module from the current firmware, without saving a copy. It checks `xt_comment` at startup and before a managed update, and `xt_TPROXY` at startup only if the saved mode is TPROXY. Check the system journal if automatic loading fails. Turning it off does not unload a running module. The option is stored beside the router configuration and is not part of YAML backups.
+
+If you move the installation to another platform or switch from legacy iptables to nftables, existing opt-ins do not block startup.
 
 **Kernel and iptables checks.** Save as `test1.sh` and run `sh test1.sh` in an Entware SSH session. This does not apply rules or explicitly load modules.
 

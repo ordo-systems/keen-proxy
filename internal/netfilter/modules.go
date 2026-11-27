@@ -42,6 +42,9 @@ type KernelModules struct {
 // ErrModuleNotLoadable means the requested module is not an eligible recovery action.
 var ErrModuleNotLoadable = errors.New("firmware module is not available to load")
 
+// ErrModuleAutoloadUnsupported means the current platform is not Keenetic with legacy iptables.
+var ErrModuleAutoloadUnsupported = errors.New("firmware module autoload requires Keenetic with legacy iptables")
+
 const ipv6Conf = "/proc/sys/net/ipv6/conf"
 
 // ModuleUnknown means the kernel inventory or firmware file could not be verified.
@@ -98,7 +101,7 @@ func (f *Firewall) KernelModuleDiagnostics(ctx context.Context) KernelModules {
 	families := guardRegistrations(root, ipv6, known)
 	return KernelModules{
 		Guard: GuardModuleStatus{
-			KernelModuleStatus: moduleStatus(root, release, FirmwareModuleName("guard"), families.combined(), openFirmwareModule, firmwareCanLoad),
+			KernelModuleStatus: guardModuleStatus(root, release, families, openFirmwareModule, firmwareCanLoad),
 			GuardFamilies:      families,
 		},
 		TProxy: moduleStatus(root, release, FirmwareModuleName("tproxy"), tproxyRegistration(root), openFirmwareModule, firmwareCanLoad),
@@ -118,13 +121,32 @@ func tproxyRegistration(root fs.FS) string {
 	return moduleUnregistered
 }
 
+func guardModuleStatus(root fs.FS, release string, families GuardFamilies, open func(string, string) (*os.File, error), canLoad func() bool) KernelModuleStatus {
+	name := FirmwareModuleName("guard")
+	registration := families.combined()
+	status := moduleStatus(root, release, name, registration, open, canLoad)
+	// A known missing match still matters when the other family is unknown.
+	// Preserve the inconclusive overall state so no load action is offered.
+	if registration == ModuleUnknown && families.hasUnregistered() {
+		status.FirmwarePresent = firmwareModulePresent(release, name, open)
+	}
+	return status
+}
+
+func firmwareModulePresent(release, name string, open func(string, string) (*os.File, error)) bool {
+	file, err := open(release, name)
+	if err != nil {
+		return false
+	}
+	file.Close()
+	return true
+}
+
 func moduleStatus(root fs.FS, release, name, registration string, open func(string, string) (*os.File, error), canLoad func() bool) KernelModuleStatus {
 	if registration == moduleRegistered {
-		file, err := open(release, name)
-		if err != nil {
+		if !firmwareModulePresent(release, name, open) {
 			return KernelModuleStatus{State: registration}
 		}
-		file.Close()
 		return KernelModuleStatus{State: registration, CanAutoload: true, FirmwarePresent: true}
 	}
 	if registration != moduleUnregistered {
@@ -138,10 +160,7 @@ func moduleStatus(root fs.FS, release, name, registration string, open func(stri
 	if status.State == moduleLoadedUnregistered {
 		// The module may have been loaded from elsewhere; verify the firmware
 		// descriptor without making it eligible for another load.
-		if firmware, err := open(release, name); err == nil {
-			firmware.Close()
-			status.FirmwarePresent = true
-		}
+		status.FirmwarePresent = firmwareModulePresent(release, name, open)
 	}
 	return status
 }
@@ -200,10 +219,14 @@ func (g GuardFamilies) combined() string {
 	if g.IPv4 == ModuleUnknown || g.IPv6 == ModuleUnknown {
 		return ModuleUnknown
 	}
-	if g.IPv4 == moduleUnregistered || g.IPv6 == moduleUnregistered {
+	if g.hasUnregistered() {
 		return moduleUnregistered
 	}
 	return moduleRegistered
+}
+
+func (g GuardFamilies) hasUnregistered() bool {
+	return g.IPv4 == moduleUnregistered || g.IPv6 == moduleUnregistered
 }
 
 func ipv6Forwarding(root fs.FS) (enabled, known bool) {
@@ -248,8 +271,11 @@ func (f *Firewall) loadKernelModule(ctx context.Context, feature string, autoloa
 	if name == "" {
 		return false, ErrModuleNotLoadable
 	}
-	release, _ := f.legacyKeenetic(ctx, os.ReadFile, iptablesVersion)
+	release, err := f.legacyKeenetic(ctx, os.ReadFile, iptablesVersion)
 	if release == "" {
+		if autoload && err == nil {
+			return false, ErrModuleAutoloadUnsupported
+		}
 		return false, ErrModuleNotLoadable
 	}
 	root := os.DirFS("/")
@@ -270,7 +296,7 @@ func guardAutoloadRegistration(root fs.FS) string {
 	ipv6, known := ipv6Forwarding(root)
 	families := guardRegistrations(root, ipv6, known)
 	// Even if one family is unknown, do not ignore a confirmed missing match.
-	if families.IPv4 == moduleUnregistered || families.IPv6 == moduleUnregistered {
+	if families.hasUnregistered() {
 		return moduleUnregistered
 	}
 	return families.combined()

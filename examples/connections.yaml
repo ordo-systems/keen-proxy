@@ -29,6 +29,7 @@ connections:
   # 3. Raw sing-box outbound/endpoint objects for protocols enabled in the build.
   #    Omit tag: the compiler derives it from id. Check the upstream schema
   #    and the selected full/lite registry before adding a raw protocol.
+  #    The ShadowTLS example below is not a supported DNS tunnel.
   - id: shadowtls
     type: singbox
     outbound:

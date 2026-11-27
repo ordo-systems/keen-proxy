@@ -52,3 +52,13 @@ test('DNS tunnel choices omit direct interfaces and tunnels that fall back to on
   assert.deepEqual(dnsTunnelChoices(choices.slice(0, 1), [bound]), [])
   assert.deepEqual(dnsTunnelChoices(choices, [bound, { ...tunnel, fallback: bound.id }]), [])
 })
+
+test('DNS tunnel choices reject unsupported raw types but leave the Direct failure policy selectable', () => {
+  const selector: Connection = { id: 'selector', name: 'Selector', type: 'singbox', outbound: { type: 'selector', outbounds: ['direct'] } }
+  const unsupportedEndpoint: Connection = { id: 'endpoint', name: 'Endpoint', type: 'singbox', outbound: { type: 'socks' }, endpoint: { type: 'tailscale' } }
+  const tunnel: Connection = { id: 'wg', name: 'WG', type: 'singbox', endpoint: { type: 'wireguard' }, fallback: 'direct' }
+  const connections = [selector, unsupportedEndpoint, tunnel]
+  const choices = connections.map(connection => ({ value: connection.id }))
+  assert.deepEqual(dnsTunnelChoices(choices, connections), [{ value: 'wg' }])
+  assert.deepEqual(dnsTunnelChoices(choices, [selector, unsupportedEndpoint, { ...tunnel, fallback: selector.id }]), [])
+})

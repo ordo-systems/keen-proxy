@@ -1,14 +1,32 @@
 import { connectionChain } from './connectionDraft.ts'
 import type { Connection, DNSConfig } from './types'
 
-// A direct outbound in the fallback chain does not guarantee a DNS tunnel.
-export function dnsChainHasDirect(connections: Connection[], id: string): boolean {
+// Keep in sync with raw tunnel types accepted by internal/model/features.go.
+const rawDNSTunnelTypes = [
+  'wireguard', 'socks', 'http', 'shadowsocks', 'vmess', 'vless', 'trojan', 'tuic',
+  'hysteria', 'hysteria2', 'ssh', 'naive', 'anytls',
+]
+
+// A named raw outbound must be a tunnel even when built-in Direct is allowed.
+export function dnsTunnelError(connections: Connection[], id: string, failure: DNSConfig['failure']): string | undefined {
   const chain = connectionChain(connections, id)
-  return connections.some(c => c.type === 'singbox' && c.outbound?.type === 'direct' && chain.includes(c.id))
+  for (const member of chain) {
+    const connection = connections.find(c => c.id === member)
+    if (connection?.type !== 'singbox') continue
+    const rawType = (connection.endpoint ?? connection.outbound)?.type
+    const type = typeof rawType === 'string' ? rawType : ''
+    if (!rawDNSTunnelTypes.includes(type)) {
+      return `dns.connection: raw type ${JSON.stringify(type)} does not guarantee a tunnel`
+    }
+  }
+  if (failure !== 'direct' && chain.includes('direct')) {
+    return 'dns: strict forbids direct in the connection chain'
+  }
 }
 
 export function dnsTunnelChoices<T extends { value: string }>(choices: T[], connections: Connection[]): T[] {
-  return choices.filter(choice => !dnsChainHasDirect(connections, choice.value))
+  // Failure policy is selected separately; keep tunnels that can work with Direct allowed.
+  return choices.filter(choice => !dnsTunnelError(connections, choice.value, 'direct'))
 }
 
 // Keep existing resolver lists usable until the operator changes their order or contents.

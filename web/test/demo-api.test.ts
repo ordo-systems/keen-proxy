@@ -136,6 +136,38 @@ test('demo rejects Apply when an existing DNS tunnel gains an interface fallback
   assert.deepEqual(await api.config(), saved)
 })
 
+test('demo rejects raw selectors in DNS chains and allows built-in Direct only with direct failure policy', async (t) => {
+  const original = await api.config()
+  t.after(async () => { await api.saveConfig(original) })
+  const draft = await api.config()
+  draft.dns.route = 'connection'
+  draft.dns.connection = 'fi'
+  const tunnel = draft.connections!.find(connection => connection.id === 'fi')!
+  draft.connections!.push({
+    id: 'selector', name: 'Selector', type: 'singbox',
+    outbound: { type: 'selector', outbounds: ['direct'] },
+  })
+  tunnel.fallback = 'selector'
+  draft.dns.failure = 'direct'
+  const rawError = /dns\.connection: raw type "selector" does not guarantee a tunnel/
+  await assert.rejects(api.validateConfig(draft), rawError)
+  await assert.rejects(api.saveConfig(draft), rawError)
+
+  tunnel.fallback = 'direct'
+  for (const failure of [undefined, 'strict'] as const) {
+    draft.dns.failure = failure
+    const strictError = /dns: strict forbids direct in the connection chain/
+    await assert.rejects(api.validateConfig(draft), strictError)
+    await assert.rejects(api.saveConfig(draft), strictError)
+  }
+  assert.deepEqual(await api.config(), original)
+
+  draft.dns.failure = 'direct'
+  assert.equal((await api.validateConfig(draft)).ok, true)
+  await api.saveConfig(draft)
+  assert.equal((await api.config()).dns.failure, 'direct')
+})
+
 test('demo Apply validates explicit DNS source bypasses without changing the saved config on failure', async (t) => {
   t.mock.method(globalThis, 'fetch', async () => { throw new Error('Unexpected network request') })
   const original = await api.config()

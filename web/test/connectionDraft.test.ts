@@ -71,6 +71,16 @@ test('router interface outbound persists the kernel device, not its label or sta
   assert.throws(() => manualConnection({ ...fields, routerDevice: '' }), /routerDevice/)
 })
 
+test('router interface IDs stay outside the failover selector namespace', () => {
+  const home: Connection = { id: 'home', name: 'Home', type: 'link', fallback: 'direct' }
+  const id = routerInterfaceID('Failover Home', 'nwg0', [home])
+  assert.equal(id, 'router-failover-home')
+  assert.equal(routerInterfaceID('Failover Home', 'nwg0', [home, { ...home, id }]), `${id}-2`)
+  assert.equal(routerInterfaceID('Failover', 'nwg0', [
+    { ...home, id: 'failover' }, { ...home, id: '2' },
+  ]), 'router-failover')
+})
+
 test('router interface names fall back to the kernel name without a firmware label', () => {
   const device = { name: 'wg0', up: true }
   assert.equal(routerInterfaceName(device), 'wg0')

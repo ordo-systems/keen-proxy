@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { dnsUpstreamsIncomplete, selectDNSResolver } from '../src/dnsSettings.ts'
-import type { DNSConfig } from '../src/types'
+import { dnsTunnelChoices, dnsUpstreamsIncomplete, selectDNSResolver } from '../src/dnsSettings.ts'
+import type { Connection, DNSConfig } from '../src/types'
 
 const primary = 'https://one.example/dns-query'
 const secondary = 'tls://two.example:853'
@@ -42,4 +42,13 @@ test('selecting the secondary first leaves an explicit empty primary slot', () =
   selectDNSResolver(dns, 0, primary)
   assert.deepEqual(dns.upstreams, [primary, extra])
   assert.equal(dns.bootstrap, undefined)
+})
+
+test('DNS tunnel choices omit direct interfaces and tunnels that fall back to one', () => {
+  const bound: Connection = { id: 'lan', name: 'LAN', type: 'singbox', outbound: { type: 'direct', bind_interface: 'eth0' } }
+  const tunnel: Connection = { id: 'wg', name: 'WG', type: 'singbox', endpoint: { type: 'wireguard' } }
+  const choices = [{ value: 'lan', label: 'LAN' }, { value: 'wg', label: 'WG' }]
+  assert.deepEqual(dnsTunnelChoices(choices, [bound, tunnel]), [choices[1]])
+  assert.deepEqual(dnsTunnelChoices(choices.slice(0, 1), [bound]), [])
+  assert.deepEqual(dnsTunnelChoices(choices, [bound, { ...tunnel, fallback: bound.id }]), [])
 })

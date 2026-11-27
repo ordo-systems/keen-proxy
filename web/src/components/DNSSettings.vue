@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NCheckbox, NDynamicInput, NForm, NFormItem, NInput, NSelect } from 'naive-ui'
 import { api } from '../api'
 import { store, selectableConnections } from '../store'
-import { selectDNSResolver } from '../dnsSettings'
+import { dnsTunnelChoices, selectDNSResolver } from '../dnsSettings'
 import type { DNSProfile, DNSCheck, FeatureStatus, DNSConfig } from '../types'
 const { t } = useI18n()
 const cfg = computed(() => store.state.config!)
@@ -73,11 +73,11 @@ function selectedResolversFor(endpoint: string) {
 
 watch(cfg, () => customSlots.value.clear())
 watch(dns, () => { result.value = undefined }, { deep: true })
-const conns = computed(() => selectableConnections(dns.value.connection))
+const conns = computed(() => dnsTunnelChoices(selectableConnections(dns.value.connection), cfg.value.connections ?? []))
 const routes = computed(() => [
   { label: t('features.dnsLegacy'), value: '' },
   { label: t('features.dnsDirect'), value: 'direct' },
-  { label: t('features.dnsTunnel'), value: 'connection' },
+  { label: t('features.dnsTunnel'), value: 'connection', disabled: !conns.value.length && dns.value.route !== 'connection' },
 ])
 const failures = computed(() => [
   { label: t('features.dnsStrict'), value: 'strict' },
@@ -109,7 +109,10 @@ function removeBootstrap(host: string) {
 // Reset route-specific settings when switching policies.
 function changeRoute(route: DNSConfig['route']) {
   dns.value.route = route
-  dns.value.connection = route === 'connection' ? dns.value.connection || selectableConnections()[0]?.value : undefined
+  const current = dns.value.connection
+  dns.value.connection = route === 'connection'
+    ? conns.value.find(({ value }) => value === current)?.value ?? conns.value[0]?.value
+    : undefined
   dns.value.failure = route === 'connection' ? 'strict' : undefined
   if (route) dns.value.fallback = ''
 }

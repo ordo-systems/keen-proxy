@@ -26,7 +26,9 @@ export function routerInterfaceName(device: RouterInterface): string {
 
 // Keep the generated ID usable without asking for another field in the wizard.
 export function routerInterfaceID(name: string, device: string, connections: readonly Connection[]): string {
-  const base = slugify(name) || slugify(device) || 'router-interface'
+  const slug = slugify(name) || slugify(device) || 'router-interface'
+  // The compiler reserves failover-<id> for generated selectors.
+  const base = slug === 'failover' || slug.startsWith('failover-') ? `router-${slug}`.slice(0, 32) : slug
   const taken = new Set(['direct', 'block', ...connections.map((connection) => connection.id)])
   let id = base
   for (let i = 2; taken.has(id); i++) {

@@ -330,8 +330,9 @@ func (d *Daemon) applyConfigLocked(ctx context.Context, cfg *model.Config, save 
 	prev := d.cfg
 	changes := configChanges(prev, cfg)
 	activation := d.startupBlocked
+	preserveRoutes := d.routeRelease != nil
 	neighbors := d.neighbors
-	if err := d.applyLocked(ctx, cfg, activation != nil); err != nil {
+	if err := d.applyLocked(ctx, cfg, activation != nil || preserveRoutes); err != nil {
 		details := err.Error()
 		restore := journalRestoreFailure(err)
 		var rollbackRestore *journal.RestoreDiagnostic
@@ -342,7 +343,7 @@ func (d *Daemon) applyConfigLocked(ctx context.Context, cfg *model.Config, save 
 			details += "; interception remains inactive"
 		} else if prev != nil {
 			d.log.Error("new configuration failed to apply, restoring previous configuration", "err", err)
-			if rbErr := d.applyLocked(ctx, prev, false); rbErr != nil {
+			if rbErr := d.applyLocked(ctx, prev, preserveRoutes); rbErr != nil {
 				d.log.Error("rollback also failed", "err", rbErr)
 				details += "; rollback also failed: " + rbErr.Error()
 				rollbackRestore = journalRestoreFailure(rbErr)

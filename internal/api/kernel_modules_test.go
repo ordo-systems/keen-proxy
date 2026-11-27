@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/ordo-systems/keen-proxy/internal/daemon"
@@ -14,14 +15,16 @@ import (
 
 type moduleDiagnosticStub struct {
 	*fakeDaemon
-	loaded string
+	loaded        string
+	autoload      bool
+	autoloadCalls int
 }
 
 func (s *moduleDiagnosticStub) KernelModuleDiagnostics(context.Context) netfilter.KernelModules {
 	guard := netfilter.KernelModuleStatus{State: "unloaded", CanLoad: true}
 	families := netfilter.GuardFamilies{IPv4: "unregistered", IPv6: "not_required"}
 	if s.loaded == "guard" {
-		guard = netfilter.KernelModuleStatus{State: "registered"}
+		guard = netfilter.KernelModuleStatus{State: "registered", Autoload: s.autoload, CanAutoload: !s.autoload}
 		families.IPv4 = "registered"
 	}
 	return netfilter.KernelModules{
@@ -33,6 +36,63 @@ func (s *moduleDiagnosticStub) KernelModuleDiagnostics(context.Context) netfilte
 func (s *moduleDiagnosticStub) LoadKernelModule(_ context.Context, feature string) error {
 	s.loaded = feature
 	return nil
+}
+
+func (s *moduleDiagnosticStub) SetKernelModuleAutoload(_ context.Context, feature string, enabled bool) error {
+	s.autoloadCalls++
+	if enabled && s.loaded != feature {
+		return netfilter.ErrModuleNotLoadable
+	}
+	s.autoload = enabled
+	return nil
+}
+
+func TestFirmwareModuleAutoloadAction(t *testing.T) {
+	const base = "http://keenproxy.example/api/diagnostics/kernel-modules/"
+	s, fake := newServer()
+	fake.cfg.API.NoTokenFrom = []string{"192.168.7.0/24"}
+	stub := &moduleDiagnosticStub{fakeDaemon: fake}
+	s.D = stub
+	h := s.Handler()
+	request := func(feature, origin, token, body string, want int) kernelModuleResponse {
+		t.Helper()
+		r := httptest.NewRequest("PUT", base+feature+"/autoload", strings.NewReader(body))
+		r.RemoteAddr = lan
+		r.Header.Set("Origin", origin)
+		if token != "" {
+			r.Header.Set("Authorization", "Bearer "+token)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != want || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Set-Cookie") != "" {
+			t.Fatalf("%s %s: got %d %s, want %d", feature, body, w.Code, w.Body, want)
+		}
+		var got kernelModuleResponse
+		if want == http.StatusOK && json.Unmarshal(w.Body.Bytes(), &got) != nil {
+			t.Fatalf("invalid diagnostics: %s", w.Body)
+		}
+		return got
+	}
+	const origin = "http://keenproxy.example"
+	request("guard", origin, "", `{"enabled":true}`, http.StatusForbidden)
+	request("guard", "http://other.example", "secret", `{"enabled":true}`, http.StatusForbidden)
+	request("xt_socket", origin, "secret", `{"enabled":true}`, http.StatusNotFound)
+	for _, body := range []string{`{}`, `{"enabled":null}`, `{"enabled":"true"}`, `{"enabled":true} false`} {
+		request("guard", origin, "secret", body, http.StatusBadRequest)
+	}
+	if stub.autoloadCalls != 0 {
+		t.Fatal("unauthorized or malformed request reached daemon")
+	}
+	request("guard", origin, "secret", `{"enabled":true}`, http.StatusConflict)
+	stub.loaded = "guard"
+	got := request("guard", origin, "secret", `{"enabled":true}`, http.StatusOK)
+	if !got.Guard.Autoload || !got.TokenRequired || fake.applied != nil {
+		t.Fatalf("enable changed panel session or routing: %+v", got)
+	}
+	got = request("guard", origin, "secret", `{"enabled":false}`, http.StatusOK)
+	if got.Guard.Autoload || got.Guard.State != "registered" || !got.Guard.CanAutoload {
+		t.Fatalf("disable changed module registration: %+v", got)
+	}
 }
 
 func TestFirmwareModuleActionRequiresTokenAndSameOrigin(t *testing.T) {
@@ -110,16 +170,27 @@ func TestFirmwareModuleBearerDoesNotCreatePanelSession(t *testing.T) {
 	}
 }
 
-func TestSupportBundleKeepsOnlyKnownFirmwareLoadMetadata(t *testing.T) {
-	for _, target := range []string{"guard", "tproxy", "private-config"} {
-		entry := journal.Entry{Action: daemon.FirmwareModuleLoadAction, Target: target, Result: "error", Details: "permission denied at private path"}
-		safe := supportEntry(journal.Audit, entry, func(_, _ string) string { return "connection-1" })
-		want := target
-		if target == "private-config" {
-			want = ""
+func TestSupportBundleKeepsOnlyKnownFirmwareModuleMetadata(t *testing.T) {
+	alias := func(_, _ string) string { return "connection-1" }
+	for _, action := range []string{daemon.FirmwareModuleLoadAction, daemon.FirmwareModuleAutoloadAction} {
+		for _, target := range []string{"guard", "tproxy", "private-config"} {
+			entry := journal.Entry{Action: action, Target: target, Result: "error", Details: "permission denied at private path"}
+			safe := supportEntry(journal.Audit, entry, alias)
+			want := target
+			if target == "private-config" {
+				want = ""
+			}
+			if safe.Action != action || safe.Target != want || safe.Result != "error" || safe.Details != "permission denied" {
+				t.Fatalf("incorrect sanitized event: %+v", safe)
+			}
 		}
-		if safe.Action != "Firmware module load" || safe.Target != want || safe.Result != "error" || safe.Details != "permission denied" {
-			t.Fatalf("incorrect sanitized event: %+v", safe)
-		}
+	}
+	entry := journal.Entry{Action: daemon.FirmwareModuleAutoloadAction, Target: "tproxy", Result: "ok", Details: "enabled=false (from 192.0.2.2)"}
+	if got := supportEntry(journal.Audit, entry, alias).Details; got != "enabled=false" {
+		t.Fatalf("incorrect sanitized setting: %q", got)
+	}
+	entry = journal.Entry{Message: "firmware module autoload failed feature=tproxy err=permission denied at private path"}
+	if got := supportEntry(journal.System, entry, alias).Message; got != "firmware module autoload failed: permission denied" {
+		t.Fatalf("incorrect sanitized system event: %q", got)
 	}
 }

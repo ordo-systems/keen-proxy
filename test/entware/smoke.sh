@@ -131,5 +131,15 @@ install v1.2.5
 test ! -e /tmp/forwarding-leak
 test "$(wc -l </tmp/guarded-starts)" -eq 3
 assert_ready v1.2.5
+
+# Entware tools alone must not authorize firmware loading on Docker's kernel.
+IFS= read -r token </opt/etc/keenproxy/token
+endpoint=http://127.0.0.1:8086/api/diagnostics/kernel-modules
+code=$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' -X PUT \
+    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+    -d '{"enabled":true}' "$endpoint/guard/autoload")
+test "$code" = 409
+test ! -e /opt/etc/keenproxy/config.yaml.autoload-guard
+echo 'PASS: Entware without Keenetic firmware rejects autoload enrollment'
 /opt/bin/sh /opt/etc/init.d/S99keenproxy stop
 printf '%s\n' 'PASS: Entware S99keenproxy update and rollback with real IPv4/IPv6 packets'

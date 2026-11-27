@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { NAlert } from 'naive-ui'
 import {
   Server,
   Layers,
@@ -18,7 +19,8 @@ import { store } from '../store'
 import { useStats } from '../useStats'
 import { bits, mbit } from '../format'
 import { protocolOf } from '../conn'
-import type { FeatureStatus } from '../types'
+import type { FeatureStatus, KernelModuleDiagnostics } from '../types'
+import { kernelModuleWarnings } from '../kernelModuleWarnings'
 import AreaChart from '../components/AreaChart.vue'
 import ConnectionHealth from '../components/ConnectionHealth.vue'
 import ConnectionChecks from '../components/ConnectionChecks.vue'
@@ -86,6 +88,11 @@ const down = computed(() => tunnels.value.reduce((sum, o) => sum + o.down, 0)),
   up = computed(() => tunnels.value.reduce((sum, o) => sum + o.up, 0))
 const features = ref<FeatureStatus | null>(null)
 const updateVersion = ref('')
+const managedUpdates = ref(false)
+const modules = ref<KernelModuleDiagnostics | null>(null)
+const moduleWarnings = computed(() =>
+  features.value?.demo ? [] : kernelModuleWarnings(modules.value, st.value?.mode, managedUpdates.value),
+)
 let timer: ReturnType<typeof setInterval> | undefined
 let updateTimer: ReturnType<typeof setInterval> | undefined
 async function loadFeatures() {
@@ -98,16 +105,30 @@ async function loadFeatures() {
 async function loadUpdateNotice() {
   try {
     const status = await api.updates()
+    managedUpdates.value = status.available && !status.demo
     updateVersion.value = status.job?.state === 'running' ? '' : (status.latest ?? '')
   } catch {
+    managedUpdates.value = false
     // Release checks are independent of the routing dashboard.
   }
+}
+async function loadModules() {
+  if (features.value?.demo) return
+  try {
+    modules.value = await api.kernelModules()
+  } catch {
+    modules.value = null
+  }
+}
+function refreshNotices() {
+  void loadUpdateNotice()
+  void loadModules()
 }
 onMounted(() => {
   void loadFeatures()
   timer = setInterval(loadFeatures, 5000)
-  void loadUpdateNotice()
-  updateTimer = setInterval(loadUpdateNotice, 60_000)
+  refreshNotices()
+  updateTimer = setInterval(refreshNotices, 60_000)
 })
 onUnmounted(() => {
   clearInterval(timer)
@@ -132,6 +153,13 @@ const selectedStats = computed(() => byTag(tab.value))
           :size="22"
         />{{ t(routingOK ? 'ui.running' : 'ui.attention') }}</router-link
       >
+    </div>
+
+    <div v-if="moduleWarnings.length" class="kernel-warning">
+      <NAlert type="warning" :title="t('monitor.kernelWarning.title')">
+        <p v-for="feature in moduleWarnings" :key="feature">{{ t(`monitor.kernelWarning.${feature}`) }}</p>
+        <router-link :to="{ name: 'diagnostics' }">{{ t('monitor.kernelWarning.diagnostics') }}</router-link>
+      </NAlert>
     </div>
 
     <router-link v-if="updateVersion" :to="{ name: 'settings', query: { section: 'updates' } }" class="update-notice">
@@ -287,6 +315,16 @@ h2 {
 .routing-status.warn {
   color: var(--warn);
   border: 1px solid var(--warn);
+}
+.kernel-warning {
+  margin-bottom: 16px;
+}
+.kernel-warning p {
+  margin: 0 0 8px;
+}
+.kernel-warning a {
+  color: inherit;
+  text-decoration: underline;
 }
 .update-notice {
   display: inline-flex;

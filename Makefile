@@ -127,14 +127,19 @@ integration:
 	CGO_ENABLED=0 GOOS=linux $(GO) build -tags $(TAGS) -o dist/keenproxy-test ./cmd/keenproxy
 	CGO_ENABLED=0 GOOS=linux $(GO) build -tags $(TAGS) -o dist/sbserver-test ./test/netns/sbserver
 	CGO_ENABLED=0 GOOS=linux $(GO) build -o dist/mkgeo-test ./test/netns/mkgeo
+	CGO_ENABLED=0 GOOS=linux $(GO) test -c -tags $(TAGS),keenproxy_netns -o dist/keenproxy-daemon-test ./internal/daemon
 	docker run --rm --privileged -v $(CURDIR)/dist/keenproxy-test:/work/keenproxy:ro \
 		-v $(CURDIR)/dist/sbserver-test:/work/sbserver:ro \
+		-v $(CURDIR)/dist/keenproxy-daemon-test:/work/keenproxy-daemon-test:ro \
 		-v $(CURDIR)/dist/mkgeo-test:/work/mkgeo:ro \
 		-v $(CURDIR)/tools:/work/tools:ro \
 		-v $(CURDIR)/test/install:/work/test/install:ro \
 		-v $(CURDIR)/test/netns:/work/test/netns:ro debian:bookworm-slim sh -c '\
 		apt-get -qq update >/dev/null && apt-get -qq install -y --no-install-recommends \
-		iptables iproute2 iputils-ping dnsmasq-base curl dnsutils python3 >/dev/null 2>&1 && sh /work/test/netns/run.sh'
+		iptables iproute2 iputils-ping dnsmasq-base curl dnsutils python3 >/dev/null 2>&1 && \
+		ip netns add policy-route-test && ip -n policy-route-test link set lo up && \
+		ip netns exec policy-route-test /work/keenproxy-daemon-test -test.run "^TestEnrolledTProxyRollbackPreservesExistingPolicyRoute$$" -test.v && \
+		ip netns del policy-route-test && sh /work/test/netns/run.sh'
 
 .PHONY: integration-openwrt
 integration-openwrt:

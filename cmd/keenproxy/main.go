@@ -45,7 +45,12 @@ func main() {
 	key := flag.Bool("key", false, "print the current panel token and exit")
 	showURL := flag.Bool("url", false, "print the configured panel URL and exit")
 	startupProtocol := flag.Bool("startup-state-protocol", false, "print the service readiness protocol version and exit")
+	autoloadUpdateGuard := flag.Bool("autoload-update-guard", false, "load the opted-in Keenetic forwarding guard module and exit")
 	flag.Parse()
+	if *autoloadUpdateGuard && (*startupProtocol || *key || *showURL || *dryRun || *uiDemo) {
+		fmt.Fprintln(os.Stderr, "-autoload-update-guard cannot be combined with other operation modes")
+		os.Exit(1)
+	}
 	if *startupProtocol {
 		fmt.Println("1")
 		return
@@ -73,6 +78,17 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if *autoloadUpdateGuard {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		fw := netfilter.NewFirewall()
+		fw.IPTables = *iptables
+		if err := daemon.AutoloadUpdateGuard(ctx, *configPath, fw); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// Keep journals beside derived rule sets; the UI demo uses memory only.
 	journalDir := filepath.Join(filepath.Dir(*ruleSetDir), "journal")

@@ -63,6 +63,8 @@ export const api = {
  kernelModules:()=>request<KernelModuleDiagnostics>('GET','/api/diagnostics/kernel-modules'),
  loadKernelModule:(feature:KernelFeature, oneShotToken?:string)=>request<KernelModuleDiagnostics>(
    'POST',`/api/diagnostics/kernel-modules/${feature}/load`,undefined,{ oneShotToken }),
+ setKernelModuleAutoload:(feature:KernelFeature, enabled:boolean, oneShotToken?:string)=>request<KernelModuleDiagnostics>(
+   'PUT',`/api/diagnostics/kernel-modules/${feature}/autoload`,{enabled},{ oneShotToken }),
  tproxyReadiness:()=>request<TProxyReadiness>('GET','/api/diagnostics/tproxy'),
  retryTProxy: async (): Promise<void> => { await send('POST', '/api/diagnostics/tproxy/retry') },
  catalog:()=>request<Catalog>('GET','/api/catalog'),

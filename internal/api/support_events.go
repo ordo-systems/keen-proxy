@@ -38,17 +38,24 @@ func supportEntry(kind journal.Kind, e journal.Entry, alias supportAlias) journa
 			"Interception rules not restored", "Direct DNS fallback", "Restore selected DNS route",
 			"IP database updated", "IP database update failed", "DNS query blocked",
 			"Switch to fallback", "No working connection", "Return to primary", "Return to higher priority",
-			daemon.FirmwareModuleLoadAction)
+			daemon.FirmwareModuleLoadAction, daemon.FirmwareModuleAutoloadAction)
 		if safe.Action == "" {
 			safe.Action = "Other audit event"
 		}
 		safe.Result = known(e.Result, "ok", "info", "warn", "error")
-		if safe.Action != daemon.FirmwareModuleLoadAction {
+		switch safe.Action {
+		case daemon.FirmwareModuleLoadAction, daemon.FirmwareModuleAutoloadAction:
+			if netfilter.FirmwareModuleName(e.Target) != "" {
+				safe.Target = e.Target
+			}
+		default:
 			safe.Target = supportAuditTarget(e.Target, alias)
-		} else if netfilter.FirmwareModuleName(e.Target) != "" {
-			safe.Target = e.Target
 		}
 		safe.Details = failureClass(e.Details)
+		if safe.Action == daemon.FirmwareModuleAutoloadAction && safe.Result == "ok" {
+			setting, _, _ := strings.Cut(e.Details, " (from ")
+			safe.Details = known(setting, "enabled=true", "enabled=false")
+		}
 		safe.Firewall = supportFirewall(e)
 		safe.FirewallApply = supportFirewallApply(e)
 	case journal.System:
@@ -100,6 +107,7 @@ func systemEvent(message string) string {
 		"new configuration failed to apply", "rollback also failed", "sing-box core restarted",
 		"interception rules disappeared", "rule restoration", "rule update", "remove rules",
 		"netfilter event hook enabled", "netfilter event hook unavailable", "netfilter event watcher error",
+		"firmware module autoload failed", "firmware module autoload submitted descriptor and verified registration",
 		"ARP unavailable", "IP database loaded", "IP database download failed",
 		"upstream DNS did not respond", "system resolver did not respond",
 		"scheduled update failed to start", "no connection in the chain is available",

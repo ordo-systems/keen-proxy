@@ -14,6 +14,7 @@ import (
 type kernelModuleDaemon interface {
 	KernelModuleDiagnostics(context.Context) netfilter.KernelModules
 	LoadKernelModule(context.Context, string) error
+	SetKernelModuleAutoload(context.Context, string, bool) error
 }
 
 type kernelModuleResponse struct {
@@ -32,14 +33,15 @@ func (s *Server) kernelModules(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, kernelModuleResponse{status, !s.tokenCookieOK(r)})
 }
 
-func (s *Server) loadKernelModule(w http.ResponseWriter, r *http.Request) {
+// mutateKernelModule applies the same authorization and update lock to both operations.
+func (s *Server) mutateKernelModule(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if !s.tokenOK(r) {
-		writeError(w, http.StatusForbidden, "panel token required to load a firmware module")
+		writeError(w, http.StatusForbidden, "panel token required to change firmware module settings")
 		return
 	}
 	if err := browserOrigin.Check(r); err != nil {
-		writeError(w, http.StatusForbidden, "cross-origin firmware module load denied")
+		writeError(w, http.StatusForbidden, "cross-origin firmware module action denied")
 		return
 	}
 	feature := r.PathValue("feature")
@@ -52,14 +54,28 @@ func (s *Server) loadKernelModule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, netfilter.ErrModuleNotLoadable.Error())
 		return
 	}
+	var change struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if r.Method == http.MethodPut {
+		if err := decodeJSONRequest(w, r, 256, &change); err != nil || change.Enabled == nil {
+			writeError(w, http.StatusBadRequest, "expected a JSON boolean in the enabled field")
+			return
+		}
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	ctx = daemon.WithActor(ctx, daemon.Actor{Who: "user", From: clientIP(r)})
-	err := s.Updates.WithoutInstall(func() error { return d.LoadKernelModule(ctx, feature) })
+	err := s.Updates.WithoutInstall(func() error {
+		if change.Enabled != nil {
+			return d.SetKernelModuleAutoload(ctx, feature, *change.Enabled)
+		}
+		return d.LoadKernelModule(ctx, feature)
+	})
 	if err != nil {
 		switch {
 		case errors.Is(err, update.ErrBusy):
-			writeError(w, http.StatusConflict, "wait for the managed update to finish before loading a module")
+			writeError(w, http.StatusConflict, "wait for the managed update to finish before changing firmware module settings")
 		case errors.Is(err, netfilter.ErrModuleNotLoadable):
 			writeError(w, http.StatusConflict, err.Error())
 		default:

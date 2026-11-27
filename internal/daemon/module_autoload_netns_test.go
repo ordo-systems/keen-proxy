@@ -65,6 +65,14 @@ func TestEnrolledTProxyRollbackPreservesExistingPolicyRoute(t *testing.T) {
 	if status := d.Status(ctx); status.Mode != string(model.InterceptTProxy) || !status.Firewall {
 		t.Fatalf("rollback did not restore TPROXY: mode=%s firewall=%t", status.Mode, status.Firewall)
 	}
+	if err := d.Apply(ctx, redirect); err != nil {
+		t.Fatalf("switch to REDIRECT: %v", err)
+	}
+	tproxy := d.Config()
+	tproxy.Intercept.Mode = model.InterceptTProxy
+	if err := d.Apply(ctx, tproxy); err != nil {
+		t.Fatalf("switch back to TPROXY: %v", err)
+	}
 	stop()
 	if rules, routes := ip("-4", "rule", "show"), ip("-4", "route", "show", "table", "all"); rules != beforeRule || routes != beforeRoutes {
 		t.Fatalf("rollback and shutdown changed preexisting routing: rules=%q routes=%q", rules, routes)

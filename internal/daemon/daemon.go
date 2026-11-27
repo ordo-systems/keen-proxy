@@ -90,6 +90,10 @@ type Daemon struct {
 	route        netfilter.TProxyRoute
 	routeOn      bool
 	routeRelease func() error // ownership-aware cleanup for a recovered TPROXY route
+
+	// Once we borrow routes, keep that policy across mode changes and rollback.
+	preservePolicyRoutes bool
+
 	plan         netfilter.Plan
 	planOn       bool
 	planPending  bool // installation failed after the plan and its dependencies were prepared
@@ -216,7 +220,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	return nil
 }
 
-func (d *Daemon) startLocked(ctx context.Context, activate func(context.Context, *model.Config, bool) error) (<-chan struct{}, error) {
+func (d *Daemon) startLocked(ctx context.Context, activate func(context.Context, *model.Config) error) (<-chan struct{}, error) {
 	if ctx.Err() != nil {
 		return nil, nil
 	}
@@ -227,6 +231,7 @@ func (d *Daemon) startLocked(ctx context.Context, activate func(context.Context,
 	catalog.AutoUpdate(cfg)
 	d.started = time.Now()
 	tproxyEnrolled, autoloadErr := d.autoloadKernelModulesLocked(ctx, cfg.Intercept.Mode == model.InterceptTProxy)
+	d.preservePolicyRoutes = tproxyEnrolled
 	blocked := d.tproxyPreflight(ctx, cfg, autoloadErr)
 	if ctx.Err() != nil {
 		return nil, nil
@@ -241,7 +246,7 @@ func (d *Daemon) startLocked(ctx context.Context, activate func(context.Context,
 	d.reloadGeoLocked(cfg)
 	d.neighbors = d.readNeighbors(cfg)
 	if blocked == nil {
-		if err := activate(ctx, cfg, tproxyEnrolled); err != nil {
+		if err := activate(ctx, cfg); err != nil {
 			// Registration alone does not guarantee usable interception.
 			// Keep management access after a route conflict or rule rejection
 			// on opted-in startup; unrelated core and DNS errors stay fatal.
@@ -330,9 +335,8 @@ func (d *Daemon) applyConfigLocked(ctx context.Context, cfg *model.Config, save 
 	prev := d.cfg
 	changes := configChanges(prev, cfg)
 	activation := d.startupBlocked
-	preserveRoutes := d.routeRelease != nil
 	neighbors := d.neighbors
-	if err := d.applyLocked(ctx, cfg, activation != nil || preserveRoutes); err != nil {
+	if err := d.applyLocked(ctx, cfg); err != nil {
 		details := err.Error()
 		restore := journalRestoreFailure(err)
 		var rollbackRestore *journal.RestoreDiagnostic
@@ -343,7 +347,7 @@ func (d *Daemon) applyConfigLocked(ctx context.Context, cfg *model.Config, save 
 			details += "; interception remains inactive"
 		} else if prev != nil {
 			d.log.Error("new configuration failed to apply, restoring previous configuration", "err", err)
-			if rbErr := d.applyLocked(ctx, prev, preserveRoutes); rbErr != nil {
+			if rbErr := d.applyLocked(ctx, prev); rbErr != nil {
 				d.log.Error("rollback also failed", "err", rbErr)
 				details += "; rollback also failed: " + rbErr.Error()
 				rollbackRestore = journalRestoreFailure(rbErr)
@@ -501,7 +505,7 @@ func stageRecoveryFile(path string, data []byte) (string, error) {
 }
 
 // applyLocked reconciles runtime state with cfg while d.mu is held.
-func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config, preserveRoutes bool) error {
+func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config) error {
 	prev := d.cfg
 	if d.startupBlocked != nil {
 		d.neighbors = d.readNeighbors(cfg)
@@ -556,11 +560,12 @@ func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config, preserveRou
 	}
 	if wantRoute && !d.routeOn {
 		var err error
-		if preserveRoutes {
+		if d.preservePolicyRoutes || d.startupBlocked != nil {
 			d.routeRelease, err = newRoute.Acquire()
 			if err != nil {
 				return fmt.Errorf("%w: %w", errPolicyRouteAcquisition, err)
 			}
+			d.preservePolicyRoutes = true
 		} else {
 			err = newRoute.Apply()
 		}

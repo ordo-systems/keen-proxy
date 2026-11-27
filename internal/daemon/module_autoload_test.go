@@ -200,10 +200,7 @@ func TestStartupRecoversIfEnrolledTProxyRulesAreRejected(t *testing.T) {
 	d.opt.OnStartupBlocked = func() { reported = true }
 	ctx := t.Context()
 	d.mu.Lock()
-	blocked, err := d.startLocked(ctx, func(ctx context.Context, cfg *model.Config, preserveRoutes bool) error {
-		if !preserveRoutes {
-			t.Error("enrolled startup may replace unrelated policy routing")
-		}
+	blocked, err := d.startLocked(ctx, func(ctx context.Context, cfg *model.Config) error {
 		// Exercise the real firewall installation without a platform-specific
 		// transparent socket or a privileged policy route.
 		d.plan = netfilter.Plan{Mode: cfg.Intercept.Mode}
@@ -232,7 +229,7 @@ func TestStartupKeepsManagementOnEnrolledTProxyRouteConflict(t *testing.T) {
 		return netfilter.TProxyReadiness{State: netfilter.TProxyReady}
 	}
 	d.mu.Lock()
-	blocked, err := d.startLocked(t.Context(), func(context.Context, *model.Config, bool) error {
+	blocked, err := d.startLocked(t.Context(), func(context.Context, *model.Config) error {
 		return errors.Join(errPolicyRouteAcquisition, errors.New("conflicting policy rule already exists"))
 	})
 	d.mu.Unlock()

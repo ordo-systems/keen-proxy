@@ -125,7 +125,8 @@ func TestRouterInterfacesAPI(t *testing.T) {
 		if w.Code == http.StatusOK {
 			var got []map[string]any
 			want := []map[string]any{
-				{"name": "eth0", "label": "Internet", "up": true},
+				{"name": "br0", "label": "LAN", "up": true},
+				{"name": "eth3", "label": "Internet", "up": true},
 				{"name": "nwg0", "label": "Home WireGuard", "up": true},
 				{"name": "wg0", "up": false},
 			}

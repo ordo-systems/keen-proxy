@@ -71,3 +71,12 @@ connections:
       Endpoint = vpn.example.com:51820
       AllowedIPs = 0.0.0.0/0, ::/0
       PersistentKeepalive = 25
+
+  # 6. Bind client traffic to an existing router interface by its kernel name.
+  #    Replace wg0 with the router's device name. Do not use this profile for DNS.
+  - id: router-wg
+    name: Router WireGuard
+    type: singbox
+    outbound:
+      type: direct
+      bind_interface: wg0

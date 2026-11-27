@@ -12,6 +12,7 @@ Try editing a group, inspecting a connection, previewing a sample preset, select
 
 - Configuration is kept in this page's memory and resets on reload.
 - The demo does not contact a router or proxy server, query DNS, fetch filter lists, or perform connectivity checks.
+- Open **Connections → Add → Connection on the router**, continue, and select **Home WireGuard** (`nwg0`). Validate the parameters, save to the draft, and choose **Apply**. The list also shows `wg0` without a firmware description. These interfaces are synthetic; applying the profile does not send traffic through a tunnel.
 - In **Settings → DNS → Advanced settings → Bypass DNS interception for source IPs**, edit or remove the sample `192.0.2.53` and choose **Apply**. Navigate away and reopen DNS settings to verify the change. This only changes the demo configuration; no firewall rules are installed and no DNS packets are sent. See [DNS interception exceptions](routing.md#dns) for the router behavior.
 - Never enter actual credentials. Use the supplied placeholders.
 - The monitor simulates traffic every three seconds. The routing journal receives new synthetic events and supports live pause, filters, and pagination. Apply adds an audit entry. The catalog contains one synthetic preset.

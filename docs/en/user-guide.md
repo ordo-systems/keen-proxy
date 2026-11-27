@@ -33,7 +33,7 @@ Open **Connections**. Select a profile to inspect its settings and status. Choos
 
 Choose **Connection on the router** to use a network interface already configured on the router, such as a native WireGuard tunnel. Select the interface and give the profile a name. KeenProxy uses the kernel interface name for routing (for example, `nwg0` or `wg0`). On Keenetic it also shows the firmware description when the local IPv4 address uniquely identifies the interface. OpenWrt and systems without matching metadata show the kernel name alone. The interface's enabled state is not a reachability result. KeenProxy does not configure or start the tunnel; test the applied profile in **Diagnostics**.
 
-Interface-bound profiles can route client traffic, but are not offered as DNS tunnels. Binding to an interface alone does not guarantee a tunneled DNS path.
+Interface-bound profiles can route client traffic, but are not offered as DNS tunnels. A tunnel is also excluded if an interface-bound profile appears anywhere in its fallback chain. See [DNS routing](routing.md#dns).
 
 The file picker accepts `.conf`, `.txt`, `.json`, and `.vpn` up to 2 MiB. For a sing-box file with multiple profiles, choose the outbound or endpoint to import. Router DNS and routes stay under KeenProxy control. In **Failover**, choose the immediate backup and review the inherited chain. Connection parameters stay hidden until you reveal them. See [how failover works](routing.md#fallback-chains).
 

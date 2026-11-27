@@ -29,7 +29,8 @@ func (s *Server) interfaces(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if _, demo := s.D.(*Demo); demo {
 		writeJSON(w, http.StatusOK, []routerInterface{
-			{Name: "eth0", Label: "Internet", Up: true},
+			{Name: "br0", Label: "LAN", Up: true},
+			{Name: "eth3", Label: "Internet", Up: true},
 			{Name: "nwg0", Label: "Home WireGuard", Up: true},
 			{Name: "wg0"},
 		})

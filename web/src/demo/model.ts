@@ -3,6 +3,7 @@ import initial from './config.json' with { type: 'json' }
 import { createTelemetry } from './telemetry.ts'
 import { activeExit, canonicalEntry, entryIdentity, groupDisabledEntryKeys, isGeo, retainPresetActivation } from '../activation.ts'
 import { connectionChain } from '../connectionDraft.ts'
+import { dnsChainHasDirect } from '../dnsSettings.ts'
 import { maxMemoryLimitMiB, type Catalog, type Config, type DiagnosticReport, type DomainStatus, type GeoLookup, type GeoStatus, type JournalKind, type Status } from '../types.ts'
 
 // Only synthetic examples are bundled; the demo never imports runtime configuration.
@@ -67,6 +68,10 @@ function validate(config: Config) {
   const limit = config.system?.memory_limit_mib
   if (limit != null && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > maxMemoryLimitMiB)) {
     throw new Error('memory limit must be a positive integer number of MiB')
+  }
+  const { route, connection } = config.dns
+  if (route === 'connection' && connection && dnsChainHasDirect(config.connections ?? [], connection)) {
+    throw new Error('dns.connection: raw type "direct" does not guarantee a tunnel')
   }
   const sources = config.dns.bypass_sources
   if (sources != null && !Array.isArray(sources)) throw new Error('dns.bypass_sources: expected a list of unicast IPv4 addresses')

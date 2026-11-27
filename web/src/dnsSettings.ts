@@ -2,9 +2,13 @@ import { connectionChain } from './connectionDraft.ts'
 import type { Connection, DNSConfig } from './types'
 
 // A direct outbound in the fallback chain does not guarantee a DNS tunnel.
+export function dnsChainHasDirect(connections: Connection[], id: string): boolean {
+  const chain = connectionChain(connections, id)
+  return connections.some(c => c.type === 'singbox' && c.outbound?.type === 'direct' && chain.includes(c.id))
+}
+
 export function dnsTunnelChoices<T extends { value: string }>(choices: T[], connections: Connection[]): T[] {
-  const direct = new Set(connections.filter(c => c.type === 'singbox' && c.outbound?.type === 'direct').map(c => c.id))
-  return choices.filter(choice => !connectionChain(connections, choice.value).some(id => direct.has(id)))
+  return choices.filter(choice => !dnsChainHasDirect(connections, choice.value))
 }
 
 // Keep existing resolver lists usable until the operator changes their order or contents.

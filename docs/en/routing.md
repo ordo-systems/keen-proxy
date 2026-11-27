@@ -6,7 +6,7 @@ For diagrams of interception, DNS, and route selection, see [How traffic flows](
 
 | Item | Purpose |
 | --- | --- |
-| Connection | A named tunnel/proxy profile that can be selected as a target |
+| Connection | A named tunnel, proxy, or router-interface profile that can be selected as a target |
 | Group | A domain/address list or country selector with a target |
 | Direct | Connect without a configured tunnel |
 | Block | Reject matching traffic |
@@ -77,6 +77,8 @@ Periodic health checks measure HTTP requests, not ICMP ping. They are separate f
 ## DNS
 
 DNS settings choose upstream resolvers and whether requests travel directly or through a connection. Bootstrap addresses help resolve encrypted resolver hostnames. Failure policy controls whether a failed selected path may use direct DNS. Filter lists and exceptions change DNS answers, not every possible form of application traffic.
+
+Binding traffic to a router interface alone does not guarantee a tunneled DNS path. A named interface-bound profile cannot be selected for DNS, and neither can a tunnel with such a profile anywhere in its fallback chain. If you add one to a tunnel already used for DNS, change the DNS route or remove that fallback before applying. The built-in **Direct** fallback is separate: DNS allows it only when the failure policy permits direct DNS.
 
 If KeenProxy uses a resolver on the LAN and that resolver forwards requests through this router on port 53, the router can send them back to the same resolver. In **Settings → DNS → Advanced settings**, add the resolver's source IPv4 address to the DNS interception exceptions and choose **Apply**. This is `dns.bypass_sources` in YAML, for example `bypass_sources: ["192.168.1.100"]` under `dns`. Use a fixed address or DHCP reservation for the resolver. An empty list preserves the default interception behavior.
 

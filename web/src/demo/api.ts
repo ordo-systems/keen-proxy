@@ -101,7 +101,8 @@ export const api = {
     { mac: '02:00:00:00:00:40', ip: '192.168.7.40', hostname: 'nas.local', hostname_source: 'dns' as const },
   ],
   interfaces: async (): Promise<RouterInterface[]> => [
-    { name: 'eth0', label: 'Internet', up: true },
+    { name: 'br0', label: 'LAN', up: true },
+    { name: 'eth3', label: 'Internet', up: true },
     { name: 'nwg0', label: 'Home WireGuard', up: true },
     { name: 'wg0', up: false },
   ],

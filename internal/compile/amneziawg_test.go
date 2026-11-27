@@ -3,7 +3,6 @@ package compile
 import (
 	"context"
 	"encoding/json"
-	"net/netip"
 	"strings"
 	"testing"
 
@@ -25,8 +24,8 @@ func TestAmneziaWGCompilerPreservesConsumerValues(t *testing.T) {
 	if len(out.outbounds) != 0 || len(out.endpoints) != 1 {
 		t.Fatalf("incorrect endpoint placement: %#v", out)
 	}
-	if out.hosts["awg-stable"] != "2001:db8::1" || len(out.servers) != 1 || out.servers[0] != netip.MustParseAddr("2001:db8::1") {
-		t.Fatalf("missing bypass peer: %#v", out)
+	if out.hosts["awg-stable"] != "2001:db8::1" || len(out.servers) != 0 {
+		t.Fatalf("IPv6 peer must be tracked without an IPv4 bypass: %#v", out)
 	}
 	raw, err := json.Marshal(map[string]any{"endpoints": out.endpoints})
 	if err != nil {

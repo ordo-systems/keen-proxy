@@ -32,12 +32,6 @@ case "$1" in
     *) native_action "$1" ;;
 esac
 ''')
-        self.command('hexdump', 'printf "%s" "${ELF_HEADER:-7f454c460201}"')
-        self.command('head', '''
-case "$*" in
-    *'/proc/self/exe'*) printf fixture ;;
-    *) exec /usr/bin/head "$@" ;;
-esac''')
         self.command('grep', '''
 case "$*" in
     *'/proc/cpuinfo'*) [ "${SSE2:-1}" = 1 ]; exit ;;
@@ -288,6 +282,74 @@ exec /bin/rm "$@"''')
         self.assertNotEqual(result.returncode, 0)
         self.assert_installed(first)
         self.assertTrue((self.prefix / 'enabled').exists())
+
+    def test_uninstall_retries_retained_guard_after_failed_deletion(self):
+        first = self.release('v1.2.3')
+        self.assert_panel_access(self.install())
+        blocked = self.prefix / 'forwarding-blocked'
+        blocked.touch()
+        failure = self.prefix / 'guard-deletion-fails'
+        blocked6 = self.prefix / 'forwarding-blocked6'
+        blocked6.touch()
+        self.executable(self.prefix / 'usr/sbin/ip6tables', '''
+case "$*" in
+    *'-C FORWARD '*'-j DROP') test -f "$KEENPROXY_PREFIX/forwarding-blocked6" ;;
+    *'-D FORWARD '*'-j DROP')
+        [ "$(cat "$KEENPROXY_PREFIX/guard-deletion-fails" 2>/dev/null)" != 6 ] || exit 1
+        rm -f "$KEENPROXY_PREFIX/forwarding-blocked6" ;;
+    *) exit 2 ;;
+esac''')
+        self.executable(self.prefix / 'usr/sbin/iptables', '''
+case "$*" in
+    *'-C FORWARD '*'-j DROP') test -f "$KEENPROXY_PREFIX/forwarding-blocked" ;;
+    *'-D FORWARD '*'-j DROP')
+        [ "$(cat "$KEENPROXY_PREFIX/guard-deletion-fails" 2>/dev/null)" != 4 ] || exit 1
+        rm -f "$KEENPROXY_PREFIX/forwarding-blocked" ;;
+    *'-I FORWARD '*'-j DROP')
+        touch "$KEENPROXY_PREFIX/forwarding-blocked"
+        printf 'reblocked IPv4\\n' >> "$KEENPROXY_PREFIX/actions" ;;
+    *'-t nat -C PREROUTING -j KEENPROXY_DNS'|*'-t nat -C PREROUTING -j KEENPROXY_TCP')
+        test -f "$KEENPROXY_PREFIX/running" ;;
+    *'-t mangle -S') exit 0 ;;
+    *) exit 2 ;;
+esac''')
+        config = 'schema_version: 1\n# operator configuration\n'
+        self.config.write_text(config)
+        token = self.config.with_name('token')
+        token.write_text('private token\n')
+        requests = self.requests.read_bytes()
+
+        for family in ('4', '6'):
+            failure.write_text(family)
+            actions = self.prefix / 'actions'
+            before = len(actions.read_text())
+            result = self.bootstrap('--uninstall')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('could not release forwarding guard', result.stderr)
+            self.assertIn('forwarding guard remains active', result.stderr)
+            self.assertNotIn('uninstalled', result.stdout)
+            self.assertEqual(blocked.exists(), family == '4')
+            self.assertTrue(blocked6.exists())
+            if family == '6':
+                rollback = actions.read_text()[before:].splitlines()
+                self.assertLess(rollback.index('reblocked IPv4'),
+                                rollback.index(f'{self.service} start'))
+            self.assert_installed(first)
+            self.assertTrue((self.prefix / 'enabled').exists())
+            self.assertEqual(self.config.read_text(), config)
+            self.assertEqual(token.read_text(), 'private token\n')
+
+        failure.unlink()
+        result = self.bootstrap('--uninstall')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('KeenProxy uninstalled.', result.stdout)
+        for path in (blocked, blocked6, self.binary, self.service, self.release_record,
+                     self.prefix / 'running', self.prefix / 'enabled'):
+            self.assertFalse(path.exists(), path)
+        self.assertEqual(self.config.read_text(), config)
+        self.assertEqual(token.read_text(), 'private token\n')
+        self.assertEqual(self.requests.read_bytes(), requests)
+        self.assert_clean()
 
     def test_transactions_never_stage_native_payload_on_tmpfs(self):
         self.release('v1.2.3')

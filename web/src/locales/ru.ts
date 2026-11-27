@@ -257,6 +257,8 @@ const ru = {
     login: 'Вход',
   },
   shell: {
+    configLoadFailed: 'Не удалось загрузить конфигурацию.',
+    statusRefreshFailed: 'Не удалось обновить состояние службы.',
     tagline: 'маршрутизация',
     applied: 'Изменения применены',
     modeTproxy: 'Обычный перехват',
@@ -426,7 +428,7 @@ const ru = {
     probeStale: 'Проверка устарела',
     probeUnknown: 'Ещё не проверен',
     probeChecked: 'Проверено в {time}',
-    probeHint: 'HTTP-проверка через VPN; время запроса, не ICMP-пинг',
+    probeHint: 'HTTP-проверка через это соединение; время запроса, не ICMP-пинг',
     healthOk: 'отвечает · {ms} мс',
     healthDown: 'не отвечает с {time}',
     server: 'Сервер',

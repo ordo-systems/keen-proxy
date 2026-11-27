@@ -11,7 +11,7 @@ unset KEENPROXY_BOOTSTRAP_RETRY
 fail() { printf 'KeenProxy: %s\n' "$*" >&2; exit 1; }
 usage() {
     printf '%s\n' 'Usage: sh -s -- [--version vX.Y.Z] [--lite] [--require-guard]' \
-        '       sh -s -- --version vX.Y.Z --expect-current vX.Y.Z [--lite] [--require-guard]' \
+        '       sh -s -- --version vX.Y.Z --expect-current vX.Y.Z [--expect-variant full|lite] [--lite] [--require-guard]' \
         '       sh -s -- --uninstall'
 }
 
@@ -61,6 +61,7 @@ release_page=https://github.com/ordo-systems/keen-proxy/releases
 releases="$release_page/download"
 version=
 expected_current=
+expected_variant=
 variant=full
 uninstall=0
 require_guard=0
@@ -69,6 +70,9 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --version) [ "$#" -ge 2 ] && [ -n "$2" ] || fail 'missing --version value'; version=$2; shift ;;
         --expect-current) [ "$#" -ge 2 ] && [ -n "$2" ] || fail 'missing --expect-current value'; expected_current=$2; shift ;;
+        --expect-variant) [ "$#" -ge 2 ] || fail 'missing --expect-variant value'
+            case "$2" in full|lite) expected_variant=$2 ;; *) fail 'invalid expected variant' ;; esac
+            shift ;;
         --lite) variant=lite ;;
         --require-guard) require_guard=1 ;;
         # Preserve the old updater/CLI input without installing a separate client.
@@ -79,12 +83,15 @@ while [ "$#" -gt 0 ]; do
     esac
     shift
 done
-if [ "$uninstall" = 1 ] && { [ -n "$version$expected_current" ] || [ "$variant" = lite ] ||
+if [ "$uninstall" = 1 ] && { [ -n "$version$expected_current$expected_variant" ] || [ "$variant" = lite ] ||
     [ "$legacy_optout" = 1 ] || [ "$require_guard" = 1 ]; }; then
     fail '--uninstall cannot be combined with installation options'
 fi
 if [ -n "$expected_current" ] && [ -z "$version" ]; then
     fail '--expect-current requires an explicit --version'
+fi
+if [ -n "$expected_variant" ] && [ -z "$expected_current" ]; then
+    fail '--expect-variant requires --expect-current'
 fi
 
 case "$prefix" in /*) ;; *) fail 'installation prefix must be absolute' ;; esac
@@ -107,13 +114,22 @@ fi
 command -v pidof >/dev/null 2>&1 || fail 'missing dependency: pidof'
 
 elf_header() {
-    head -c 6 /proc/self/exe | hexdump -v -e '1/1 "%02x"'
+    if command -v hexdump >/dev/null 2>&1; then
+        head -c 6 /proc/self/exe | hexdump -v -e '1/1 "%02x"'
+    else
+        head -c 6 /proc/self/exe | od -An -v -tx1 | tr -d '[:space:]'
+    fi
 }
 
 architecture() {
     cpu=$(uname -m)
     case "$cpu" in
-        aarch64|arm64) echo arm64 ;;
+        aarch64|arm64)
+            case "$(elf_header)" in
+                7f454c4602??) echo arm64 ;;
+                7f454c4601??) echo armv5 ;;
+                *) fail 'cannot determine ARM userspace ELF class' ;;
+            esac ;;
         armv[5-8]*|arm) echo armv5 ;;
         x86_64|amd64)
             case "$(elf_header)" in
@@ -144,12 +160,16 @@ fetch() {
         --max-time 240 --retry 2 "$1" -o "$2" || fail "download failed: $1"
 }
 
+checksum() {
+    sum=$(sha256sum "$1") || return 1
+    printf '%s\n' "${sum%% *}"
+}
+
 verify() {
     expected=$(awk -v name="$1" '$2 == name {print $1}' "$work/SHA256SUMS")
     case "$expected" in *[!0-9a-fA-F]*) fail "invalid SHA256 entry for $1" ;; esac
     [ "${#expected}" -eq 64 ] || fail "missing or invalid SHA256 entry for $1"
-    actual=$(sha256sum "$work/$1")
-    [ "${actual%% *}" = "$expected" ] || fail "SHA256 mismatch for $1"
+    [ "$(checksum "$work/$1")" = "$expected" ] || fail "SHA256 mismatch for $1"
 }
 
 # Retry only from preflight, before touching service state or installed files.
@@ -169,14 +189,18 @@ retry_release_bootstrap() {
 
     set -- --version "$tag"
     if [ -n "$expected_current" ]; then set -- "$@" --expect-current "$expected_current"; fi
+    if [ -n "$expected_variant" ]; then set -- "$@" --expect-variant "$expected_variant"; fi
     if [ "$variant" = lite ]; then set -- "$@" --lite; fi
     if [ "$require_guard" = 1 ]; then set -- "$@" --require-guard; fi
     if [ "$legacy_optout" = 1 ]; then set -- "$@" --without-trusttunnel; fi
     # The fallback takes its own installer lock and revalidates installed state.
     rmdir "$lock" || fail 'could not release installer lock for fallback'
     lock=
-    KEENPROXY_BOOTSTRAP_RETRY=1 sh -s -- "$@" < "$work/bootstrap.sh"
-    exit $?
+    if KEENPROXY_BOOTSTRAP_RETRY=1 sh -s -- "$@" < "$work/bootstrap.sh"; then exit 0; fi
+    if [ -n "$expected_variant" ]; then
+        echo 'KeenProxy: panel fallback requires a bootstrap with --expect-variant support; retry from the LAN if the release bootstrap does not recognize it' >&2
+    fi
+    exit 1
 }
 
 ensure_firewall_tools() {
@@ -225,7 +249,7 @@ restore_autoload_guard() {
     [ "$platform" = entware ] || return 0
     [ -f "${config}.autoload-guard" ] && [ ! -L "${config}.autoload-guard" ] || return 0
     module_status=0
-    module_output=$("$work/$asset" -autoload-update-guard -config "$config" -iptables "$guard4" 2>&1) || module_status=$?
+    module_output=$("$staged_binary" -autoload-update-guard -config "$config" -iptables "$guard4" 2>&1) || module_status=$?
     [ "$module_status" = 0 ] && return 0
     case "$module_status:$module_output" in
         '2:flag provided but not defined: -autoload-update-guard'*)
@@ -293,12 +317,25 @@ hold_forwarding() {
 }
 
 release_forwarding() {
+    released4=0
     if [ "$held4" = 1 ]; then
         guard_rule "$guard4" -D || return 1
         held4=0
+        released4=1
     fi
     if [ "$held6" = 1 ]; then
-        guard_rule "$guard6" -D || return 1
+        if ! guard_rule "$guard6" -D; then
+            # A failed uninstall will restart the old service. Reblock the
+            # family already released before that unprotected interval.
+            if [ "${1:-}" = uninstall ] && [ "$released4" = 1 ]; then
+                if guard_rule "$guard4" -I; then
+                    held4=1
+                else
+                    echo 'KeenProxy: could not restore the IPv4 forwarding guard before uninstall rollback' >&2
+                fi
+            fi
+            return 1
+        fi
         held6=0
     fi
 }
@@ -306,7 +343,7 @@ release_forwarding() {
 start_release() {
     service_action start || return 1
     [ "$check_routing$held4$held6" != 000 ] || return 0
-    wait_for_interception
+    wait_for_interception "${1:-previous}"
 }
 
 wait_for_interception() {
@@ -320,12 +357,12 @@ wait_for_interception() {
         # UDP chain before attaching any jumps, and attaches its jump last.
         if "$guard4" -w -t nat -C PREROUTING -j KEENPROXY_DNS >/dev/null 2>&1 &&
             "$guard4" -w -t nat -C PREROUTING -j KEENPROXY_TCP >/dev/null 2>&1; then
-            if [ "${1:-}" = running ] && [ "$planned_udp" = 0 ]; then return 0; fi
+            if [ "${1:-}" != previous ] && [ "$planned_udp" = 0 ]; then return 0; fi
             if mangle=$("$guard4" -w -t mangle -S 2>/dev/null); then
                 if printf '%s\n' "$mangle" | grep -Fxq -- '-A PREROUTING -j KEENPROXY_UDP'; then
                     return 0
                 fi
-                if { [ "${1:-}" != running ] || [ "$planned_udp" = unknown ]; } &&
+                if { [ "${1:-}" = previous ] || [ "$planned_udp" = unknown ]; } &&
                     ! printf '%s\n' "$mangle" | grep -Fxq -- '-N KEENPROXY_UDP'; then
                     return 0
                 fi
@@ -355,12 +392,22 @@ release_field() {
 # The installer lock protects the history read and the staged record moves with the binary.
 stage_release_record() {
     previous_tag=$(release_field current)
+    previous_variant=$(release_field variant)
     if [ "$previous_tag" = "$tag" ]; then
+        # Panel targets are tags; switching builds of one tag is a CLI action.
+        installed_variant=$previous_variant
         previous_tag=$(release_field previous)
+        previous_variant=$(release_field previous_variant)
+        previous_variant=${previous_variant:-$installed_variant}
     fi
     if ! valid_release_tag "$previous_tag"; then previous_tag=; fi
     mkdir -p "$work/payload/${release_record%/*}"
     printf 'current %s\nprevious %s\nvariant %s\n' "$tag" "$previous_tag" "$variant" > "$work/payload/$release_record"
+    if [ -n "$previous_tag" ] && [ "$previous_variant" != "$variant" ]; then
+        case "$previous_variant" in
+            full|lite) printf 'previous_variant %s\n' "$previous_variant" >> "$work/payload/$release_record" ;;
+        esac
+    fi
 }
 
 backup_file() {
@@ -381,7 +428,10 @@ install_payload() {
 restore_payload() {
     for path in $payload; do
         if [ -f "$work/previous/$path" ]; then
-            mv -f "$work/previous/$path" "$prefix/$path" || return 1
+            # Retain the original copy if a later path fails to restore.
+            staged="$work/payload/$path"
+            mkdir -p "${staged%/*}" && cp -p "$work/previous/$path" "$staged" &&
+                mv -f "$staged" "$prefix/$path" || return 1
         else
             rm -f "$prefix/$path" || return 1
         fi
@@ -444,6 +494,8 @@ finish() {
         if [ "$platform" = openwrt ] && [ "$autostart_saved" = 0 ] && [ -f "$service" ]; then
             service_action disable || { keep_work=1; result=1; }
         fi
+        # Free the download before recreating staged files for rollback.
+        if [ -n "${asset:-}" ]; then rm -f "$work/$asset" || :; fi
         if { [ "$start_attempted" = 1 ] && ! service_action stop; } || ! restore_payload; then
             echo "KeenProxy: rollback failed; recovery files retained at $work" >&2
             keep_work=1
@@ -516,9 +568,9 @@ uninstall_release() {
     if [ "$platform" = openwrt ]; then service_action disable || fail 'could not disable service autostart'; fi
     replacing=1
     for path in $payload; do rm -f "$prefix/$path" || fail "could not remove $path"; done
+    release_forwarding uninstall || fail 'could not release forwarding guard'
     replacing=0
     restart_previous=0
-    release_forwarding || fail 'could not release forwarding guard'
     printf 'KeenProxy uninstalled. Settings retained in %s/etc/keenproxy\n' "$prefix"
 }
 
@@ -567,6 +619,9 @@ fi
 if [ -n "$expected_current" ]; then
     valid_release_tag "$expected_current" || fail 'invalid expected release version'
     [ "$(release_field current)" = "$expected_current" ] || fail 'installed release changed or is not recorded'
+    if [ -n "$expected_variant" ]; then
+        [ "$(release_field variant)" = "$expected_variant" ] || fail 'installed variant changed or is not recorded'
+    fi
 fi
 
 for tool in curl sha256sum; do
@@ -599,10 +654,12 @@ if [ "$platform" = entware ]; then names="$names install.sh"; fi
 for name in $names; do
     fetch "$base/$name" "$work/$name"
     verify "$name"
+    case "$name" in
+        "$asset") binary_sha=$expected ;;
+        "$controller") controller_sha=$expected ;;
+    esac
 done
-if [ "$platform" = openwrt ]; then
-    grep -Fxq "$marker" "$work/$controller" || retry_release_bootstrap 'native controller is not managed by this installer'
-fi
+grep -Fxq "$marker" "$work/$controller" || retry_release_bootstrap 'release controller is not managed by this installer'
 
 config="$prefix/etc/keenproxy/config.yaml"
 config_source="$config"
@@ -615,10 +672,9 @@ if [ ! -f "$config" ]; then
     config_source="$work/config.yaml"
 fi
 chmod 755 "$work/$asset"
-# Inspect only the plan's jump list. Dry-run can print connection credentials,
-# so do not log or save it. The last line carries the exit status across POSIX sh.
-planned_udp=$(
-    { "$work/$asset" -dry-run -config "$config_source" 2>/dev/null && printf '\n# KeenProxy validation complete\n'; } |
+candidate_plan() {
+    # Dry-run can print credentials. Only retain whether UDP is planned.
+    { "$1" -dry-run -config "$2" 2>/dev/null && printf '\n# KeenProxy validation complete\n'; } |
         awk '
             $0 == "# jumps" { jumps = 1 }
             jumps && /^iptables[[:space:]].*[[:space:]]-j[[:space:]]+KEENPROXY_UDP[[:space:]]*$/ { udp = 1 }
@@ -627,7 +683,19 @@ planned_udp=$(
                 if (jumps) print udp + 0
                 else print "unknown"
             }'
-) || retry_release_bootstrap 'candidate binary or configuration failed validation'
+}
+
+refresh_candidate_plan() {
+    # A concurrent Apply may have changed the config before the old daemon stopped.
+    current_sha=$(checksum "$config") || return 1
+    if [ "$current_sha" != "$config_sha" ]; then
+        planned_udp=$(candidate_plan "$staged_binary" "$config") || return 1
+    fi
+}
+
+config_sha=$(checksum "$config_source") || fail 'could not read configuration for validation'
+planned_udp=$(candidate_plan "$work/$asset" "$config_source") ||
+    retry_release_bootstrap 'candidate binary or configuration failed validation'
 
 if [ -e "$service" ] || [ -L "$service" ]; then
     managed_service || fail 'existing init script is not managed by this installer'
@@ -642,9 +710,15 @@ else
     cp "$work/$asset" "$work/payload/$binary_path"
     chmod 755 "$work/payload/$binary_path"
 fi
+staged_binary="$work/payload/$binary_path"
+[ -f "$staged_binary" ] && [ ! -L "$staged_binary" ] && [ -x "$staged_binary" ] ||
+    retry_release_bootstrap 'installer did not stage an executable binary'
+[ "$(checksum "$staged_binary")" = "$binary_sha" ] || fail 'staged binary differs from the verified release'
 mkdir -p "$work/payload/etc/init.d"
 chmod 755 "$work/$controller"
 cp -p "$work/$controller" "$work/payload/$service_path"
+[ "$(checksum "$work/payload/$service_path")" = "$controller_sha" ] ||
+    fail 'staged controller differs from the verified release'
 
 ensure_firewall_tools
 lock_service
@@ -676,22 +750,23 @@ if [ -f "$service" ]; then
     find_forwarding_guard
     if [ "$guard_needed" = 1 ]; then hold_forwarding; fi
 fi
+if [ "$changed" = 1 ] && [ "$was_running" = 1 ]; then
+    restart_previous=1
+    service_action stop || fail 'previous service did not stop cleanly'
+fi
+refresh_candidate_plan || fail 'configuration changed and failed candidate validation'
 if [ "$changed" = 1 ]; then
-    if [ "$was_running" = 1 ]; then
-        restart_previous=1
-        service_action stop || fail 'previous service did not stop cleanly'
-    fi
     replacing=1
     install_payload || fail 'could not install staged files'
     start_attempted=1
-    start_release || fail 'new service failed to start with routing'
+    start_release candidate || fail 'new service failed to start with routing'
     if [ "$platform" = openwrt ] && [ "$autostart_saved" = 0 ]; then
         service_action enable || fail 'could not enable service autostart'
     fi
     restart_previous=0
     replacing=0
 elif [ "$was_running" = 0 ]; then
-    start_release || fail 'service failed to start with routing'
+    start_release candidate || fail 'service failed to start with routing'
 else
     wait_for_interception running || fail 'running service does not have active routing'
 fi

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -86,6 +87,27 @@ func firstA(m *dns.Msg) string {
 		}
 	}
 	return ""
+}
+
+func TestStartAllowsImmediateCloseAndRebind(t *testing.T) {
+	// Keep Start and Close on one scheduler P so the serving goroutines
+	// cannot race ahead and hide a missing startup barrier.
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	s := New(Config{Listen: "127.0.0.1:0"})
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	addr := s.Addr()
+	if err := s.Close(); err != nil {
+		t.Fatalf("close right after start: %v", err)
+	}
+	replacement := New(Config{Listen: addr})
+	if err := replacement.Start(); err != nil {
+		t.Fatalf("rebind both transports on %s: %v", addr, err)
+	}
+	if err := replacement.Close(); err != nil {
+		t.Fatalf("close rebound listener: %v", err)
+	}
 }
 
 func TestFailoverUDPAndTCP(t *testing.T) {

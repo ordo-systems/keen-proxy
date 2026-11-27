@@ -1,3 +1,4 @@
+import { boundRouterInterface } from './routerInterface.ts'
 import type { Connection, WireGuard } from './types'
 
 // Bound UTF-8 import payloads and file reads to 2 MiB.
@@ -13,7 +14,6 @@ const endpointTypes = new Set([
   'openconnect',
 ])
 const forbiddenTypes = new Set([
-  'direct',
   'block',
   'dns',
   'selector',
@@ -142,7 +142,7 @@ const wgFields: Record<string, Record<string, WGSetter>> = {
       wg.private_key = value
     },
     address: (wg, value) => {
-      wg.address = commaList(value)
+      for (const address of commaList(value)) wg.address.push(address)
     },
     mtu: (wg, value) => {
       wg.mtu = unsigned(value, 'MTU')
@@ -159,7 +159,8 @@ const wgFields: Record<string, Record<string, WGSetter>> = {
       wg.peer.endpoint = value
     },
     allowedips: (wg, value) => {
-      wg.peer.allowed_ips = commaList(value)
+      const allowedIPs = (wg.peer.allowed_ips ??= [])
+      for (const ip of commaList(value)) allowedIPs.push(ip)
     },
     persistentkeepalive: (wg, value) => {
       wg.peer.keepalive = unsigned(value, 'Keepalive')
@@ -270,22 +271,21 @@ function jsonCandidates(obj: Profile): Candidate[] {
   if (!candidates.length && obj.type) candidates.push({ value: obj })
   return candidates
 }
-// Exclude built-in routing actions and move the imported tag into the display name.
+// Move the tag to the display name; only canonical interface-bound direct outbounds are importable.
 function rawProfile({ value, kind }: Candidate): Connection[] {
   if (!object(value) || typeof value.type !== 'string')
     throw new Error('Missing connection type')
   if (forbiddenTypes.has(value.type)) return []
   const key = kind ?? (endpointTypes.has(value.type) ? 'endpoint' : 'outbound')
-  const profile = structuredClone(value)
-  delete profile.tag
-  return [
-    {
-      id: '',
-      name: typeof value.tag === 'string' ? value.tag : '',
-      type: 'singbox',
-      [key]: profile,
-    },
-  ]
+  const { tag, ...profile } = value
+  const connection: Connection = {
+    id: '',
+    name: typeof tag === 'string' ? tag : '',
+    type: 'singbox',
+    [key]: profile,
+  }
+  if (value.type === 'direct' && !boundRouterInterface(connection)) return []
+  return [connection]
 }
 function jsonProfiles(raw: string): Connection[] {
   const obj: unknown = JSON.parse(raw)

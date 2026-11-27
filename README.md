@@ -13,7 +13,7 @@ KeenProxy requires **at least 256 MiB of total router RAM** on Keenetic/Netcraze
 ## Documentation and live demo
 
 - [English documentation](https://ordo-systems.github.io/keen-proxy/) · [Russian documentation](https://ordo-systems.github.io/keen-proxy/ru/)
-- [Interactive browser demo](https://ordo-systems.github.io/keen-proxy/demo/) with live simulated traffic, CPU and memory, and a simulated update and rollback flow. Changes reset on reload.
+- [Interactive browser demo](https://ordo-systems.github.io/keen-proxy/demo/) with simulated traffic, CPU and memory, and a simulated update and rollback flow. Changes reset on reload. The demo follows `main` and may show features not yet in the latest published router release.
 
 ## What works today
 

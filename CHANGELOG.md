@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Keep TCP DNS in the DNS frontend after firewall repair, use the bound DNS port when it is allocated dynamically, and exclude IPv6 peers from IPv4 firewall rules.
+- Preserve existing TPROXY policy routes when activating TPROXY, and restore the previous firewall plan even if the Apply request is canceled.
+- Reject null, trailing JSON documents, and oversized configuration requests without replacing the current configuration.
+- Preserve edits made while Apply is in progress or a session is renewed, discard them on explicit logout, distinguish stale status from a failed Apply, and let users retry an initial configuration load.
+- Keep credentials out of redacted demo exports and require applied connection profiles for DNS-through-connection checks.
+- Preserve repeated WireGuard address lists on import and recognize router-interface outbounds in sing-box JSON.
+- Validate staged releases before stopping the service, require planned UDP interception after replacement, and preserve recovery files if rollback cannot restore the whole installation.
+- Preserve the previous build variant for rollback, verify installed tag and variant before a queued update, and restore a partially removed forwarding guard before attempting uninstall recovery.
 - Add router-interface connections to the wizard, using Keenetic interface descriptions when they match and kernel interface names on OpenWrt.
 - Upgrade embedded sing-box-lx to v1.14.4-lx.37 and use its WireGuard/AWG fork with a smaller receive batch to reduce memory growth during repeated Apply.
 - Retry eligible installer preflight failures once with the checksummed bootstrap from the selected release, without retrying failed service starts or checksum errors.

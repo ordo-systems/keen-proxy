@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,36 @@ func TestDemoDNSDisabledPolicy(t *testing.T) {
 	check, err = d.CheckDNS(context.Background(), cfg)
 	if err != nil || check.Route != "direct-fallback" || check.Error == "" {
 		t.Fatalf("direct demo DNS: %+v %v", check, err)
+	}
+}
+
+func TestDNSCheckAcceptsAppliedRawProfile(t *testing.T) {
+	cfg := &model.Config{Connections: []model.Connection{{
+		ID: "dns-tunnel", Type: model.ConnSingBox,
+		Outbound: map[string]any{"type": "socks", "server": "203.0.113.4", "server_port": 1080},
+	}}}
+	cfg.Defaults()
+	d := &Demo{cfg: cfg}
+	s := &Server{D: d, Token: "test-token"}
+	h := s.Handler()
+	draft := d.Config()
+	draft.DNS.Route, draft.DNS.Connection, draft.DNS.Failure = "connection", "dns-tunnel", "strict"
+	draft.DNS.Upstreams = []string{"https://1.1.1.1/dns-query"}
+	send := func() (int, string) {
+		t.Helper()
+		raw, err := json.Marshal(draft)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res := do(t, h, http.MethodPost, "/api/dns/check", string(raw), s.Token, lan)
+		return res.Code, res.Body.String()
+	}
+	if status, body := send(); status != http.StatusOK {
+		t.Fatalf("unchanged raw profile: status %d, body %s", status, body)
+	}
+	draft.Connections[0].Outbound["server_port"] = 1081
+	if status, body := send(); status != http.StatusBadRequest || !strings.Contains(body, "Apply connection changes first") {
+		t.Fatalf("unapplied raw profile: status %d, body %s", status, body)
 	}
 }
 

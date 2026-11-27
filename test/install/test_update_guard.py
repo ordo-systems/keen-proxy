@@ -53,6 +53,9 @@ esac
             touch "$KEENPROXY_PREFIX/forwarding-exposed"
         [ -f "$KEENPROXY_PREFIX/forwarding-blocked-6" ] ||
             touch "$KEENPROXY_PREFIX/forwarding-exposed-6"
+        if [ -f "$KEENPROXY_PREFIX/redirect-on-stop" ]; then
+            printf 'schema_version: 1\\n# redirect\\n' > "$KEENPROXY_PREFIX/etc/keenproxy/config.yaml"
+        fi
         rm -f "$state"
         ''')
         self.record_starts(self.old_asset)
@@ -99,6 +102,36 @@ esac
         self.assert_panel_access(self.install('--version', 'v1.2.4'))
 
         self.assertTrue((self.prefix / 'udp-ready').exists())
+        self.assert_released()
+
+    def test_candidate_that_requires_udp_cannot_start_without_its_jump(self) -> None:
+        self.record_starts(self.release('v1.2.4', dry_run='''
+echo '# jumps'
+echo 'iptables -t mangle -I PREROUTING 1 -j KEENPROXY_UDP'
+'''))
+
+        result = self.install('--version', 'v1.2.4')
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('new service failed to start with routing', result.stderr)
+        self.assertEqual(self.binary.read_bytes(), self.old)
+        self.assertTrue(self.running.exists())
+        self.assertEqual((self.prefix / 'starts').read_text().splitlines(),
+                         ['v1.2.3', 'v1.2.4', 'v1.2.3'])
+        self.assert_released()
+
+    def test_candidate_uses_config_saved_before_the_old_service_stopped(self) -> None:
+        self.record_starts(self.release('v1.2.4', dry_run='''
+echo '# jumps'
+if ! grep -Fxq '# redirect' "$3"; then
+    echo 'iptables -t mangle -I PREROUTING 1 -j KEENPROXY_UDP'
+fi
+'''))
+        (self.prefix / 'redirect-on-stop').touch()
+
+        self.assert_panel_access(self.install('--version', 'v1.2.4'))
+
+        self.assertEqual((self.prefix / 'starts').read_text().splitlines(), ['v1.2.3', 'v1.2.4'])
         self.assert_released()
 
     def test_management_only_candidate_does_not_release_forwarding(self) -> None:

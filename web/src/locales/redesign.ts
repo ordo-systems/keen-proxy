@@ -142,7 +142,7 @@ export const redesignRu = {
   watchdogUnknown: 'Отдельный статус не предоставлен',
   httpOnly:
     'Периодически проверяется HTTP. HTTPS и передача данных требуют отдельной проверки.',
-  traffic: 'Трафик через туннели',
+  traffic: 'Трафик через настроенные соединения',
   window: 'Доступная история',
   details: 'Подробности',
   checkedAt: 'Проверено {time}',
@@ -300,7 +300,7 @@ export const redesignEn: Record<keyof typeof redesignRu, string> = {
   watchdogUnknown: 'Separate status is not provided',
   httpOnly:
     'Periodic checks test HTTP. HTTPS and data transfer require a separate check.',
-  traffic: 'Tunnel traffic',
+  traffic: 'Traffic through configured connections',
   window: 'Available history',
   details: 'Details',
   checkedAt: 'Checked {time}',

@@ -9,10 +9,15 @@ const state = reactive({
   config: null as Config | null,
   saved: '',
   status: null as Status | null,
+  statusError: '',
   devices: [] as Device[],
   applying: false,
   error: '',
 })
+let statusRequest = 0
+let statusSettled = 0
+let pendingApply: Promise<void> | undefined
+let draftSession = 0
 
 const invalidDNSUpstreams = computed(() => state.config !== null && dnsUpstreamsIncomplete(
   state.config.dns.upstreams,
@@ -57,17 +62,31 @@ export const store = {
   // Replace only the draft; the saved snapshot remains the dirty-state baseline.
   setDraft(c:Config){state.config=normalize(c);state.error=''},
 
+  // Explicit logout discards the draft and invalidates pending configuration replies.
+  resetDraft() {
+    draftSession++
+    state.config = null
+    state.saved = ''
+    state.error = ''
+  },
+
   async load() {
+    const sessionAtLoad = draftSession
     const cfg = normalize(await api.config())
-    state.config = cfg
+    if (sessionAtLoad !== draftSession) return
+    // A session renewal can follow a successful Apply with newer edits in memory.
+    if (!this.dirty.value) state.config = cfg
     state.saved = JSON.stringify(cfg)
     state.error = ''
     authed.value = true
-    await Promise.all([this.refreshStatus(), this.refreshDevices()])
+    void this.refreshStatus().catch(() => {}) // refreshStatus exposes the warning.
+    void this.refreshDevices().catch(() => {})
   },
 
   async loadSession(open = false) {
+    const sessionAtLoad = draftSession
     const s = await api.session(open)
+    if (sessionAtLoad !== draftSession) return s
     session.trusted = s.trusted
     session.network = s.network ?? ''
     session.ip = s.ip
@@ -75,30 +94,51 @@ export const store = {
   },
 
   async refreshStatus() {
-    state.status = await api.status()
+    const request = ++statusRequest
+    try {
+      const status = await api.status()
+      if (request < statusSettled) return
+      statusSettled = request
+      state.status = status
+      state.statusError = ''
+    } catch (e) {
+      if (request > statusSettled) {
+        statusSettled = request
+        state.statusError = e instanceof Error ? e.message : String(e)
+      }
+      throw e
+    }
   },
 
   async refreshDevices() {
     state.devices = await api.devices()
   },
 
-  // Persist the whole draft and advance the baseline only after a successful save.
-  async apply() {
-    if (!state.config) return
-    if (invalidDNSUpstreams.value) throw new Error(t('settings.dnsUpstreamsRequired'))
+  // Advance the saved baseline on success, without overwriting edits made after send.
+  apply(): Promise<void> {
+    if (pendingApply) return pendingApply
+    if (!state.config || state.applying) return Promise.resolve()
+    if (invalidDNSUpstreams.value) return Promise.reject(new Error(t('settings.dnsUpstreamsRequired')))
+    const sent = JSON.stringify(state.config)
+    const sessionAtApply = draftSession
     state.applying = true
     state.error = ''
-    try {
-      const cfg = normalize(await api.saveConfig(state.config))
-      state.config = cfg
+    // Send the same snapshot we use to check for edits when the response arrives.
+    pendingApply = api.saveConfig(JSON.parse(sent) as Config).then((result) => {
+      if (sessionAtApply !== draftSession) return
+      const cfg = normalize(result)
+      const unchanged = JSON.stringify(state.config) === sent
       state.saved = JSON.stringify(cfg)
-      await this.refreshStatus()
-    } catch (e) {
-      state.error = (e as Error).message
+      if (unchanged) state.config = cfg
+      void this.refreshStatus().catch(() => {}) // A failed refresh is not a failed save.
+    }).catch((e) => {
+      if (sessionAtApply === draftSession) state.error = (e as Error).message
       throw e
-    } finally {
+    }).finally(() => {
+      pendingApply = undefined
       state.applying = false
-    }
+    })
+    return pendingApply
   },
 
   // Restore a fresh copy of the last saved configuration.

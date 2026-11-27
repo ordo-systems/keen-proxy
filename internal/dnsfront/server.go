@@ -112,11 +112,35 @@ func (s *Server) Start() error {
 		udpConn.Close()
 		return err
 	}
-	s.udp = &dns.Server{PacketConn: udpConn, Handler: h}
-	s.tcp = &dns.Server{Listener: tcpLn, Handler: h}
-	go s.udp.ActivateAndServe()
-	go s.tcp.ActivateAndServe()
+	udp := &dns.Server{PacketConn: udpConn, Handler: h}
+	tcp := &dns.Server{Listener: tcpLn, Handler: h}
+	if err := activateDNS(udp); err != nil {
+		udpConn.Close()
+		tcpLn.Close()
+		return err
+	}
+	if err := activateDNS(tcp); err != nil {
+		tcpLn.Close()
+		return errors.Join(err, udp.Shutdown())
+	}
+	s.udp, s.tcp = udp, tcp
 	return nil
+}
+
+// A bound socket is not enough: Shutdown refuses to close a server until
+// ActivateAndServe has entered its serving loop.
+func activateDNS(server *dns.Server) error {
+	start := make(chan error, 1)
+	server.NotifyStartedFunc = func() { start <- nil }
+	go func() {
+		if err := server.ActivateAndServe(); err != nil {
+			select {
+			case start <- err:
+			default:
+			}
+		}
+	}()
+	return <-start
 }
 
 // Addr returns the bound address, including an automatically assigned port.

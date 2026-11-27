@@ -26,14 +26,18 @@ done
 case "$prefix" in /*) ;; *) fail 'prefix must be an absolute path' ;; esac
 [ -n "$binary" ] && [ -f "$binary" ] && [ -x "$binary" ] || fail '--binary must name an executable KeenProxy build for this router'
 
-# Work on the destination filesystem so replacement by rename is atomic.
-mkdir -p "$prefix/bin" "$prefix/tmp"
-work=$(mktemp -d "$prefix/tmp/keenproxy-install.XXXXXX")
-trap 'rm -rf "$work"' EXIT
+dest="$prefix/bin/keenproxy"
+if [ -L "$dest" ] || { [ -e "$dest" ] && [ ! -f "$dest" ]; }; then
+    fail "destination must be absent or a regular file (not a symlink): $dest"
+fi
+
+# Stage beside the destination so replacement by rename is atomic.
+mkdir -p "$prefix/bin"
+staged=$(mktemp "$prefix/bin/.keenproxy-install.XXXXXX")
+trap 'rm -f "$staged"' 0
 trap 'exit 1' HUP INT TERM
 
-# Stage all payloads before replacing existing files.
-cp "$binary" "$work/keenproxy"
-chmod 755 "$work/keenproxy"
-mv -f "$work/keenproxy" "$prefix/bin/keenproxy"
+cp "$binary" "$staged"
+chmod 755 "$staged"
+mv -f "$staged" "$dest"
 echo "Installed into $prefix/bin. Configuration preserved. Restart KeenProxy to load the new build."

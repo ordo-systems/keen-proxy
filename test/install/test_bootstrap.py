@@ -27,6 +27,12 @@ class BootstrapFixture(unittest.TestCase):
                         KEENPROXY_PREFIX=str(self.prefix), FIXTURES=str(self.mirror),
                         REQUESTS=str(self.requests), CPU='aarch64')
         self.command('uname', 'echo "$CPU"')
+        self.command('hexdump', 'printf "%s" "${ELF_HEADER:-7f454c460201}"')
+        self.command('head', '''
+case "$*" in
+    *'/proc/self/exe'*) printf fixture ;;
+    *) exec /usr/bin/head "$@" ;;
+esac''')
         self.command('pidof', 'exit 1')
         self.command('curl', '''
 while [ "$#" -gt 0 ]; do
@@ -489,6 +495,54 @@ done
         self.assertEqual(self.binary.read_bytes(), first.read_bytes())
         self.assertTrue((self.prefix / 'running').exists())
 
+    def test_entware_preflight_rejects_changed_staged_binary(self):
+        first = self.release('v1.2.3', stop='touch "$KEENPROXY_PREFIX/stopped"; rm -f "$state"')
+        self.assert_panel_access(self.install())
+        folder = self.release('v1.2.4').parent
+        self.executable(folder / 'install.sh', '''
+mkdir -p "$2/bin"
+printf '#!/bin/sh\\nexit 0\\n' > "$4"
+cp "$4" "$2/bin/keenproxy"
+chmod 755 "$2/bin/keenproxy"
+''')
+        self.write_checksums(folder)
+
+        result = self.install('--version', 'v1.2.4')
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('staged binary differs from the verified release', result.stderr)
+        self.assertFalse((self.prefix / 'stopped').exists())
+        self.assertEqual(self.binary.read_bytes(), first.read_bytes())
+        self.assert_release('v1.2.3')
+
+    def test_partial_rollback_retains_all_original_files(self):
+        first = self.release('v1.2.3')
+        self.assert_panel_access(self.install())
+        service = self.service.read_bytes()
+        release = self.release_record.read_bytes()
+        self.release('v1.2.4', start=False)
+        self.command('mv', '''
+for path in "$@"; do target=$path; done
+if [ "$target" = "$KEENPROXY_PREFIX/etc/init.d/S99keenproxy" ] &&
+    [ -f "$KEENPROXY_PREFIX/controller-replaced" ]; then
+    exit 1
+elif [ "$target" = "$KEENPROXY_PREFIX/etc/init.d/S99keenproxy" ]; then
+    touch "$KEENPROXY_PREFIX/controller-replaced"
+fi
+exec /bin/mv "$@"
+''')
+
+        result = self.install('--version', 'v1.2.4')
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('rollback failed; recovery files retained', result.stderr)
+        (work,) = (self.prefix / 'tmp').glob('keenproxy-release.*')
+        previous = work / 'previous'
+        self.assertEqual((previous / 'bin/keenproxy').read_bytes(), first.read_bytes())
+        self.assertEqual((previous / 'etc/init.d/S99keenproxy').read_bytes(), service)
+        self.assertEqual((previous / 'share/keenproxy/release').read_bytes(), release)
+        self.assertEqual(self.binary.read_bytes(), first.read_bytes())
+
     def test_failed_start_restores_previous_release(self):
         first = self.release('v1.2.3')
         installed = self.install()
@@ -525,6 +579,40 @@ done
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.binary.read_bytes(), first.read_bytes())
         self.assert_release('v1.2.3', 'v1.2.4')
+
+    def test_variant_switch_records_exact_previous_build_and_rejects_stale_job(self):
+        first = self.release('v1.2.3')
+        lite = self.release('v1.2.4', lite=True)
+        self.assert_panel_access(self.install())
+        self.assert_panel_access(self.install('--version', 'v1.2.4', '--lite'))
+        self.assertEqual(self.binary.read_bytes(), lite.read_bytes())
+        self.assertEqual(self.release_record.read_text(),
+                         'current v1.2.4\nprevious v1.2.3\nvariant lite\nprevious_variant full\n')
+        before = self.requests.read_bytes()
+        result = self.install('--version', 'v1.2.3', '--expect-current', 'v1.2.4',
+                              '--expect-variant', 'full')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('installed variant changed', result.stderr)
+        self.assertEqual(self.requests.read_bytes(), before)
+        self.assertEqual(self.binary.read_bytes(), lite.read_bytes())
+        self.assert_panel_access(self.install('--version', 'v1.2.3', '--expect-current',
+                                              'v1.2.4', '--expect-variant', 'lite'))
+        self.assertEqual(self.binary.read_bytes(), first.read_bytes())
+        self.assertEqual(self.release_record.read_text(),
+                         'current v1.2.3\nprevious v1.2.4\nvariant full\nprevious_variant lite\n')
+        same_tag_lite = first.with_name('keenproxy-lite-linux-arm64')
+        same_tag_lite.write_bytes(first.read_bytes() + b'\n# lite\n')
+        self.write_checksums(first.parent)
+        self.assert_panel_access(self.install('--version', 'v1.2.3', '--lite'))
+        self.assertEqual(self.binary.read_bytes(), same_tag_lite.read_bytes())
+        self.assert_release('v1.2.3', 'v1.2.4', 'lite')
+
+    def test_arm64_kernel_with_32_bit_userspace_selects_armv5_asset(self):
+        self.env['ELF_HEADER'] = '7f454c460101'
+        release = self.release('v1.2.3', arch='armv5', lite=True)
+        self.assert_panel_access(self.install('--lite'))
+        self.assertEqual(self.binary.read_bytes(), release.read_bytes())
+        self.assertIn('/v1.2.3/keenproxy-lite-linux-armv5', self.requests.read_text())
 
     def test_expected_release_requires_managed_version_metadata(self):
         result = self.install('--version', 'v1.2.4', '--expect-current', 'v1.2.3')

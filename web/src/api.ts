@@ -8,6 +8,7 @@ export { ApiError } from './apiError.ts'
 
 // The shell uses this callback to show login after an unauthorized request.
 let onUnauthorized: () => void = () => {}
+let authSession = 0
 // Register the application-wide handler for expired or missing authentication.
 export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn
@@ -25,6 +26,7 @@ type RequestOptions = { fileType?: string; oneShotToken?: string }
 
 // Share cookie authentication and the login handler across JSON and file requests.
 async function send(method: string, path: string, body?: unknown, { fileType = 'application/octet-stream', oneShotToken }: RequestOptions = {}): Promise<Response> {
+  const requestedIn = authSession
   const file = body instanceof Blob ? body : undefined
   const contentHeaders = body === undefined ? undefined : { 'Content-Type': file ? fileType : 'application/json' }
   const res = await fetch(path, {
@@ -35,7 +37,8 @@ async function send(method: string, path: string, body?: unknown, { fileType = '
     body: file ?? (body === undefined ? undefined : JSON.stringify(body)),
   })
   if (!res.ok) {
-    if (res.status === 401 && path !== '/api/login' && !oneShotToken) onUnauthorized()
+    if (res.status === 401 && path !== '/api/login' && path !== '/api/logout' &&
+        !oneShotToken && requestedIn === authSession) onUnauthorized()
     throw httpError(res.status, await res.text())
   }
   return res
@@ -86,7 +89,14 @@ export const api = {
   domains: () => request<DomainStatus>('GET', '/api/domains'),
   resolveDomains: (names: string[], preview = false) => request<DomainStatus>('POST', '/api/domains/resolve', { names, preview }),
   login: (token: string) => request<{ ok: boolean }>('POST', '/api/login', { token }),
-  logout: () => request<{ ok: boolean }>('POST', '/api/logout'),
+  logout: async () => {
+    try {
+      return await request<{ ok: boolean }>('POST', '/api/logout')
+    } finally {
+      // Late responses for the logged-out session must not log out its successor.
+      authSession++
+    }
+  },
   // open=true audits trusted-network access when the panel is opened.
   session: (open = false) => request<Session>('GET', `/api/session${open ? '?open=1' : ''}`),
   status: () => request<Status>('GET', '/api/status'),

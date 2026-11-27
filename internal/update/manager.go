@@ -19,6 +19,7 @@ const (
 	defaultTime   = "04:00"
 	checkInterval = 6 * time.Hour
 	checkCooldown = 30 * time.Second
+	busyRetry     = 10 * time.Second
 )
 
 var (
@@ -39,7 +40,12 @@ type schedule struct {
 	AttemptDate string `json:"attempt_date,omitempty"`
 }
 
-type installState struct{ Current, Previous, Variant string }
+type releaseIdentity struct{ tag, variant string }
+
+type installState struct {
+	Current, Variant string
+	Previous         releaseIdentity
+}
 
 // Job is persisted across service restarts by the detached installer.
 type Job struct {
@@ -68,9 +74,9 @@ type Manager struct {
 	prefix, shell       string
 	client              *http.Client
 	log                 *slog.Logger
-	start               func(installState, string) error
+	start               func(installState, releaseIdentity) error
 	latest, variant     string
-	rollbackReady       string
+	rollbackReady       releaseIdentity
 	checked             time.Time
 	checkFailed         bool
 }
@@ -95,12 +101,17 @@ func readInstall(r io.Reader) installState {
 			fields[key] = value
 		}
 	}
-	s := installState{Current: fields["current"], Previous: fields["previous"], Variant: fields["variant"]}
+	s := installState{Current: fields["current"], Variant: fields["variant"]}
 	if !stable.MatchString(s.Current) || (s.Variant != "full" && s.Variant != "lite") || scan.Err() != nil {
 		return installState{}
 	}
-	if !stable.MatchString(s.Previous) || s.Previous == s.Current {
-		s.Previous = ""
+	previousVariant, ok := fields["previous_variant"]
+	if !ok {
+		previousVariant = s.Variant
+	}
+	previousTag := fields["previous"]
+	if stable.MatchString(previousTag) && previousTag != s.Current && (previousVariant == "full" || previousVariant == "lite") {
+		s.Previous = releaseIdentity{tag: previousTag, variant: previousVariant}
 	}
 	return s
 }
@@ -143,10 +154,7 @@ func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s.Available = true
-	s.Current, s.Previous = current.Current, current.Previous
-	if m.platform == "openwrt" && m.rollbackReady != current.Previous {
-		s.Previous = ""
-	}
+	s.Current, s.Previous = current.Current, m.rollbackCandidate(current).tag
 	if prefs, err := m.settings(); err == nil {
 		s.Preferences = prefs.Preferences
 	}
@@ -184,17 +192,18 @@ func (m *Manager) Check(ctx context.Context, manual bool) {
 }
 
 func (m *Manager) confirmRollback(ctx context.Context, current installState) {
-	m.rollbackReady = ""
-	if m.platform != "openwrt" || current.Previous == "" {
+	m.rollbackReady = releaseIdentity{}
+	previous := current.Previous
+	if m.platform != "openwrt" || previous.tag == "" {
 		return
 	}
-	tag, err := fetchTagged(ctx, m.client, current.Previous, current.Variant, m.arch, m.platform)
+	tag, err := fetchTagged(ctx, m.client, previous.tag, previous.variant, m.arch, m.platform)
 	if err != nil {
 		m.log.Debug("previous release is not a native rollback target", "err", err)
 		return
 	}
-	if tag == current.Previous {
-		m.rollbackReady = tag
+	if tag == previous.tag {
+		m.rollbackReady = previous
 	}
 }
 
@@ -216,7 +225,7 @@ func (m *Manager) SetPreferences(p Preferences) error {
 	return m.save(s)
 }
 
-// Start accepts only the checked latest version or the recorded rollback version.
+// Start accepts only the checked latest version or an eligible rollback version.
 func (m *Manager) Start(target string, rollback bool) error {
 	current := m.installed()
 	if current.Current == "" {
@@ -224,17 +233,19 @@ func (m *Manager) Start(target string, rollback bool) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	expected := m.candidate(current)
+	var expected releaseIdentity
 	if rollback {
-		expected = current.Previous
+		expected = m.rollbackCandidate(current)
+	} else {
+		expected = releaseIdentity{tag: m.candidate(current), variant: current.Variant}
 	}
-	if expected == "" || expected != target {
+	if expected.tag == "" || expected.tag != target {
 		return ErrTarget
 	}
 	if rollback {
-		return m.startRollback(current, target)
+		return m.startRollback(current, expected)
 	}
-	return m.start(current, target)
+	return m.start(current, expected)
 }
 
 func (m *Manager) candidate(current installState) string {
@@ -244,7 +255,14 @@ func (m *Manager) candidate(current installState) string {
 	return ""
 }
 
-func (m *Manager) startRollback(current installState, target string) error {
+func (m *Manager) rollbackCandidate(current installState) releaseIdentity {
+	if m.platform == "openwrt" && (m.rollbackReady != current.Previous || m.variant != current.Variant) {
+		return releaseIdentity{}
+	}
+	return current.Previous
+}
+
+func (m *Manager) startRollback(current installState, target releaseIdentity) error {
 	s, err := m.settings()
 	if err != nil {
 		return err
@@ -264,30 +282,41 @@ func due(p Preferences, attempted string, now time.Time) bool {
 	return p.Enabled && attempted != now.Format(time.DateOnly) && p.Time == now.Format("15:04")
 }
 
-func (m *Manager) scheduled(ctx context.Context, now time.Time) {
+// scheduled reports whether lock contention warrants another try in this minute.
+func (m *Manager) scheduled(ctx context.Context, now func() time.Time) bool {
 	s, err := m.settings()
-	if err != nil || !due(s.Preferences, s.AttemptDate, now) {
-		return
+	if err != nil || !due(s.Preferences, s.AttemptDate, now()) {
+		return false
 	}
 	m.Check(ctx, true)
 	if ctx.Err() != nil {
-		return
+		return false
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, err = m.settings()
 	current := m.installed()
 	target := m.candidate(current)
-	if err != nil || !due(s.Preferences, s.AttemptDate, now) || target == "" {
-		return
+	currentTime := now()
+	if err != nil || !due(s.Preferences, s.AttemptDate, currentTime) || target == "" {
+		return false
 	}
-	s.AttemptDate = now.Format(time.DateOnly)
+	before := s
+	s.AttemptDate = currentTime.Format(time.DateOnly)
 	if err = m.save(s); err == nil {
-		err = m.start(current, target)
+		err = m.start(current, releaseIdentity{tag: target, variant: current.Variant})
+		if errors.Is(err, ErrBusy) {
+			restoreErr := m.save(before)
+			if restoreErr == nil {
+				return true
+			}
+			err = errors.Join(err, restoreErr)
+		}
 	}
 	if err != nil {
 		m.log.Warn("scheduled update failed to start", "err", err)
 	}
+	return false
 }
 
 // Run checks for releases at startup and ticks on the router clock.
@@ -296,9 +325,16 @@ func (m *Manager) Run(ctx context.Context) {
 		return
 	}
 	for {
-		m.scheduled(ctx, time.Now())
+		now := time.Now()
+		// Measure the next tick before a network check can cross a minute boundary.
+		next := now.Truncate(time.Minute).Add(time.Minute)
+		if m.scheduled(ctx, time.Now) {
+			if retry := now.Add(busyRetry); retry.Before(next) {
+				next = retry
+			}
+		}
 		m.Check(ctx, false)
-		timer := time.NewTimer(time.Until(time.Now().Truncate(time.Minute).Add(time.Minute)))
+		timer := time.NewTimer(time.Until(next))
 		select {
 		case <-ctx.Done():
 			timer.Stop()

@@ -25,6 +25,30 @@ def release_step(name):
     return textwrap.dedent('\n'.join(lines[start:end]))
 
 
+@unittest.skipUnless(shutil.which('jq'), 'release identity pinning requires jq')
+class ReleaseIdentityTest(unittest.TestCase):
+    def test_explicit_request_rejects_release_renamed_after_lookup(self):
+        boundary = r'''
+gh() {
+    case "$2" in
+        repos/example/fixture/releases/42) echo '{"tag_name":"v1.2.4","draft":false}' ;;
+        repos/example/fixture/commits/refs/tags/v1.2.4) printf '%040d\n' 1 ;;
+        *) return 2 ;;
+    esac
+}
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / 'outputs'
+            result = subprocess.run(['bash', '-ec', boundary + release_step('Pin release identity')],
+                                    env=dict(os.environ, GITHUB_REPOSITORY='example/fixture',
+                                             REQUESTED_TAG='v1.2.3', RELEASE_ID='42', CREATED='',
+                                             CREATED_SHA='', GITHUB_OUTPUT=str(output)),
+                                    capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('no longer matches the requested tag', result.stderr)
+            self.assertFalse(output.exists())
+
+
 class ReleaseBootstrapContractTest(unittest.TestCase):
     def test_first_tag_with_bootstrap_is_v0_10_2(self):
         boundary = r'''
@@ -42,7 +66,7 @@ git() {
             with self.subTest(tag=tag), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 (root / 'tools').mkdir()
-                for name in ('bootstrap.sh', 'S99keenproxy'):
+                for name in ('bootstrap.sh', 'S99keenproxy', 'keenproxy.openwrt'):
                     (root / 'tools' / name).touch()
                 (root / 'version.txt').write_text(tag[1:] + '\n')
                 output = root / 'outputs'
@@ -163,8 +187,8 @@ class ReleasePublicationTest(unittest.TestCase):
             for name in sorted(self.names)))
         self.names.add('SHA256SUMS')
 
-    def publish(self, *, recovery=False, failed_upload='', tag_moved=False, historical=False,
-                latest='v1.2.2'):
+    def publish(self, *, recovery=False, failed_upload='', tag_moved=False,
+                tag_moved_on_verify=False, historical=False, native=True, latest='v1.2.2'):
         boundary = r'''
 set -euo pipefail
 export RELEASE_ID=42 RELEASE_TAG=v1.2.3 GH_REPO=example/fixture GH_TOKEN=test
@@ -175,13 +199,20 @@ gh() {
             jq -n --arg sha "$RELEASE_REVISION" --argjson recovery "$RELEASE_RECOVERY" \
                 '{tag_name:"v1.2.3",target_commitish:$sha,draft:($recovery|not),prerelease:false}' ;;
         repos/*/commits/refs/tags/v1.2.3)
-            if [[ "$TAG_MOVED" == true ]]; then echo different; else echo "$RELEASE_REVISION"; fi ;;
+            if [[ "$TAG_MOVED" == true || -f "$TEST_ROOT/tag-moved" ]]; then
+                echo different
+            else
+                echo "$RELEASE_REVISION"
+            fi ;;
         --paginate)
             if [[ "$4" == "repos/$GH_REPO/releases?per_page=100" ]]; then
                 jq -n --arg tag "$TEST_LATEST" '[[{tag_name:$tag, draft:false, prerelease:false}]]'
                 return
             fi
             [[ "$4" == "$endpoint/assets?per_page=100" ]]
+            if [[ "$TAG_MOVED_ON_VERIFY" == true && -f "$TEST_ROOT/remote/SHA256SUMS" ]]; then
+                touch "$TEST_ROOT/tag-moved"
+            fi
             (
                 shopt -s nullglob
                 for path in "$TEST_ROOT"/remote/*; do
@@ -212,11 +243,12 @@ source "$PUBLISH_SCRIPT" "$TEST_ROOT/dist"
 '''
         env = dict(os.environ, PUBLISH_SCRIPT=str(PUBLISH), TEST_ROOT=str(self.root),
                    RELEASE_REVISION=self.revision, RELEASE_RECOVERY=str(recovery).lower(),
-                   RELEASE_NATIVE=str(not historical).lower(),
+                   RELEASE_NATIVE=str(native and not historical).lower(),
                    RELEASE_BOOTSTRAP=str(not historical).lower(),
                    RELEASE_ENTWARE_CONTROLLER=str(not historical).lower(),
                    RELEASE_ARCHITECTURES='arm64 mipsle' if historical else 'amd64 386 armv5 arm64 mipsle mipsbe',
                    FAILED_UPLOAD=failed_upload, TAG_MOVED=str(tag_moved).lower(),
+                   TAG_MOVED_ON_VERIFY=str(tag_moved_on_verify).lower(),
                    TEST_LATEST=latest)
         return subprocess.run(['bash', '-c', boundary], env=env, cwd=self.root,
                               capture_output=True, text=True, timeout=20)
@@ -249,6 +281,25 @@ source "$PUBLISH_SCRIPT" "$TEST_ROOT/dist"
         result = self.publish(recovery=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(set(path.name for path in self.remote.iterdir()), self.names)
+        self.assertFalse((self.root / 'published').exists())
+
+    def test_repair_rechecks_tag_after_remote_verification(self):
+        result = self.publish(recovery=True, tag_moved_on_verify=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('tag no longer points', result.stderr)
+        self.assertEqual({path.name for path in self.remote.iterdir()}, self.names)
+        self.assertFalse((self.root / 'published').exists())
+
+    def test_draft_rejects_payload_without_openwrt_controller(self):
+        (self.local / 'keenproxy.openwrt').unlink()
+        checksums = self.local / 'SHA256SUMS'
+        checksums.write_text(''.join(line + '\n' for line in checksums.read_text().splitlines()
+                                     if line.split()[1] != 'keenproxy.openwrt'))
+
+        result = self.publish(native=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('draft releases require keenproxy.openwrt', result.stderr)
+        self.assertEqual(list(self.remote.iterdir()), [])
         self.assertFalse((self.root / 'published').exists())
 
     def test_repair_accepts_tagged_historical_layout(self):

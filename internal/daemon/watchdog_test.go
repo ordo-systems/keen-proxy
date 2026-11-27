@@ -28,20 +28,30 @@ type watchdogRunner struct {
 	dropNextCheck   bool
 	applyCalls      int
 	restoreInput    string
+	onRestore       func(context.Context)
 	applyErr        error
 	applyErrAt      int
 	applyDelay      time.Duration
 }
 
-func (r *watchdogRunner) Run(_ context.Context, input string, name string, args ...string) error {
+func (r *watchdogRunner) Run(ctx context.Context, input string, name string, args ...string) error {
 	if name == "iptables-restore" {
 		r.applyCalls++
 		r.restoreInput = input
+		if r.onRestore != nil {
+			r.onRestore(ctx)
+		}
 		time.Sleep(r.applyDelay)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if r.applyErrAt == 0 || r.applyCalls == r.applyErrAt {
 			return r.applyErr
 		}
 		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if args[3] == "-D" {
 		if args[len(args)-1] == netfilter.ChainTCP {
@@ -334,6 +344,110 @@ func TestWatchdogRecoversAfterFailedApplyAndRollback(t *testing.T) {
 				t.Fatal("shutdown left the recovered interception rules installed")
 			}
 		})
+	}
+}
+
+func TestCanceledApplyRestoresPreviousFirewall(t *testing.T) {
+	holdMemoryLimit(t)
+	cfg := quietConfig(t)
+	path := writeSavedConfig(t, cfg)
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &watchdogRunner{missing: true}
+	d := newMemoryDaemon(t, path, runner)
+	d.runCtx = t.Context()
+	t.Cleanup(d.shutdown)
+	d.mu.Lock()
+	blocked, err := d.startLocked(d.runCtx, d.applyLocked)
+	d.mu.Unlock()
+	if err != nil || blocked != nil {
+		t.Fatalf("startup: blocked=%t, err=%v", blocked != nil, err)
+	}
+	oldPlan := runner.restoreInput
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	runner.onRestore = func(ctx context.Context) {
+		switch runner.applyCalls {
+		case 2:
+			if runner.restoreInput == oldPlan {
+				t.Error("draft did not change the firewall plan")
+			}
+			cancel()
+		case 3:
+			if _, ok := ctx.Deadline(); !ok {
+				t.Error("firewall rollback has no deadline")
+			}
+		}
+	}
+	next := d.Config()
+	next.LAN.Interface = "lan-test"
+	if err := d.Apply(ctx, next); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled apply returned %v", err)
+	}
+	if runner.applyCalls != 3 || runner.restoreInput != oldPlan || d.planPending || !d.Status(d.runCtx).Firewall {
+		t.Fatalf("previous firewall not restored before Apply returned: applies=%d pending=%t missing=%t", runner.applyCalls, d.planPending, runner.missing)
+	}
+	if got := d.Config().LAN.Interface; got != cfg.LAN.Interface {
+		t.Fatalf("active LAN = %q, want %q", got, cfg.LAN.Interface)
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, saved) {
+		t.Fatalf("canceled apply changed saved configuration: %v", err)
+	}
+}
+
+func TestFirewallUsesBoundDNSPort(t *testing.T) {
+	holdMemoryLimit(t)
+	ctx := t.Context()
+	cfg := quietConfig(t) // Explicitly requests an ephemeral DNS port.
+	const mac = "02:00:00:00:00:01"
+	cfg.Clients = []model.Client{{MAC: mac, Mode: model.ModeSplit}}
+	runner := &watchdogRunner{missing: true}
+	d := newMemoryDaemon(t, writeSavedConfig(t, cfg), runner)
+	t.Cleanup(d.shutdown)
+	d.mu.Lock()
+	blocked, err := d.startLocked(ctx, d.applyLocked)
+	d.mu.Unlock()
+	if err != nil || blocked != nil {
+		t.Fatalf("startup: blocked=%t, err=%v", blocked != nil, err)
+	}
+	bound, err := netip.ParseAddrPort(d.Status(ctx).DNS)
+	if err != nil || bound.Port() == 0 {
+		t.Fatalf("invalid DNS listener address: %v (%v)", bound, err)
+	}
+	checkPort := func(phase string, attempts int) {
+		t.Helper()
+		if runner.applyCalls != attempts {
+			t.Fatalf("%s: %d restores, want %d", phase, runner.applyCalls, attempts)
+		}
+		for _, proto := range []string{"udp", "tcp"} {
+			rule := fmt.Sprintf("-A %s -i %s -p %s -m %s --dport 53 -j REDIRECT --to-ports %d\n",
+				netfilter.ChainDNS, cfg.LAN.Interface, proto, proto, bound.Port())
+			if !strings.Contains(runner.restoreInput, rule) {
+				t.Fatalf("%s: missing DNS redirect %q in:\n%s", phase, rule, runner.restoreInput)
+			}
+		}
+	}
+	checkPort("startup", 1)
+
+	next := d.Config()
+	next.DNS.BypassSources = []string{"192.0.2.53"}
+	if err := d.Apply(ctx, next); err != nil {
+		t.Fatal(err)
+	}
+	checkPort("apply", 2)
+
+	const ip = "192.0.2.10"
+	arp := fmt.Sprintf("IP address HW type Flags HW address Mask Device\n%s 0x1 0x2 %s * %s\n", ip, mac, cfg.LAN.Interface)
+	if err := os.WriteFile(d.opt.ARPPath, []byte(arp), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d.watch(ctx)
+	checkPort("watchdog", 3)
+	if !strings.Contains(runner.restoreInput, "-s "+ip+"/32") {
+		t.Fatalf("watchdog did not rebuild the plan with the discovered client:\n%s", runner.restoreInput)
 	}
 }
 

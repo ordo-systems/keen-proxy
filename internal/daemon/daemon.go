@@ -88,11 +88,7 @@ type Daemon struct {
 	eng          engine.Engine
 	dns          *dnsfront.Server
 	route        netfilter.TProxyRoute
-	routeOn      bool
-	routeRelease func() error // ownership-aware cleanup for a recovered TPROXY route
-
-	// Once we borrow routes, keep that policy across mode changes and rollback.
-	preservePolicyRoutes bool
+	routeRelease func() error // non-nil while a TPROXY policy route is acquired
 
 	plan         netfilter.Plan
 	planOn       bool
@@ -231,7 +227,6 @@ func (d *Daemon) startLocked(ctx context.Context, activate func(context.Context,
 	catalog.AutoUpdate(cfg)
 	d.started = time.Now()
 	tproxyEnrolled, autoloadErr := d.autoloadKernelModulesLocked(ctx, cfg.Intercept.Mode == model.InterceptTProxy)
-	d.preservePolicyRoutes = tproxyEnrolled
 	blocked := d.tproxyPreflight(ctx, cfg, autoloadErr)
 	if ctx.Err() != nil {
 		return nil, nil
@@ -347,7 +342,15 @@ func (d *Daemon) applyConfigLocked(ctx context.Context, cfg *model.Config, save 
 			details += "; interception remains inactive"
 		} else if prev != nil {
 			d.log.Error("new configuration failed to apply, restoring previous configuration", "err", err)
-			if rbErr := d.applyLocked(ctx, prev); rbErr != nil {
+			// The request may have been canceled after changing interception.
+			parent := d.runCtx
+			if parent == nil {
+				parent = context.Background()
+			}
+			rollbackCtx, cancel := context.WithTimeout(parent, 10*time.Second)
+			rbErr := d.applyLocked(rollbackCtx, prev)
+			cancel()
+			if rbErr != nil {
 				d.log.Error("rollback also failed", "err", rbErr)
 				details += "; rollback also failed: " + rbErr.Error()
 				rollbackRestore = journalRestoreFailure(rbErr)
@@ -555,26 +558,16 @@ func (d *Daemon) applyLocked(ctx context.Context, cfg *model.Config) error {
 
 	newRoute := netfilter.TProxyRoute{Mark: cfg.Intercept.FWMark, Table: cfg.Intercept.RouteTable}
 	wantRoute := cfg.Intercept.Mode == model.InterceptTProxy
-	if d.routeOn && (!wantRoute || newRoute != d.route) {
+	if d.routeRelease != nil && (!wantRoute || newRoute != d.route) {
 		d.removeRouteLocked()
 	}
-	if wantRoute && !d.routeOn {
-		var err error
-		if d.preservePolicyRoutes || d.startupBlocked != nil {
-			d.routeRelease, err = newRoute.Acquire()
-			if err != nil {
-				return fmt.Errorf("%w: %w", errPolicyRouteAcquisition, err)
-			}
-			d.preservePolicyRoutes = true
-		} else {
-			err = newRoute.Apply()
-		}
+	if wantRoute && d.routeRelease == nil {
+		release, err := newRoute.Acquire()
 		if err != nil {
-			return err
+			return fmt.Errorf("%w: %w", errPolicyRouteAcquisition, err)
 		}
-		d.routeOn = true
+		d.route, d.routeRelease = newRoute, release
 	}
-	d.route = newRoute
 
 	// Interception mode changes require removing the complete previous chain set.
 	if d.planOn && d.plan.Mode != out.Plan.Mode {
@@ -646,17 +639,13 @@ func (d *Daemon) stopInterceptionLocked() {
 }
 
 func (d *Daemon) removeRouteLocked() {
-	if !d.routeOn {
+	if d.routeRelease == nil {
 		return
 	}
-	release := d.routeRelease
-	if release == nil {
-		release = d.route.Remove
-	}
-	if err := release(); err != nil {
+	if err := d.routeRelease(); err != nil {
 		d.log.Warn("remove TPROXY route", "err", err)
 	}
-	d.routeOn, d.routeRelease = false, nil
+	d.routeRelease = nil
 }
 
 // restoreInactiveLocked tears down a failed first activation without activating
@@ -715,8 +704,13 @@ func (d *Daemon) startDNS() error {
 	}
 	cfg.OnRoute = d.recordDNSRoute
 	cfg.OnBlock = d.recordDNSBlock
-	d.dns = dnsfront.New(cfg)
-	return d.dns.Start()
+	s := dnsfront.New(cfg)
+	if err := s.Start(); err != nil {
+		s.Close()
+		return err
+	}
+	d.dns = s
+	return nil
 }
 
 // watch refreshes neighbor addresses and restores missing interception rules.

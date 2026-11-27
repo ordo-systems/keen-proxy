@@ -19,14 +19,17 @@ export function dnsTunnelError(connections: Connection[], id: string, failure: D
       return `dns.connection: raw type ${JSON.stringify(type)} does not guarantee a tunnel`
     }
   }
+  if (!connections.some(connection => connection.id === id)) {
+    return `dns.connection: unknown connection ${JSON.stringify(id)}`
+  }
   if (failure !== 'direct' && chain.includes('direct')) {
     return 'dns: strict forbids direct in the connection chain'
   }
 }
 
-export function dnsTunnelChoices<T extends { value: string }>(choices: T[], connections: Connection[]): T[] {
-  // Failure policy is selected separately; keep tunnels that can work with Direct allowed.
-  return choices.filter(choice => !dnsTunnelError(connections, choice.value, 'direct'))
+// The picker permits explicit Direct fallback; automatic defaults can require a stricter policy.
+export function dnsTunnelChoices<T extends { value: string }>(choices: T[], connections: Connection[], failure: DNSConfig['failure'] = 'direct'): T[] {
+  return choices.filter(choice => !dnsTunnelError(connections, choice.value, failure))
 }
 
 // Keep existing resolver lists usable until the operator changes their order or contents.

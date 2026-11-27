@@ -150,6 +150,7 @@ test('demo rejects raw selectors in DNS chains and allows built-in Direct only w
   tunnel.fallback = 'selector'
   draft.dns.failure = 'direct'
   const rawError = /dns\.connection: raw type "selector" does not guarantee a tunnel/
+  await assert.rejects(api.checkDNS(draft), rawError)
   await assert.rejects(api.validateConfig(draft), rawError)
   await assert.rejects(api.saveConfig(draft), rawError)
 
@@ -157,12 +158,19 @@ test('demo rejects raw selectors in DNS chains and allows built-in Direct only w
   for (const failure of [undefined, 'strict'] as const) {
     draft.dns.failure = failure
     const strictError = /dns: strict forbids direct in the connection chain/
+    await assert.rejects(api.checkDNS(draft), strictError)
     await assert.rejects(api.validateConfig(draft), strictError)
     await assert.rejects(api.saveConfig(draft), strictError)
   }
+  draft.dns.connection = undefined
+  const missingError = /dns\.connection: unknown connection ""/
+  await assert.rejects(api.checkDNS(draft), missingError)
+  await assert.rejects(api.saveConfig(draft), missingError)
+  draft.dns.connection = 'fi'
   assert.deepEqual(await api.config(), original)
 
   draft.dns.failure = 'direct'
+  assert.equal((await api.checkDNS(draft)).rcode, 0)
   assert.equal((await api.validateConfig(draft)).ok, true)
   await api.saveConfig(draft)
   assert.equal((await api.config()).dns.failure, 'direct')

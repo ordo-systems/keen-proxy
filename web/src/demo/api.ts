@@ -67,6 +67,7 @@ export const api = {
   exportResources: async (_format: ResourceFormat, _list: ResourceList): Promise<ResourceExport> => { throw new Error(resourceFileUnavailable) },
   refreshFilters: async () => ({ demo: true }),
   checkDNS: async (config: Config) => {
+    demo.validate(config)
     const route = dnsExit(config)
     return { demo: true, rcode: route === 'block' ? 2 : 0, latency_ms: 0, route: `simulated: ${route}`, error: route === 'block' ? 'Configured DNS path is unavailable' : undefined }
   },

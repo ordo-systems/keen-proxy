@@ -109,11 +109,14 @@ function removeBootstrap(host: string) {
 // Reset route-specific settings when switching policies.
 function changeRoute(route: DNSConfig['route']) {
   dns.value.route = route
-  const current = dns.value.connection
-  dns.value.connection = route === 'connection'
-    ? conns.value.find(({ value }) => value === current)?.value ?? conns.value[0]?.value
-    : undefined
-  dns.value.failure = route === 'connection' ? 'strict' : undefined
+  if (route === 'connection') {
+    const strictChoices = dnsTunnelChoices(conns.value, cfg.value.connections ?? [], 'strict')
+    dns.value.connection = strictChoices.find(({ value }) => value === dns.value.connection)?.value ?? strictChoices[0]?.value
+    dns.value.failure = 'strict'
+  } else {
+    dns.value.connection = undefined
+    dns.value.failure = undefined
+  }
   if (route) dns.value.fallback = ''
 }
 

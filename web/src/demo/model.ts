@@ -70,8 +70,8 @@ function validate(config: Config) {
     throw new Error('memory limit must be a positive integer number of MiB')
   }
   const { route, connection, failure } = config.dns
-  if (route === 'connection' && connection) {
-    const error = dnsTunnelError(config.connections ?? [], connection, failure)
+  if (route === 'connection') {
+    const error = dnsTunnelError(config.connections ?? [], connection ?? '', failure)
     if (error) throw new Error(error)
   }
   const sources = config.dns.bypass_sources

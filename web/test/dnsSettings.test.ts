@@ -62,3 +62,12 @@ test('DNS tunnel choices reject unsupported raw types but leave the Direct failu
   assert.deepEqual(dnsTunnelChoices(choices, connections), [{ value: 'wg' }])
   assert.deepEqual(dnsTunnelChoices(choices, [selector, unsupportedEndpoint, { ...tunnel, fallback: selector.id }]), [])
 })
+
+test('strict DNS defaults skip Direct fallbacks without removing them from the manual picker', () => {
+  const viaDirect: Connection = { id: 'reserve', name: 'Reserve', type: 'wireguard', fallback: 'direct' }
+  const strict: Connection = { id: 'strict', name: 'Strict', type: 'wireguard' }
+  const choices = [viaDirect, strict].map(connection => ({ value: connection.id }))
+  assert.deepEqual(dnsTunnelChoices(choices, [viaDirect, strict], 'strict'), [{ value: 'strict' }])
+  assert.deepEqual(dnsTunnelChoices(choices.slice(0, 1), [viaDirect], 'strict'), [])
+  assert.deepEqual(dnsTunnelChoices(choices, [viaDirect, strict]), choices)
+})

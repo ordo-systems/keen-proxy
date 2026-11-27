@@ -278,6 +278,14 @@ func singBox(c *model.Config, ruleSetDir string, networks []policy, conns connOu
 	if len(conns.endpoints) > 0 {
 		cfg["endpoints"] = conns.endpoints
 	}
+	for _, endpoint := range conns.endpoints {
+		if endpoint["type"] == "wireguard" {
+			// A Linux receive loop reserves one 64 KiB slot per datagram.
+			// Keep router memory bounded across rebuilds while retaining batched reads.
+			cfg["lx"] = obj{"wg": obj{"buffers": obj{"read_datagram_count": 32}}}
+			break
+		}
+	}
 	return cfg
 }
 

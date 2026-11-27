@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NDropdown, NSpin } from 'naive-ui'
+import { NAlert, NButton, NDropdown, NSpin } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
   Settings,
@@ -23,7 +23,10 @@ const route = useRoute(),
   router = useRouter(),
   { t } = useI18n()
 const drawer = ref(false)
+const booting = ref(false)
+const configLoadError = ref<string | null>(null)
 const bare = computed(() => route.meta.bare === true)
+const ready = computed(() => !booting.value && configLoadError.value === null && store.state.config !== null)
 // Credits required by the licenses of the country databases in use.
 const attributions = computed(() => store.state.status?.geoip.attributions ?? [])
 const build = computed(() => store.state.status?.build)
@@ -82,14 +85,21 @@ setUnauthorizedHandler(() => {
   if (route.name !== 'login')
     void router.push({ name: 'login', query: { next: route.fullPath } })
 })
+let bootSession = 0
 // Load session policy and the shared draft when entering authenticated screens.
 async function boot() {
-  if (bare.value) return
+  if (bare.value || booting.value) return
+  const startedIn = bootSession
+  booting.value = true
+  configLoadError.value = null
   try {
     await store.loadSession(true).catch(() => {})
+    if (startedIn !== bootSession) return
     await store.load()
-  } catch {
-    /* Store or login displays error. */
+  } catch (e) {
+    if (startedIn === bootSession) configLoadError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    if (startedIn === bootSession) booting.value = false
   }
 }
 onMounted(boot)
@@ -108,6 +118,9 @@ onMounted(() => {
 onUnmounted(() => clearInterval(timer))
 async function logout() {
   await api.logout().catch(() => {})
+  bootSession++
+  booting.value = false
+  store.resetDraft()
   authed.value = false
   void router.push({ name: 'login' })
 }
@@ -191,17 +204,27 @@ async function logout() {
         >{{ item.label }}</router-link
       >
     </nav>
-    <DraftActions v-if="route.name !== 'settings'" />
+    <DraftActions v-if="ready && route.name !== 'settings'" />
     <main class="content">
-      <div v-if="store.state.error" class="apply-error" role="alert">
+      <div v-if="ready && store.state.error" class="request-error" role="alert">
         <b>{{ t('shell.applyFailed') }}</b>
         <pre>{{ store.state.error }}</pre>
       </div>
-      <NSpin :show="!store.state.config && authed !== false"
-        ><router-view v-if="store.state.config" />
-        <div v-else class="empty-state">{{ t('ui.unknown') }}</div></NSpin
-      >
-      <DraftActions v-if="route.name === 'settings'" settings />
+      <div v-if="configLoadError !== null" class="request-error" role="alert">
+        <b>{{ t('shell.configLoadFailed') }}</b>
+        <pre v-if="configLoadError">{{ configLoadError }}</pre>
+        <NButton @click="boot">{{ t('ui.routerRetry') }}</NButton>
+      </div>
+      <template v-else>
+        <NAlert v-if="ready && store.state.statusError" class="status-warning" type="warning" role="status">
+          {{ t('shell.statusRefreshFailed') }} {{ store.state.statusError }}
+        </NAlert>
+        <NSpin :show="!ready">
+          <router-view v-if="ready" />
+          <div v-else class="empty-state">{{ t('ui.unknown') }}</div>
+        </NSpin>
+      </template>
+      <DraftActions v-if="ready && route.name === 'settings'" settings />
     </main>
     <footer v-if="build || attributions.length" class="panel-footer">
       <div class="footer-content">
@@ -362,15 +385,18 @@ async function logout() {
   color: var(--accent);
   border-color: var(--accent);
 }
-.apply-error {
+.request-error {
   padding: 16px;
   border: 1px solid var(--bad);
   color: var(--bad);
   margin-bottom: 24px;
 }
-.apply-error pre {
+.request-error pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+.status-warning {
+  margin-bottom: 24px;
 }
 .menu-toggle {
   display: none;

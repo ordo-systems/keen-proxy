@@ -1,9 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
-	"reflect"
 	"time"
 
 	"github.com/ordo-systems/keen-proxy/internal/catalog"
@@ -125,8 +126,11 @@ func (s *Server) checkDNS(w http.ResponseWriter, r *http.Request) {
 	// Connection profiles in a draft are not running yet. Avoid testing another
 	// live profile with the same id while presenting the draft as verified.
 	if c.DNS.Route == "connection" {
-		live := s.D.Config()
-		if !reflect.DeepEqual(c.Connections, live.Connections) {
+		// Compare the API representation: raw profile numbers can be ints in a
+		// YAML-cloned applied config and float64 in a JSON request.
+		draft, draftErr := json.Marshal(c.Connections)
+		applied, appliedErr := json.Marshal(s.D.Config().Connections)
+		if draftErr != nil || appliedErr != nil || !bytes.Equal(draft, applied) {
 			writeError(w, 400, "Apply connection changes first")
 			return
 		}

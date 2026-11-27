@@ -78,17 +78,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ steps.pending.outputs.id || steps.release.outputs.id }}
+          REQUESTED_TAG: ${{ inputs.tag }}
           CREATED_SHA: ${{ steps.release.outputs.sha }}
           CREATED: ${{ steps.release.outputs.releases_created }}
         run: |
           if [[ -z "$RELEASE_ID" ]]; then
-            [[ "$CREATED" != true ]]
+            [[ -z "$REQUESTED_TAG" && "$CREATED" != true ]]
             exit
           fi
           [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]
           release=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")
           tag=$(jq -er .tag_name <<< "$release")
           [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]
+          if [[ -n "$REQUESTED_TAG" && "$tag" != "$REQUESTED_TAG" ]]; then
+            echo 'The selected release no longer matches the requested tag.' >&2
+            exit 1
+          fi
           revision=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$tag" --jq .sha)
           [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
           if [[ -n "$CREATED_SHA" ]]; then
@@ -135,6 +140,10 @@ jobs:
           if [[ -f tools/keenproxy.openwrt ]]; then
             echo 'native=true' >> "$GITHUB_OUTPUT"
           else
+            if [[ "$RECOVERY" != true ]]; then
+              echo 'Draft releases require tools/keenproxy.openwrt in the tagged source.' >&2
+              exit 1
+            fi
             echo 'native=false' >> "$GITHUB_OUTPUT"
           fi
           if [[ -f tools/S99keenproxy ]]; then

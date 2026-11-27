@@ -87,7 +87,7 @@ func Compile(in Input) (Output, error) {
 	}
 	bypass := netfilter.DefaultBypass()
 	for _, a := range conns.servers {
-		bypass = append(bypass, netip.PrefixFrom(a, a.BitLen()))
+		bypass = append(bypass, netip.PrefixFrom(a, 32))
 	}
 	var dnsBypass []netip.Addr
 	if len(c.DNS.BypassSources) > 0 {

@@ -22,11 +22,12 @@ import (
 )
 
 type fakeDaemon struct {
-	cfg      *model.Config
-	applied  *model.Config
-	failErr  error
-	journals journal.Set
-	limits   []int
+	cfg        *model.Config
+	applied    *model.Config
+	applyCalls int
+	failErr    error
+	journals   journal.Set
+	limits     []int
 }
 
 func (f *fakeDaemon) Journal(k journal.Kind) *journal.Journal { return f.journals[k] }
@@ -35,6 +36,7 @@ func (f *fakeDaemon) NoTokenFrom() []netip.Prefix             { return f.cfg.API
 
 func (f *fakeDaemon) Config() *model.Config { return f.cfg }
 func (f *fakeDaemon) Apply(_ context.Context, c *model.Config) error {
+	f.applyCalls++
 	if f.failErr != nil {
 		return f.failErr
 	}
@@ -185,6 +187,56 @@ func TestPutConfig(t *testing.T) {
 	w = do(t, h, "PUT", "/api/config", body, "secret", lan)
 	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "sing-box") {
 		t.Errorf("apply error: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestConfigRequestJSON(t *testing.T) {
+	routes := []struct {
+		method, path string
+		invalidCode  int
+	}{
+		{http.MethodPut, "/api/config", http.StatusBadRequest},
+		{http.MethodPost, "/api/config/validate", http.StatusUnprocessableEntity},
+	}
+	tests := []struct {
+		name, body string
+		valid      bool
+	}{
+		{"null", "null", false},
+		{"array", "[]", false},
+		{"unknown field", `{"unknown":1}`, false},
+		{"second JSON value", "{}\n{}", false},
+		{"invalid suffix", "{} x", false},
+		{"oversize whitespace", "{}" + strings.Repeat(" ", maxConfigJSONBytes-1), false},
+		{"empty object", " \t{}\r\n", true},
+		{"configuration", `{"groups":[{"name":"g","target":"direct","entries":["example.com"]}]}`, true},
+	}
+	for _, route := range routes {
+		t.Run(route.method, func(t *testing.T) {
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					s, d := newServer()
+					before := d.cfg
+					w := do(t, s.Handler(), route.method, route.path, tt.body, s.Token, lan)
+					wantCode, wantCalls := route.invalidCode, 0
+					if tt.valid {
+						wantCode = http.StatusOK
+						if route.method == http.MethodPut {
+							wantCalls = 1
+						}
+					}
+					if w.Code != wantCode {
+						t.Errorf("status = %d, want %d: %s", w.Code, wantCode, w.Body)
+					}
+					if d.applyCalls != wantCalls {
+						t.Errorf("Apply calls = %d, want %d", d.applyCalls, wantCalls)
+					}
+					if wantCalls == 0 && d.cfg != before {
+						t.Error("current configuration changed")
+					}
+				})
+			}
+		})
 	}
 }
 

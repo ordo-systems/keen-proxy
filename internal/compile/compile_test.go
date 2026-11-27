@@ -186,6 +186,56 @@ func TestPlanFromModel(t *testing.T) {
 	}
 }
 
+func TestWireGuardFirewallBypassUsesOnlyIPv4(t *testing.T) {
+	for _, tc := range []struct {
+		name, endpoint, host, bypass string
+	}{
+		{"ipv6", "[2001:db8::10]:42820", "2001:db8::10", ""},
+		{"ipv4", "203.0.113.10:42820", "203.0.113.10", "203.0.113.10/32"},
+		{"mapped", "[::ffff:203.0.113.10]:42820", "::ffff:203.0.113.10", "203.0.113.10/32"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			yaml := strings.Replace(testYAML, "endpoint: 203.0.113.10:42820", `endpoint: "`+tc.endpoint+`"`, 1)
+			cfg, err := model.Parse([]byte(yaml))
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := Compile(Input{Config: cfg, RuleSetDir: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := out.ServerHosts["fi"]; got != tc.host {
+				t.Errorf("ServerHosts[fi] = %q, want %q", got, tc.host)
+			}
+			var sb struct {
+				Endpoints []struct {
+					Peers []struct {
+						Address string `json:"address"`
+					} `json:"peers"`
+				} `json:"endpoints"`
+			}
+			if err := json.Unmarshal(out.SingBox, &sb); err != nil {
+				t.Fatal(err)
+			}
+			if len(sb.Endpoints) != 1 || len(sb.Endpoints[0].Peers) != 1 || sb.Endpoints[0].Peers[0].Address != tc.host {
+				t.Errorf("sing-box lost WireGuard peer %q: %+v", tc.host, sb.Endpoints)
+			}
+			for _, prefix := range out.Plan.Bypass {
+				if !prefix.Addr().Is4() {
+					t.Errorf("non-IPv4 prefix in IPv4 firewall bypass: %s", prefix)
+				}
+			}
+			rules := out.Plan.Render()
+			if !strings.Contains(rules, "-A KEENPROXY_TCP -i br0 -s 192.168.7.0/24 -p tcp -j REDIRECT") {
+				t.Fatal("fixture must render interception for the IPv4 network")
+			}
+			if tc.bypass != "" && !strings.Contains(rules, "-A KEENPROXY_TCP -d "+tc.bypass+" -j RETURN\n") {
+				t.Errorf("IPv4 firewall missing peer bypass for %s", tc.bypass)
+			}
+		})
+	}
+}
+
 func TestPlanFromModelDNSBypassSources(t *testing.T) {
 	cfg, err := model.Parse([]byte("dns: {bypass_sources: [192.168.31.53, 192.168.31.54, 192.168.31.53]}"))
 	if err != nil {

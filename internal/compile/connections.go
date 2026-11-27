@@ -16,7 +16,7 @@ import (
 type connOut struct {
 	outbounds []obj
 	endpoints []obj
-	servers   []netip.Addr      // server addresses excluded from LAN interception
+	servers   []netip.Addr      // IPv4 server addresses excluded from LAN interception
 	hosts     map[string]string // connection ID to server address or hostname for country lookup
 }
 
@@ -29,7 +29,10 @@ func connections(c *model.Config) (connOut, error) {
 			out.hosts[current] = host
 		}
 		if a, err := netip.ParseAddr(host); err == nil {
-			out.servers = append(out.servers, a.Unmap())
+			a = a.Unmap()
+			if a.Is4() {
+				out.servers = append(out.servers, a)
+			}
 		}
 	}
 	for _, cn := range c.Connections {

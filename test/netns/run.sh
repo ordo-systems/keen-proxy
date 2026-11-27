@@ -118,7 +118,7 @@ a=$(ip netns exec client dig -b 192.168.77.10 +short +time=2 +tries=1 @192.168.7
 [ "$a" = "0.0.0.0" ] || fail "blocking: '$a'"
 ok "blocked domain → 0.0.0.0"
 for transport in +notcp +tcp; do
-	# .3 is not a tunnel endpoint: the generic TCP redirect would capture this without the source exception.
+	# .3 is not a tunnel endpoint; it has no destination bypass in the firewall.
 	name="bypass-${transport#+}.ads.test"
 	a=$(ip netns exec client dig "$transport" -b 192.168.77.11 +short +time=2 +tries=1 @198.51.100.3 "$name" A)
 	[ "$a" = "198.51.100.2" ] || fail "DNS bypass ($transport): '$a'"
@@ -253,8 +253,12 @@ for i in $(seq 1 25); do
 	sleep 0.2
 done
 iptables -t nat -C PREROUTING -j KEENPROXY_TCP 2>/dev/null || fail "watchdog did not restore the removed jump"
+first=$(iptables -t nat -S PREROUTING | awk '/^-A PREROUTING -j KEENPROXY_(TCP|DNS)$/ { print $4; exit }')
+[ "$first" = "KEENPROXY_TCP" ] || fail "watchdog regression must exercise TCP before DNS"
+a=$(ip netns exec client dig +tcp -b 192.168.77.10 +short +time=2 +tries=1 @198.51.100.3 watchdog.ads.test A) || fail "TCP DNS query after watchdog repair"
+[ "$a" = "0.0.0.0" ] || fail "TCP DNS after watchdog repair: '$a'"
 ip netns exec client curl -s -m 5 -o /dev/null http://198.51.100.3/ || fail "HTTP after recovery"
-ok "watchdog restored the removed jump and HTTP works again"
+ok "watchdog restored the TCP jump before DNS; both HTTP and TCP DNS still work"
 curl -s -m 5 -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8086/api/journal/audit?actor=watchdog" | grep -q 'Interception rules restored' || fail "watchdog audit record is missing"
 # A direct connection to a closed port must produce an engine error record.
 ip netns exec client curl -s -m 3 -o /dev/null http://198.51.100.3:81/ || true

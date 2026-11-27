@@ -19,7 +19,8 @@ import { store } from '../store'
 import { useStats } from '../useStats'
 import { bits, mbit } from '../format'
 import { protocolOf } from '../conn'
-import type { FeatureStatus, KernelModuleDiagnostics } from '../types'
+import { boundRouterInterface } from '../routerInterface'
+import type { Connection, FeatureStatus, KernelModuleDiagnostics } from '../types'
 import { kernelModuleWarnings } from '../kernelModuleWarnings'
 import AreaChart from '../components/AreaChart.vue'
 import ConnectionHealth from '../components/ConnectionHealth.vue'
@@ -53,15 +54,16 @@ watch(
 const conn = computed(() =>
   cfg.value.connections?.find((c) => c.id === tab.value),
 )
-const tunnels = computed(() =>
+const connectionType = (c: Connection) => boundRouterInterface(c) ? t('ui.routerConnection') : protocolOf(c)
+const connectionOutbounds = computed(() =>
   (snap.value?.outbounds ?? []).filter(
     (o) => !['direct', 'block'].includes(o.tag),
   ),
 )
-// Merge tunnel samples by timestamp; direct and blocked traffic are excluded.
+// Merge connection samples by timestamp, excluding the built-in direct and block outbounds.
 const points = computed(() => {
   const byTime = new Map<number, { down: number; up: number }>()
-  for (const outbound of tunnels.value)
+  for (const outbound of connectionOutbounds.value)
     for (const p of outbound.series ?? []) {
       const existing = byTime.get(p.t) ?? { down: 0, up: 0 }
       existing.down += p.down
@@ -84,8 +86,8 @@ const series = computed(() => [
     fill: false,
   },
 ])
-const down = computed(() => tunnels.value.reduce((sum, o) => sum + o.down, 0)),
-  up = computed(() => tunnels.value.reduce((sum, o) => sum + o.up, 0))
+const down = computed(() => connectionOutbounds.value.reduce((sum, o) => sum + o.down, 0)),
+  up = computed(() => connectionOutbounds.value.reduce((sum, o) => sum + o.up, 0))
 const features = ref<FeatureStatus | null>(null)
 const updateVersion = ref('')
 const managedUpdates = ref(false)
@@ -231,7 +233,7 @@ const selectedStats = computed(() => byTag(tab.value))
             :height="250"
             :format="mbit"
           />
-          <p v-else class="empty-state">{{ t('monitor.noTraffic') }}</p>
+          <p v-else class="empty-state">{{ t('ui.unknown') }}</p>
         </div>
       </div>
     </section>
@@ -247,7 +249,7 @@ const selectedStats = computed(() => byTag(tab.value))
         >
           <Server :size="24" /><span
             ><b>{{ c.name }}</b
-            ><small>{{ protocolOf(c) }}</small></span
+            ><small>{{ connectionType(c) }}</small></span
           ><ConnectionHealth :id="c.id" compact /><ChevronRight
             :size="18"
           /></button
@@ -259,7 +261,7 @@ const selectedStats = computed(() => byTag(tab.value))
       </section>
       <aside class="detail-pane">
         <template v-if="conn"
-          ><h2>{{ conn.name }} · {{ protocolOf(conn) }}</h2>
+          ><h2>{{ conn.name }} · {{ connectionType(conn) }}</h2>
           <ConnectionChecks :id="conn.id" />
           <p class="muted">{{ t('ui.httpOnly') }}</p>
           <router-link

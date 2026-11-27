@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"time"
 
 	"github.com/ordo-systems/keen-proxy/internal/journal"
@@ -16,6 +17,15 @@ const firewallVerifyRetryDelay = 250 * time.Millisecond
 // installFirewall installs the current plan and makes shutdown responsible for its cleanup.
 // A failed update stays pending even when the previous entry jumps remain installed.
 func (d *Daemon) installFirewall(ctx context.Context) error {
+	// Both Apply and watchdog recompilations leave an ephemeral DNS port unset.
+	if d.plan.DNSPort == 0 && d.dns != nil {
+		addr, err := netip.ParseAddrPort(d.dns.Addr())
+		if err != nil {
+			d.planPending = true
+			return fmt.Errorf("bound DNS address: %w", err)
+		}
+		d.plan.DNSPort = addr.Port()
+	}
 	if err := d.opt.Firewall.Apply(ctx, d.plan); err != nil {
 		d.planPending = true
 		return err

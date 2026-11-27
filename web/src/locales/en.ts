@@ -258,6 +258,8 @@ const en: Messages = {
     login: 'Sign in',
   },
   shell: {
+    configLoadFailed: 'Could not load the configuration.',
+    statusRefreshFailed: 'Could not refresh the daemon status.',
     tagline: 'routing',
     applied: 'Changes applied',
     modeTproxy: 'Standard interception',
@@ -427,7 +429,7 @@ const en: Messages = {
     probeStale: 'Check is stale',
     probeUnknown: 'Not checked yet',
     probeChecked: 'Checked at {time}',
-    probeHint: 'HTTP check through VPN; request latency, not ICMP ping',
+    probeHint: 'HTTP check through this connection; request latency, not ICMP ping',
     healthOk: 'responding · {ms} ms',
     healthDown: 'not responding since {time}',
     server: 'Server',

@@ -10,6 +10,7 @@ import {
 } from '../src/connectionDraft.ts'
 import { boundRouterInterface, editRouterInterface, routerInterfaceID, routerInterfaceName } from '../src/routerInterface.ts'
 import type { Connection } from '../src/types.ts'
+import { wireGuardToConf } from '../src/wgconf.ts'
 const base = {
   protocol: 'vless',
   name: 'Example',
@@ -137,6 +138,41 @@ test('file import selects outbounds without importing global routing', () => {
   )
   assert.throws(() => importConnections('[]', 'x.json'))
 })
+
+test('imports a standalone router interface outbound and uses its tag as the display name', () => {
+  const { outbound } = manualConnection({
+    protocol: 'router-interface', id: 'office', name: 'Office VPN', routerDevice: 'nwg0',
+  })
+  const tagged = { ...outbound, tag: 'Office VPN' }
+  for (const input of [tagged, { outbound: tagged }]) {
+    assert.deepEqual(importConnections(JSON.stringify(input), 'profile.json'), [
+      { id: '', name: 'Office VPN', type: 'singbox', outbound },
+    ])
+  }
+})
+
+test('mixed JSON imports keep canonical router interface outbounds but not other direct profiles', () => {
+  const direct = { type: 'direct', bind_interface: 'wg0' }
+  const profiles = importConnections(JSON.stringify({
+    outbounds: [
+      { type: 'direct', tag: 'plain' },
+      { ...direct, tag: 'marked', routing_mark: 7 },
+      { ...direct, tag: 'blank', bind_interface: ' ' },
+      { ...direct, tag: 'Home VPN' },
+      { type: 'socks', tag: 'Proxy', server: 'proxy.example.test' },
+    ],
+    endpoints: [
+      { ...direct, tag: 'not an endpoint' },
+      { type: 'wireguard', tag: 'WireGuard' },
+    ],
+  }), 'config.json')
+  assert.deepEqual(profiles, [
+    { id: '', name: 'Home VPN', type: 'singbox', outbound: direct },
+    { id: '', name: 'Proxy', type: 'singbox', outbound: { type: 'socks', server: 'proxy.example.test' } },
+    { id: '', name: 'WireGuard', type: 'singbox', endpoint: { type: 'wireguard' } },
+  ])
+})
+
 test('WireGuard import rejects commands, unknown options and multiple peers', () => {
   const conf =
     '[Interface]\nPrivateKey=a\nAddress=10.1.0.2/32\n[Peer]\nPublicKey=b\nEndpoint=vpn.example.test:51820'
@@ -414,6 +450,24 @@ test('WireGuard file parsing preserves supported optional fields and rejects inv
     '[Interface]\nAddress=10.1.0.2/32',
   ])
     assert.throws(() => importConnections(bad, 'x.conf'))
+})
+
+test('WireGuard import accumulates repeated addresses and allowed IPs in export order', () => {
+  const file = `
+[Interface]
+PrivateKey = a
+Address = 10.1.0.2/32, fd00::2/128
+Address = 10.2.0.2/32
+[Peer]
+PublicKey = b
+Endpoint = vpn.example.test:51820
+AllowedIPs = 192.0.2.0/24
+AllowedIPs = 2001:db8::/32, 198.51.100.0/24
+`
+  const wg = importConnections(file, 'profile.conf')[0]!.wireguard!
+  assert.deepEqual(wg.address, ['10.1.0.2/32', 'fd00::2/128', '10.2.0.2/32'])
+  assert.deepEqual(wg.peer.allowed_ips, ['192.0.2.0/24', '2001:db8::/32', '198.51.100.0/24'])
+  assert.deepEqual(importConnections(wireGuardToConf(wg), 'export.conf')[0]!.wireguard, wg)
 })
 test('port bounds, TLS activation and REALITY options are preserved exactly', () => {
   for (const port of ['1', '65535'])

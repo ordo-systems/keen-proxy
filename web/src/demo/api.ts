@@ -4,20 +4,10 @@ import { createDemoUpdates, demoRevision } from './updates.ts'
 import type { Config, Connection, JournalKind, LinkPreview, Status, TProxyReadiness, UpdatePreferences, UpdateSelection } from '../types'
 import type { KernelFeature, KernelModuleDiagnostics, RouterInterface } from '../types'
 import type { ResourceExport, ResourceFormat, ResourceList, ResourcePreview } from '../resourceExchange'
-import { activeExit } from '../activation.ts'
 
 const demo = createDemo()
 const updates = createDemoUpdates()
 const resourceFileUnavailable = 'Resource file conversion requires the Go backend.'
-
-// Configuration-only simulation; no resolver or transport is contacted.
-function dnsExit(config: Config): string {
-  if (config.dns.route !== 'connection') return 'direct'
-  const exit = activeExit(config, config.dns.connection ?? '')
-  if (config.dns.failure !== 'direct') return exit === 'direct' ? 'block' : exit
-  return exit === 'block' ? 'direct' : exit
-}
-
 
 // The demo accepts only metadata previews; it never connects to the supplied endpoint.
 function parseLink(link: string): LinkPreview {
@@ -63,15 +53,14 @@ export const api = {
   tproxyReadiness: async (): Promise<TProxyReadiness> => ({ state: 'ready' }),
   retryTProxy: async (): Promise<void> => { throw new Error('TPROXY startup recovery is available on the router only') },
   catalog: async () => structuredClone(catalog),
-  features: async () => ({ demo: true, dns: { route: dnsExit(demo.config()), checked: new Date().toISOString(), fallbacks: 0, blocked: 18 }, filters: [] }),
+  features: async () => ({ demo: true, dns: { route: demo.dnsExit(), checked: new Date().toISOString(), fallbacks: 0, blocked: 18 }, filters: [] }),
   previewPreset: async (config: Config, id: string, target: string, index?: number) => demo.preview(config, id, target, index),
   resourceExchangeAvailable: false,
   previewResources: async (_format: ResourceFormat, _file: Blob): Promise<ResourcePreview> => { throw new Error(resourceFileUnavailable) },
   exportResources: async (_format: ResourceFormat, _list: ResourceList): Promise<ResourceExport> => { throw new Error(resourceFileUnavailable) },
   refreshFilters: async () => ({ demo: true }),
   checkDNS: async (config: Config) => {
-    demo.validate(config)
-    const route = dnsExit(config)
+    const route = demo.checkDNS(config)
     return { demo: true, rcode: route === 'block' ? 2 : 0, latency_ms: 0, route: `simulated: ${route}`, error: route === 'block' ? 'Configured DNS path is unavailable' : undefined }
   },
   geoip: async () => demo.geoip(),
@@ -122,11 +111,28 @@ export const api = {
   journalExportURL: (kind: JournalKind, _since: string) => download(demo.journal(kind, { limit: DEMO_JOURNAL_LIMIT }).entries, 'application/json'),
   configExportURL: (redacted = false) => {
     const config = demo.config()
-    if (redacted) {
-      delete config.dns.bypass_sources
-      delete config.local_presets
-    }
-    return download(config, 'application/json')
+    if (!redacted) return download(config, 'application/json')
+
+    // Match the support-only field policy in internal/api/yaml.go. Copy only
+    // connection metadata so new protocol payloads cannot leak by default.
+    delete config.local_presets
+    config.dns.upstreams = ['REDACTED']
+    delete config.dns.bypass_sources
+    // Browser saves do not migrate the legacy single-database URL.
+    if (config.geoip.url) config.geoip.url = 'REDACTED'
+    for (const db of config.geoip.databases) if (db.url) db.url = 'REDACTED'
+    if (config.failover) config.failover.url = 'REDACTED'
+    for (const source of config.filters?.sources ?? []) source.url = 'REDACTED'
+    for (const group of config.groups ?? []) delete group.disabled_entries
+    config.connections = config.connections?.map(({ id, name, type, disabled, fallback }) => ({
+      id, name, type, disabled, fallback, link: 'REDACTED',
+    })) ?? null
+
+    // A JSON object is a YAML flow mapping.
+    return URL.createObjectURL(new Blob([
+      '# SUPPORT ONLY — secrets removed; not a restorable backup\n',
+      JSON.stringify({ ...config, redacted: true }, null, 2),
+    ], { type: 'application/yaml' }))
   },
 } satisfies typeof import('../api').api
 

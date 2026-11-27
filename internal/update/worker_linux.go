@@ -214,11 +214,11 @@ tmp="$job.$$"
 printf '%s %s\n' "$result" "$target" > "$tmp" && mv -f "$tmp" "$job"
 `
 
-func (m *Manager) launch(current installState, target string) error {
+func (m *Manager) launch(current installState, target releaseIdentity) error {
 	return m.startWorker(current, target, tools.Bootstrap)
 }
 
-func (m *Manager) startWorker(current installState, target string, installer []byte) error {
+func (m *Manager) startWorker(current installState, target releaseIdentity, installer []byte) error {
 	lock, err := m.lock(unix.LOCK_EX)
 	if err != nil {
 		return err
@@ -234,9 +234,9 @@ func (m *Manager) startWorker(current installState, target string, installer []b
 		return err
 	}
 	defer log.Close()
-	args := []string{"-c", worker, "keenproxy-update", m.shell, filepath.Join(m.dir, "job"), target,
-		"--version", target, "--expect-current", current.Current}
-	if current.Variant == "lite" {
+	args := []string{"-c", worker, "keenproxy-update", m.shell, filepath.Join(m.dir, "job"), target.tag,
+		"--version", target.tag, "--expect-current", current.Current, "--expect-variant", current.Variant}
+	if target.variant == "lite" {
 		args = append(args, "--lite")
 	}
 	cmd := exec.Command(m.shell, args...)
@@ -245,11 +245,11 @@ func (m *Manager) startWorker(current installState, target string, installer []b
 	cmd.ExtraFiles = []*os.File{lock}
 	cmd.Env = workerEnv(os.Environ(), m.platform, m.prefix)
 
-	if err := writePrivate(m.dir, "job", []byte("running "+target+"\n")); err != nil {
+	if err := writePrivate(m.dir, "job", []byte("running "+target.tag+"\n")); err != nil {
 		return err
 	}
 	if err := cmd.Start(); err != nil {
-		_ = writePrivate(m.dir, "job", []byte("failed "+target+"\n"))
+		_ = writePrivate(m.dir, "job", []byte("failed "+target.tag+"\n"))
 		return err
 	}
 	go func() { _ = cmd.Wait() }()

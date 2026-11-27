@@ -111,6 +111,8 @@ Run the same command to update. Your configuration and token are preserved. The 
 
 For releases from `v0.10.2`, the installer can retry once with the selected release's `bootstrap.sh` if architecture detection, candidate validation, an OpenWrt service-script compatibility check, or payload staging fails before changing the installation. It verifies the script against the same release's `SHA256SUMS` and keeps the selected version and options. It does not retry on a checksum failure or after a failed service start. A panel on an older release uses its embedded installer and does not gain this fallback until upgraded; use the current command-line bootstrap if it cannot update.
 
+A panel update verifies both the installed tag and build variant before replacement. An older release bootstrap that does not understand `--expect-variant` cannot run as its fallback. If that happens, retry from the LAN using the command-line installer.
+
 To choose a release, replace `vX.Y.Z` with a published tag. The optional `--lite` flag selects the smaller build without QUIC/HTTP/3. `--without-trusttunnel` remains accepted for existing updaters and scripts, but no longer changes the payload: TrustTunnel is embedded. `--trusttunnel-only` is no longer accepted.
 
 ```sh
@@ -139,7 +141,9 @@ If `ip6tables` is unavailable, the installer cannot tell whether an earlier upda
 
 Rerunning the bootstrap with the same release and build variant does not restart a running service if the installed files are unchanged. If interception is inactive, the command exits with `running service does not have active routing`. The panel may still be reachable in `management-only` mode, for example when TPROXY is unavailable. From the LAN, fix and apply the interception settings, then rerun the bootstrap with the working release. Applying settings alone does not remove a guard left by the installer.
 
-**Roll back** reinstalls the previous published version and switches off automatic installation. It needs access to GitHub and keeps the existing configuration and token. The installer rejects an incompatible configuration before restarting the service. Rolling back to a version released before panel updates also restores that version's earlier panel. Use the command-line installer to upgrade again.
+**Roll back** reinstalls the previous published tag and build variant and switches off automatic installation. Older installation records that lack the previous variant use the current variant. Rollback needs access to GitHub and keeps the existing configuration and token. The installer rejects an incompatible configuration before restarting the service. Rolling back to a version released before panel updates also restores that version's earlier panel. Use the command-line installer to upgrade again.
+
+Switch builds within the same tag from the command line with or without `--lite`. This does not create a separate panel rollback target.
 
 ## First configuration
 
@@ -148,6 +152,8 @@ Follow the [user guide](user-guide.md): inspect a connection, add a domain group
 ## Updates and recovery
 
 Back up the current configuration and keep the old binary before updating. Read release compatibility and migration notes. Settings can preview a previous configuration into the shared draft; applying it still requires **Apply**. Do not assume a successful HTTP probe establishes that all HTTPS traffic works.
+
+Automatic recovery covers errors the installer can handle; it is not a crash-safe transaction. After power loss or a forced kill during replacement, do not assume the files all belong to the same release or that the forwarding guard survived. From the LAN, confirm that no installer or service action is still running, keep any staged recovery files, and reinstall a known-good tag and build variant before relying on client routing. A stale `keenproxy-install.lock` or service `action.lock` can block a retry.
 
 ## Uninstall
 
@@ -158,3 +164,5 @@ curl -fsSL https://raw.githubusercontent.com/ordo-systems/keen-proxy/main/tools/
 ```
 
 The command stops the managed service and removes `/opt/bin/keenproxy` and `/opt/etc/init.d/S99keenproxy`. It preserves `/opt/etc/keenproxy/` (including configuration and token), `/opt/var/lib/keenproxy/` (logs and derived state), and any previously installed external TrustTunnel client. KeenProxy no longer uses that executable. Run the regular installer again to reuse your settings.
+
+If a retained forwarding guard cannot be removed, uninstall returns an error and attempts to restore the previous installation, including its running and autostart state. If the firewall tools also fail to restore protection, forwarded traffic may bypass KeenProxy until interception starts. Fix the firewall-tool error before retrying from the LAN.

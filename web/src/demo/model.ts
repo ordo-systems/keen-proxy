@@ -4,7 +4,7 @@ import { createTelemetry } from './telemetry.ts'
 import { activeExit, canonicalEntry, entryIdentity, groupDisabledEntryKeys, isGeo, retainPresetActivation } from '../activation.ts'
 import { connectionChain } from '../connectionDraft.ts'
 import { dnsTunnelError } from '../dnsSettings.ts'
-import { maxMemoryLimitMiB, type Catalog, type Config, type DiagnosticReport, type DomainStatus, type GeoLookup, type GeoStatus, type JournalKind, type Status } from '../types.ts'
+import { maxMemoryLimitMiB, type Catalog, type Config, type Connection, type DiagnosticReport, type DomainStatus, type GeoLookup, type GeoStatus, type JournalKind, type Status } from '../types.ts'
 
 // Only synthetic examples are bundled; the demo never imports runtime configuration.
 export const catalog: Catalog = {
@@ -54,6 +54,45 @@ function isDNSBypassSource(value: unknown): boolean {
   return first !== 127 && (first < 224 || first >= 240) && value !== '0.0.0.0' && value !== '255.255.255.255'
 }
 
+function isResolverIP(value: unknown): boolean {
+  return typeof value === 'string' && !/[\s/#]/.test(value) && canonicalEntry(value).type === 'ip_cidr'
+}
+
+function parseResolverURL(raw: string): { protocol: string; host: string } | undefined {
+  const scheme = /^(https|tls|udp):\/\//i.exec(raw)?.[1]
+  if (!scheme) return undefined
+  try {
+    // Opaque hosts preserve case. The zone is only needed on the real socket.
+    const authority = raw.slice(scheme.length).replace(/^(:\/\/(?:[^/?#]*@)?\[[a-f\d:.]+)%25(?:%[\da-f]{2}|[^\]%/?#])+\]/i, '$1]')
+    const host = new URL(`resolver${authority}`).hostname.replace(/^\[|\]$/g, '')
+    // Go accepts UTF-8 host escapes, but not escaped ASCII except percent.
+    if (host && !/%(?!25)[0-7][\da-f]/i.test(host)) {
+      return { protocol: scheme.toLowerCase(), host: decodeURIComponent(host) }
+    }
+  } catch { /* Invalid upstream URL. */ }
+}
+
+// The router requires encrypted upstreams for tunnel DNS and IP pins for names.
+function validateDNSUpstreams({ upstreams, bootstrap, route }: Config['dns']) {
+  for (const [host, address] of Object.entries(bootstrap ?? {})) {
+    if (!isResolverIP(address)) throw new Error(`dns.bootstrap[${host}]: invalid IP`)
+  }
+  if (route && !upstreams?.length) throw new Error('dns.upstreams: at least one server is required')
+  for (const raw of upstreams ?? []) {
+    const bareIP = isResolverIP(raw)
+    const endpoint = bareIP ? undefined : parseResolverURL(raw)
+    const protocol = bareIP ? 'udp' : endpoint?.protocol
+    if (!protocol) {
+      throw new Error('dns.upstreams: expected a DNS server address')
+    }
+    if (route === 'connection' && protocol === 'udp') throw new Error('dns: routing through a connection requires DoH or DoT')
+    const host = endpoint?.host
+    if (route && host && !isResolverIP(host) && !isResolverIP(bootstrap?.[host])) {
+      throw new Error(`dns.bootstrap: IP required for ${host}`)
+    }
+  }
+}
+
 // This small validation subset protects the demo state; the real daemon is authoritative.
 function validate(config: Config) {
   const ids = (config.connections ?? []).map(c => c.id)
@@ -74,11 +113,57 @@ function validate(config: Config) {
     const error = dnsTunnelError(config.connections ?? [], connection ?? '', failure)
     if (error) throw new Error(error)
   }
+  validateDNSUpstreams(config.dns)
   const sources = config.dns.bypass_sources
   if (sources != null && !Array.isArray(sources)) throw new Error('dns.bypass_sources: expected a list of unicast IPv4 addresses')
   for (const [index, source] of sources?.entries() ?? []) {
     if (!isDNSBypassSource(source)) throw new Error(`dns.bypass_sources[${index}]: expected a unicast IPv4 address`)
   }
+}
+
+// JSON object member order is immaterial. Profile and nested array order are not.
+function sameJSON(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (Array.isArray(a)) {
+    return Array.isArray(b) && a.length === b.length && a.every((item, i) => sameJSON(item, b[i]))
+  }
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(b)) return false
+  const left = a as Record<string, unknown>
+  const right = b as Record<string, unknown>
+  return Object.keys(left).every(key => sameJSON(left[key], Object.hasOwn(right, key) ? right[key] : undefined)) &&
+    Object.keys(right).every(key => Object.hasOwn(left, key) || right[key] === undefined)
+}
+
+// Omitted optional fields and their Go zero values represent the same profile.
+function comparableConnection(connection: Connection): Connection {
+  const wg = connection.wireguard
+  return {
+    ...connection,
+    disabled: connection.disabled ?? false,
+    fallback: connection.fallback ?? '',
+    link: connection.link ?? '',
+    amneziawg: connection.amneziawg ?? '',
+    outbound: connection.outbound ?? undefined,
+    endpoint: connection.endpoint ?? undefined,
+    wireguard: wg ? {
+      ...wg,
+      mtu: wg.mtu ?? 0,
+      peer: {
+        ...wg.peer,
+        preshared_key: wg.peer.preshared_key ?? '',
+        keepalive: wg.peer.keepalive ?? 0,
+        allowed_ips: wg.peer.allowed_ips?.length ? wg.peer.allowed_ips : undefined,
+      },
+    } : undefined,
+  }
+}
+
+// Configuration-only simulation; no resolver or transport is contacted.
+function dnsExit(config: Config): string {
+  if (config.dns.route !== 'connection') return 'direct'
+  const exit = activeExit(config, config.dns.connection ?? '')
+  if (config.dns.failure !== 'direct') return exit === 'direct' ? 'block' : exit
+  return exit === 'block' ? 'direct' : exit
 }
 
 // Owns one browser session's synthetic applied state and previous configuration.
@@ -100,6 +185,20 @@ export function createDemo(now: () => number = () => Date.now()) {
     }
     telemetry.applied()
     return copy(saved)
+  }
+
+  function checkDNS(config: Config) {
+    validate(config)
+    if (config.dns.route !== 'connection') return dnsExit(config)
+
+    // Like the server, compare the entire ordered list, not just the selected tunnel.
+    const draft = config.connections
+    const applied = saved.connections
+    if (!draft || !applied || draft.length !== applied.length ||
+      !draft.every((connection, i) => sameJSON(comparableConnection(connection), comparableConnection(applied[i]!)))) {
+      throw new Error('Apply connection changes first')
+    }
+    return dnsExit({ ...saved, dns: config.dns })
   }
 
   // Databases "downloaded" by a demo update; enabled databases count as present.
@@ -137,6 +236,7 @@ export function createDemo(now: () => number = () => Date.now()) {
   return {
     geoip, updateGeo, lookupGeo,
     config: () => copy(saved), previous: () => copy(previous), save, validate, preview,
+    dnsExit: () => dnsExit(saved), checkDNS,
     diagnostics: (connection: string) => diagnostics(saved, connection),
     domains: (names?: string[]) => domains(saved, names), status: () => status(saved, telemetry.started),
     stats(series = true) {

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -40,10 +41,10 @@ func TestScheduledInstallRefreshesReleaseAndPersistsAttempt(t *testing.T) {
 			`{"tag_name":"v0.5.0","assets":[{"name":"keenproxy-linux-arm64","state":"uploaded"},` +
 				`{"name":"S99keenproxy","state":"uploaded"},{"name":"install.sh","state":"uploaded"},{"name":"SHA256SUMS","state":"uploaded"}]}`))}, nil
 	})}
-	m.start = func(current installState, target string) error {
+	m.start = func(current installState, target releaseIdentity) error {
 		starts++
-		if current.Current != "v0.4.0" || target != "v0.5.0" {
-			t.Fatalf("unexpected scheduled transition: %+v to %s", current, target)
+		if current.Current != "v0.4.0" || target != (releaseIdentity{tag: "v0.5.0", variant: "full"}) {
+			t.Fatalf("unexpected scheduled transition: %+v to %+v", current, target)
 		}
 		return nil
 	}
@@ -56,9 +57,9 @@ func TestScheduledInstallRefreshesReleaseAndPersistsAttempt(t *testing.T) {
 	if err := m.SetPreferences(Preferences{Enabled: true, Time: "04:30"}); err != nil {
 		t.Fatal(err)
 	}
-	m.scheduled(context.Background(), now.Add(-time.Minute))
-	m.scheduled(context.Background(), now)
-	m.scheduled(context.Background(), now.Add(30*time.Second))
+	for _, at := range []time.Time{now.Add(-time.Minute), now, now.Add(30 * time.Second)} {
+		m.scheduled(context.Background(), func() time.Time { return at })
+	}
 	if checks != 1 || starts != 1 {
 		t.Fatalf("checks=%d starts=%d, want one each", checks, starts)
 	}
@@ -67,6 +68,29 @@ func TestScheduledInstallRefreshesReleaseAndPersistsAttempt(t *testing.T) {
 	}
 	if s, err := m.settings(); err != nil || s.AttemptDate != now.Format(time.DateOnly) {
 		t.Fatalf("attempt was not persisted: %+v, %v", s, err)
+	}
+}
+
+func TestScheduledInstallDoesNotStartAfterMinute(t *testing.T) {
+	m := fixtureManager(t)
+	now := time.Date(2026, 11, 7, 4, 30, 55, 0, time.Local)
+	if err := m.SetPreferences(Preferences{Enabled: true, Time: "04:30"}); err != nil {
+		t.Fatal(err)
+	}
+	m.client = &http.Client{Transport: releaseTransport(func(_ *http.Request) (*http.Response, error) {
+		now = now.Add(10 * time.Second)
+		body := releaseAssetBody("v0.5.0", "keenproxy-linux-arm64", "SHA256SUMS", "S99keenproxy", "install.sh")
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	m.start = func(installState, releaseIdentity) error {
+		t.Fatal("launch after the scheduled minute")
+		return nil
+	}
+	if m.scheduled(context.Background(), func() time.Time { return now }) {
+		t.Fatal("requested a retry outside the scheduled minute")
+	}
+	if s, err := m.settings(); err != nil || s.AttemptDate != "" {
+		t.Fatalf("skipped attempt was persisted: %+v, %v", s, err)
 	}
 }
 
@@ -79,16 +103,16 @@ func TestRollbackDisablesAutoInstallOnlyWhenAccepted(t *testing.T) {
 	if err := m.Start("v0.2.0", true); !errors.Is(err, ErrTarget) {
 		t.Fatalf("accepted a stale rollback target: %v", err)
 	}
-	m.start = func(installState, string) error { return ErrBusy }
+	m.start = func(installState, releaseIdentity) error { return ErrBusy }
 	if err := m.Start("v0.3.0", true); !errors.Is(err, ErrBusy) {
 		t.Fatalf("expected busy: %v", err)
 	}
 	if m.Status().Preferences != prefs {
 		t.Fatal("failed launch changed preferences")
 	}
-	m.start = func(current installState, target string) error {
-		if current.Current != "v0.4.0" || target != "v0.3.0" {
-			t.Fatalf("unexpected rollback: %+v to %s", current, target)
+	m.start = func(current installState, target releaseIdentity) error {
+		if current.Current != "v0.4.0" || target != (releaseIdentity{tag: "v0.3.0", variant: "full"}) {
+			t.Fatalf("unexpected rollback: %+v to %+v", current, target)
 		}
 		return nil
 	}
@@ -114,6 +138,43 @@ func TestSchedulerStopsWhenServiceStops(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("update scheduler outlived its service")
 	}
+}
+
+func TestSchedulerRetriesBusyAfterStartupCheckCrossesMinute(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m := fixtureManager(t)
+		time.Sleep(55 * time.Second)
+		dueAt := time.Now().Truncate(time.Minute).Add(time.Minute)
+		if err := m.SetPreferences(Preferences{Enabled: true, Time: dueAt.Format("15:04")}); err != nil {
+			t.Fatal(err)
+		}
+		m.client = &http.Client{Transport: releaseTransport(func(_ *http.Request) (*http.Response, error) {
+			time.Sleep(10 * time.Second)
+			body := releaseAssetBody("v0.5.0", "keenproxy-linux-arm64", "SHA256SUMS", "S99keenproxy", "install.sh")
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+		})}
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		var starts int
+		m.start = func(installState, releaseIdentity) error {
+			if time.Now().Truncate(time.Minute) != dueAt {
+				t.Fatalf("launch outside the scheduled minute: %v", time.Now())
+			}
+			starts++
+			if starts == 1 {
+				return ErrBusy
+			}
+			cancel()
+			return nil
+		}
+		m.Run(ctx)
+		if starts != 2 {
+			t.Fatalf("got %d launches, want a retry in the scheduled minute", starts)
+		}
+		if s, err := m.settings(); err != nil || s.AttemptDate != dueAt.Format(time.DateOnly) {
+			t.Fatalf("attempt was not persisted: %+v, %v", s, err)
+		}
+	})
 }
 
 func TestReleaseCheckRejectsMalformedAndIncompleteResponses(t *testing.T) {
@@ -154,11 +215,22 @@ func TestScheduleUsesLocalMinuteAndOnlyOneAttempt(t *testing.T) {
 
 func TestParseInstallMetadata(t *testing.T) {
 	state := readInstall(strings.NewReader("current v0.4.0\nprevious v0.3.0\nvariant lite\n"))
-	if state.Current != "v0.4.0" || state.Previous != "v0.3.0" || state.Variant != "lite" {
+	if state.Current != "v0.4.0" || state.Previous != (releaseIdentity{tag: "v0.3.0", variant: "lite"}) || state.Variant != "lite" {
 		t.Fatalf("unexpected install state: %+v", state)
 	}
 	if state := readInstall(strings.NewReader("current ../../unsafe\nvariant full\n")); state.Current != "" {
 		t.Fatal("accepted invalid installed tag")
+	}
+	for _, history := range []string{
+		"previous v0.3.0\nprevious_variant \n",
+		"previous v0.3.0\nprevious_variant unknown\n",
+		"previous v0.4.0\n",
+		"previous v0.4.0\nprevious_variant full\n",
+	} {
+		state := readInstall(strings.NewReader("current v0.4.0\nvariant lite\n" + history))
+		if state.Current != "v0.4.0" || state.Previous.tag != "" {
+			t.Fatalf("invalid or same-tag rollback identity: %+v", state)
+		}
 	}
 }
 
@@ -218,40 +290,122 @@ func TestEntwareStatusStillAdvertisesRecordedRollback(t *testing.T) {
 }
 
 func TestNativeRollbackNotAdvertisedWithoutProcdAsset(t *testing.T) {
-	const previousURL = "https://api.github.com/repos/ordo-systems/keen-proxy/releases/tags/v0.3.0"
+	const previousTag = "v0.3.0"
+	const previousURL = "https://api.github.com/repos/ordo-systems/keen-proxy/releases/tags/" + previousTag
 	latest := releaseAssetBody("v0.5.0", "keenproxy-linux-arm64", "SHA256SUMS", "keenproxy.openwrt")
-	check := func(t *testing.T, previous string, previousStatus int) Status {
-		t.Helper()
-		m := fixtureManager(t)
-		m.platform = "openwrt"
-		if m.Status().Previous != "" {
-			t.Fatal("native rollback advertised before the previous release was checked")
-		}
-		m.client = &http.Client{Transport: releaseTransport(func(r *http.Request) (*http.Response, error) {
-			switch r.URL.String() {
-			case latestReleaseURL:
-				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(latest))}, nil
-			case previousURL:
-				return &http.Response{StatusCode: previousStatus, Body: io.NopCloser(strings.NewReader(previous))}, nil
-			default:
-				t.Errorf("unexpected release source: %s", r.URL)
-				return nil, errors.New("unexpected release source")
+	for _, tc := range []struct {
+		name, body string
+		code       int
+		ready      bool
+	}{
+		{"no procd asset", releaseAssetBody(previousTag, "keenproxy-linux-arm64", "install.sh", "S99keenproxy", "SHA256SUMS"), http.StatusOK, false},
+		{"missing release", "", http.StatusNotFound, false},
+		{"complete release", releaseAssetBody(previousTag, "keenproxy-linux-arm64", "SHA256SUMS", "keenproxy.openwrt"), http.StatusOK, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := fixtureManager(t)
+			m.platform = "openwrt"
+			prefs := Preferences{Enabled: true, Time: "04:30"}
+			if err := m.SetPreferences(prefs); err != nil {
+				t.Fatal(err)
 			}
-		})}
-		m.Check(context.Background(), true)
-		return m.Status()
+			starts := 0
+			m.start = func(_ installState, target releaseIdentity) error {
+				starts++
+				if target != (releaseIdentity{tag: previousTag, variant: "full"}) {
+					t.Fatalf("unexpected rollback target: %+v", target)
+				}
+				return nil
+			}
+			assertRejected := func() {
+				t.Helper()
+				if err := m.Start(previousTag, true); !errors.Is(err, ErrTarget) {
+					t.Fatalf("native rollback was not rejected: %v", err)
+				}
+				if s := m.Status(); s.Previous != "" || s.Preferences != prefs || starts != 0 {
+					t.Fatalf("unavailable rollback advertised or changed state: %+v, starts=%d", s, starts)
+				}
+			}
+			assertRejected()
+			m.client = &http.Client{Transport: releaseTransport(func(r *http.Request) (*http.Response, error) {
+				switch r.URL.String() {
+				case latestReleaseURL:
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(latest))}, nil
+				case previousURL:
+					return &http.Response{StatusCode: tc.code, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+				default:
+					t.Errorf("unexpected release source: %s", r.URL)
+					return nil, errors.New("unexpected release source")
+				}
+			})}
+			m.Check(context.Background(), true)
+			status := m.Status()
+			if status.Latest != "v0.5.0" || status.CheckFailed {
+				t.Fatalf("previous release affected the latest check: %+v", status)
+			}
+			if !tc.ready {
+				assertRejected()
+				return
+			}
+			if status.Previous != previousTag {
+				t.Fatalf("complete native rollback was hidden: %+v", status)
+			}
+			if err := m.Start(previousTag, true); err != nil {
+				t.Fatal(err)
+			}
+			if starts != 1 || m.Status().Preferences.Enabled {
+				t.Fatalf("validated rollback did not launch exactly once and disable automatic updates: starts=%d", starts)
+			}
+		})
 	}
+}
 
-	missing := releaseAssetBody("v0.3.0", "keenproxy-linux-arm64", "install.sh", "S99keenproxy", "SHA256SUMS")
-	if status := check(t, missing, http.StatusOK); status.Latest != "v0.5.0" || status.Previous != "" || status.CheckFailed {
-		t.Fatalf("incomplete native rollback advertised: %+v", status)
+func TestNativeRollbackUsesConfirmedPreviousIdentity(t *testing.T) {
+	const tag, previousTag = "v0.4.0", "v0.3.0"
+	m := fixtureManager(t)
+	m.platform = "openwrt"
+	writeMetadata := func(history string) {
+		t.Helper()
+		if err := os.WriteFile(m.metadata, []byte("current "+tag+"\nprevious "+previousTag+"\nvariant full\n"+history), 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if status := check(t, "", http.StatusNotFound); status.Latest != "v0.5.0" || status.Previous != "" || status.CheckFailed {
-		t.Fatalf("missing previous release affected latest or was advertised: %+v", status)
+	writeMetadata("previous_variant lite\n")
+	m.client = &http.Client{Transport: releaseTransport(func(r *http.Request) (*http.Response, error) {
+		var body string
+		switch r.URL.String() {
+		case latestReleaseURL:
+			body = releaseAssetBody("v0.5.0", "keenproxy-linux-arm64", "SHA256SUMS", "keenproxy.openwrt")
+		case releaseTagURL + previousTag:
+			body = releaseAssetBody(previousTag, "keenproxy-lite-linux-arm64", "SHA256SUMS", "keenproxy.openwrt")
+		default:
+			t.Fatalf("unexpected release source: %s", r.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	m.Check(context.Background(), true)
+	if got := m.Status().Previous; got != previousTag {
+		t.Fatalf("previous release = %q, want %s", got, previousTag)
 	}
-	ready := releaseAssetBody("v0.3.0", "keenproxy-linux-arm64", "SHA256SUMS", "keenproxy.openwrt")
-	if status := check(t, ready, http.StatusOK); status.Latest != "v0.5.0" || status.Previous != "v0.3.0" || status.CheckFailed {
-		t.Fatalf("complete native rollback was hidden: %+v", status)
+	if err := m.Start(previousTag, false); !errors.Is(err, ErrTarget) {
+		t.Fatalf("accepted rollback target as an ordinary update: %v", err)
+	}
+	m.start = func(current installState, target releaseIdentity) error {
+		if current.Current != tag || current.Variant != "full" ||
+			target != (releaseIdentity{tag: previousTag, variant: "lite"}) {
+			t.Fatalf("unexpected rollback: %+v to %+v", current, target)
+		}
+		return nil
+	}
+	if err := m.Start(previousTag, true); err != nil {
+		t.Fatal(err)
+	}
+	writeMetadata("")
+	if got := m.Status().Previous; got != "" {
+		t.Fatalf("cached confirmation advertised a changed identity: %s", got)
+	}
+	if err := m.Start(previousTag, true); !errors.Is(err, ErrTarget) {
+		t.Fatalf("accepted a changed rollback identity: %v", err)
 	}
 }
 

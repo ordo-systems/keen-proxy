@@ -272,20 +272,21 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // decodeConfig parses a size-bounded JSON configuration and applies model defaults.
-func decodeConfig(r *http.Request) (*model.Config, error) {
-	var cfg model.Config
-	dec := json.NewDecoder(io.LimitReader(r.Body, maxConfigJSONBytes))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&cfg); err != nil {
+func decodeConfig(w http.ResponseWriter, r *http.Request) (*model.Config, error) {
+	var cfg *model.Config
+	if err := decodeJSONRequest(w, r, maxConfigJSONBytes, &cfg); err != nil {
 		return nil, err
 	}
+	if cfg == nil {
+		return nil, errors.New("configuration must be a JSON object")
+	}
 	cfg.Defaults()
-	return &cfg, nil
+	return cfg, nil
 }
 
 // validateConfig checks model and engine profile constraints without applying changes.
 func (s *Server) validateConfig(w http.ResponseWriter, r *http.Request) {
-	cfg, err := decodeConfig(r)
+	cfg, err := decodeConfig(w, r)
 	if err == nil {
 		err = cfg.Validate()
 	}
@@ -301,7 +302,7 @@ func (s *Server) validateConfig(w http.ResponseWriter, r *http.Request) {
 
 // putConfig validates and applies the complete configuration through the daemon.
 func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
-	cfg, err := decodeConfig(r)
+	cfg, err := decodeConfig(w, r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid configuration: "+err.Error())
 		return

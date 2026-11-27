@@ -7,6 +7,23 @@ import { demoRevision, demoVersion } from '../src/demo/updates.ts'
 import { manualConnection } from '../src/connectionDraft.ts'
 import { routerInterfaceName } from '../src/routerInterface.ts'
 import { snapshotBundledPreset, stageBundledPreset } from '../src/presetDraft.ts'
+import type { Connection } from '../src/types.ts'
+
+async function readConfigExport(redacted = false) {
+  const url = api.configExportURL(redacted)
+  try {
+    const blob = resolveObjectURL(url)!
+    const contents = await blob.text()
+    if (!redacted) return JSON.parse(contents)
+    const heading = '# SUPPORT ONLY — secrets removed; not a restorable backup\n'
+    assert.equal(blob.type, 'application/yaml')
+    assert.ok(contents.startsWith(heading))
+    return JSON.parse(contents.slice(heading.length))
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
 test('demo API drives the UI without HTTP or EventSource operations', async () => {
   const original = globalThis.fetch
   globalThis.fetch = async () => { throw new Error('Unexpected network request') }
@@ -21,14 +38,6 @@ test('demo API drives the UI without HTTP or EventSource operations', async () =
     assert.equal((await api.updates()).demo, true)
     const config = await api.config()
     assert.equal((await api.checkDNS(config)).demo, true)
-    const offDNS = structuredClone(config)
-    offDNS.dns.route = 'connection'
-    offDNS.dns.connection = 'fi'
-    offDNS.dns.failure = 'strict'
-    for (const connection of offDNS.connections ?? []) connection.disabled = true
-    assert.equal((await api.checkDNS(offDNS)).rcode, 2)
-    offDNS.dns.failure = 'direct'
-    assert.equal((await api.checkDNS(offDNS)).route, 'simulated: direct')
     assert.equal((await api.validateConfig(config)).ok, true)
     assert.equal((await api.devices()).length, 4)
     const status = await api.status()
@@ -90,6 +99,7 @@ test('demo API drives the UI without HTTP or EventSource operations', async () =
 })
 
 test('demo validates then applies an interface profile without altering raw profiles', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('Unexpected network request') })
   const original = await api.config()
   t.after(async () => { await api.saveConfig(original) })
   const devices = await api.interfaces()
@@ -114,6 +124,61 @@ test('demo validates then applies an interface profile without altering raw prof
   assert.deepEqual(await api.config(), original)
   await api.saveConfig(draft)
   assert.deepEqual((await api.config()).connections, draft.connections)
+  assert.equal((await api.diagnosticCheck(connection.id)).demo, true)
+})
+
+test('demo DNS Check previews draft DNS but only uses applied connection profiles', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('Unexpected network request') })
+  const original = await api.config()
+  t.after(async () => { await api.saveConfig(original) })
+  const draft = await api.config()
+  draft.dns.upstreams = ['https://Draft-Resolver.example/dns-query']
+  draft.dns.route = 'connection'
+  draft.dns.connection = 'fi'
+  draft.dns.failure = 'strict'
+  const local = { ...draft, dns: { ...draft.dns, route: 'direct' as const, connection: undefined, failure: undefined, upstreams: ['udp://[fe80::53%25br0]:53'] } }
+  assert.equal((await api.checkDNS(local)).route, 'simulated: direct')
+  local.dns.upstreams = ['udp://[fe80::53%25br%ZZ]:53']
+  await assert.rejects(api.checkDNS(local), /expected a DNS server address/)
+  await assert.rejects(api.checkDNS(draft), /dns\.bootstrap: IP required for Draft-Resolver\.example/)
+  draft.dns.bootstrap = { 'Draft-Resolver.example': '192.0.2.53' }
+  draft.dns.upstreams = ['192.0.2.53']
+  await assert.rejects(api.checkDNS(draft), /requires DoH or DoT/)
+  draft.dns.upstreams = ['https://Draft-Resolver.example/dns-query']
+  const wg = draft.connections!.find(connection => connection.id === 'fi')!.wireguard!
+  const { endpoint, ...otherPeerFields } = wg.peer
+  wg.peer = { ...otherPeerFields, endpoint }
+  wg.mtu = 0
+  assert.equal((await api.checkDNS(draft)).route, 'simulated: fi')
+  assert.equal(wg.peer.allowed_ips, undefined)
+  wg.peer.allowed_ips = []
+  assert.equal((await api.checkDNS(draft)).route, 'simulated: fi')
+  const internationalHost = 'dns.\u0440\u0444'
+  draft.dns.upstreams = [`https://${internationalHost}/dns-query`]
+  draft.dns.bootstrap = { [internationalHost]: '192.0.2.53' }
+  assert.equal((await api.checkDNS(draft)).route, 'simulated: fi')
+
+  const applyFirst = /^Error: Apply connection changes first$/
+  draft.connections!.reverse()
+  await assert.rejects(api.checkDNS(draft), applyFirst)
+  draft.connections!.reverse()
+  const otherTunnel = draft.connections!.find(connection => connection.id === 'de')!
+  const savedLink = otherTunnel.link
+  otherTunnel.link = otherTunnel.link!.replace('#DE', '#edited')
+  await assert.rejects(api.checkDNS(draft), applyFirst)
+  otherTunnel.link = savedLink
+  for (const connection of draft.connections!) connection.disabled = true
+  await assert.rejects(api.checkDNS(draft), applyFirst)
+  draft.dns.route = 'direct'
+  assert.equal((await api.checkDNS(draft)).route, 'simulated: direct')
+  assert.deepEqual(await api.config(), original)
+
+  await api.saveConfig({ ...draft, dns: original.dns })
+  draft.dns.route = 'connection'
+  assert.equal((await api.checkDNS(draft)).rcode, 2)
+  draft.dns.failure = 'direct'
+  assert.equal((await api.checkDNS(draft)).route, 'simulated: direct')
+  assert.deepEqual((await api.config()).dns, original.dns)
 })
 
 test('demo rejects Apply when an existing DNS tunnel gains an interface fallback', async (t) => {
@@ -131,6 +196,7 @@ test('demo rejects Apply when an existing DNS tunnel gains an interface fallback
     protocol: 'router-interface', id: 'home-wg', name: 'Home WireGuard', routerDevice: 'nwg0',
   }))
   const error = /dns\.connection: raw type "direct" does not guarantee a tunnel/
+  await assert.rejects(api.checkDNS(draft), error)
   await assert.rejects(api.validateConfig(draft), error)
   await assert.rejects(api.saveConfig(draft), error)
   assert.deepEqual(await api.config(), saved)
@@ -170,9 +236,10 @@ test('demo rejects raw selectors in DNS chains and allows built-in Direct only w
   assert.deepEqual(await api.config(), original)
 
   draft.dns.failure = 'direct'
-  assert.equal((await api.checkDNS(draft)).rcode, 0)
+  await assert.rejects(api.checkDNS(draft), /Apply connection changes first/)
   assert.equal((await api.validateConfig(draft)).ok, true)
   await api.saveConfig(draft)
+  assert.equal((await api.checkDNS(draft)).rcode, 0)
   assert.equal((await api.config()).dns.failure, 'direct')
 })
 
@@ -187,13 +254,8 @@ test('demo Apply validates explicit DNS source bypasses without changing the sav
   assert.deepEqual((await api.saveConfig(draft)).dns.bypass_sources, sources)
   assert.deepEqual(await api.previousConfig(), original)
   for (const redacted of [false, true]) {
-    const url = api.configExportURL(redacted)
-    try {
-      const exported = JSON.parse(await resolveObjectURL(url)!.text())
-      assert.deepEqual(exported.dns.bypass_sources, redacted ? undefined : sources)
-    } finally {
-      URL.revokeObjectURL(url)
-    }
+    const exported = await readConfigExport(redacted)
+    assert.deepEqual(exported.dns.bypass_sources, redacted ? undefined : sources)
   }
 
   for (const invalid of ['', 'resolver.local', '192.0.2.53/32', '::ffff:192.0.2.53',
@@ -222,14 +284,63 @@ test('demo applies local presets without creating routes or exposing them in sup
   assert.deepEqual(applied.local_presets, draft.local_presets)
   assert.deepEqual(applied.groups, original.groups)
   for (const redacted of [false, true]) {
-    const url = api.configExportURL(redacted)
-    try {
-      const contents = JSON.parse(await resolveObjectURL(url)!.text())
-      assert.deepEqual(contents.local_presets, redacted ? undefined : draft.local_presets)
-    } finally {
-      URL.revokeObjectURL(url)
-    }
+    const contents = await readConfigExport(redacted)
+    assert.deepEqual(contents.local_presets, redacted ? undefined : draft.local_presets)
   }
+})
+
+test('demo support YAML removes protocol payloads and other sensitive fields without altering the backup', async (t) => {
+  const original = await api.config()
+  t.after(async () => { await api.saveConfig(original) })
+  const draft = await api.config()
+  const profiles = [
+    { id: 'awg-fixture', name: 'AWG fixture', type: 'amneziawg', disabled: true, fallback: 'fi',
+      amneziawg: '[Interface]\nPrivateKey = synthetic-awg-private\nHeaderProtectionKey = synthetic-awg-header\n[Peer]\nPresharedKey = synthetic-awg-peer\n' },
+    { id: 'wg-fixture', name: 'WG fixture', type: 'wireguard', wireguard: {
+      private_key: 'synthetic-wg-private', address: ['192.0.2.2/32'],
+      peer: { endpoint: 'wg-fixture.example:51820', public_key: 'synthetic-wg-public', preshared_key: 'synthetic-wg-peer' },
+    } },
+    { id: 'link-fixture', name: 'Link fixture', type: 'link', link: 'trojan://synthetic-link-password@link-fixture.example:443' },
+    { id: 'outbound-fixture', name: 'Outbound fixture', type: 'singbox',
+      outbound: { type: 'socks', password: 'synthetic-outbound-password', extra: { secret: 'synthetic-outbound-nested' } } },
+    { id: 'endpoint-fixture', name: 'Endpoint fixture', type: 'singbox',
+      endpoint: { type: 'wireguard', private_key: 'synthetic-endpoint-private' } },
+    { id: 'legacy-fixture', name: 'Legacy fixture', type: 'link', link: 'tt://?synthetic-link-token',
+      trusttunnel: { link: 'tt://?synthetic-legacy-token' } },
+  ] satisfies (Connection & { trusttunnel?: { link: string } })[]
+  draft.connections!.push(...profiles)
+  draft.dns.upstreams = ['https://resolver.example/synthetic-dns-token']
+  draft.dns.bootstrap = { 'resolver.example': '192.0.2.53' }
+  draft.dns.bypass_sources = ['192.0.2.54']
+  draft.geoip.url = 'https://geo.example/synthetic-legacy-geo-token'
+  draft.geoip.databases.push({ id: 'geo-fixture', url: 'https://geo.example/synthetic-geo-token', enabled: true })
+  draft.failover = { url: 'https://health.example/synthetic-health-token', interval: 15, down_after: 60, up_after: 120 }
+  draft.filters!.sources.push({ id: 'filter-fixture', name: 'Filter fixture',
+    url: 'https://filter.example/synthetic-filter-token', enabled: true, auto_update: false })
+  draft.groups![0]!.disabled_entries = ['private-disabled.example']
+  draft.local_presets = [{ id: 'secret-preset', name: 'Private list', entries: ['private-preset.example'] }]
+  const applied = await api.saveConfig(draft)
+
+  const support = await readConfigExport(true)
+  assert.equal(support.redacted, true)
+  assert.deepEqual(support.connections, applied.connections!.map(({ id, name, type, disabled, fallback }) => ({
+    id, name, type, link: 'REDACTED',
+    ...(disabled === undefined ? {} : { disabled }),
+    ...(fallback === undefined ? {} : { fallback }),
+  })))
+  assert.deepEqual(support.dns.upstreams, ['REDACTED'])
+  assert.equal(Object.hasOwn(support.dns, 'bypass_sources'), false)
+  assert.equal(support.geoip.url, 'REDACTED')
+  assert.deepEqual(support.geoip.databases, applied.geoip.databases.map(db => db.url ? { ...db, url: 'REDACTED' } : db))
+  assert.deepEqual(support.failover, { ...applied.failover, url: 'REDACTED' })
+  assert.deepEqual(support.filters.sources, [
+    { ...applied.filters!.sources[0], url: 'REDACTED' },
+  ])
+  assert.equal(Object.hasOwn(support.groups[0], 'disabled_entries'), false)
+  assert.deepEqual(support.groups[0].entries, applied.groups![0]!.entries)
+  assert.equal(Object.hasOwn(support, 'local_presets'), false)
+  assert.deepEqual(await readConfigExport(), applied)
+  assert.deepEqual(await api.config(), applied)
 })
 
 test('demo updates, rolls back, and saves a schedule without fetching', async (t) => {

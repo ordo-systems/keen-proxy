@@ -37,7 +37,7 @@ type Plan struct {
 	Sources []netip.Prefix
 	// Excluded bypasses individual devices inside Sources (off mode).
 	Excluded []netip.Addr
-	// Bypass lists destinations that must never be intercepted.
+	// Bypass lists IPv4 destinations that must never be intercepted.
 	Bypass []netip.Prefix
 }
 
@@ -99,10 +99,8 @@ func (p Plan) Render() string {
 		for _, e := range p.Excluded {
 			w("-A %s -s %s -j RETURN", ChainTCP, host(e))
 		}
-		// A DNS-chain RETURN alone still reaches the generic TCP redirect.
-		for _, source := range p.DNSBypassSources {
-			w("-A %s %s -s %s -p tcp -m tcp --dport 53 -j RETURN", ChainTCP, in, host(source))
-		}
+		// Port 53 belongs to the DNS chain even if TCP's PREROUTING jump comes first.
+		w("-A %s -p tcp -m tcp --dport 53 -j RETURN", ChainTCP)
 		for _, s := range p.Sources {
 			w("-A %s %s -s %s -p tcp -j REDIRECT --to-ports %d", ChainTCP, in, s, p.TCPPort)
 		}

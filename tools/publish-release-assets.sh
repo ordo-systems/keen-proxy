@@ -14,6 +14,9 @@ endpoint="repos/$GH_REPO/releases/$RELEASE_ID"
 
 fail() { echo "Release $RELEASE_TAG: $*" >&2; exit 1; }
 
+[[ "$RELEASE_RECOVERY" == true || "$RELEASE_NATIVE" == true ]] ||
+    fail 'draft releases require keenproxy.openwrt'
+
 check_identity() {
     local release revision
     release=$(gh api "$endpoint")
@@ -96,9 +99,9 @@ for name in "${assets[@]}"; do
     [[ -n "$entry" ]] || fail "$name is missing after upload"
     verify_asset "$name" "$entry"
 done
+check_identity
 if [[ "$RELEASE_RECOVERY" == false ]]; then
     [[ "$(jq length <<< "$remote")" == "${#assets[@]}" ]] || fail 'draft contains unexpected assets'
-    check_identity
     # Resuming an older draft must not displace a newer public stable release.
     newest=$(gh api --paginate --slurp "repos/$GH_REPO/releases?per_page=100" |
         jq -r '.[][] | select((.draft or .prerelease) | not) |

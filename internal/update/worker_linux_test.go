@@ -60,7 +60,7 @@ func TestDetachedInstallerKeepsLockAndPublishesResult(t *testing.T) {
 	// Ensure an assertion failure cannot strand the fixture process.
 	t.Cleanup(func() { _ = os.WriteFile(gate, nil, 0600) })
 	script := []byte(`
-[ "$*" = '--version v0.4.0 --expect-current v0.3.0 --lite' ] || exit 1
+[ "$*" = '--version v0.4.0 --expect-current v0.3.0 --expect-variant lite --lite' ] || exit 1
 [ ! -e /proc/self/fd/3 ] || exit 1
 for try in 1 2 3 4 5 6 7 8 9 10; do
     [ ! -f "$KEENPROXY_PREFIX/proceed" ] || exit 0
@@ -69,14 +69,15 @@ done
 exit 1
 `)
 	current := installState{Current: "v0.3.0", Variant: "lite"}
-	if err := m.startWorker(current, "v0.4.0", script); err != nil {
+	target := releaseIdentity{tag: "v0.4.0", variant: "lite"}
+	if err := m.startWorker(current, target, script); err != nil {
 		t.Fatal(err)
 	}
 	restarted := &Manager{dir: m.dir}
 	if job := restarted.job(); job == nil || job.State != "running" {
 		t.Fatalf("restarted API lost the active job: %+v", job)
 	}
-	if err := m.startWorker(current, "v0.4.0", script); !errors.Is(err, ErrBusy) {
+	if err := m.startWorker(current, target, script); !errors.Is(err, ErrBusy) {
 		t.Fatalf("second install should be blocked, got %v", err)
 	}
 	if err := restarted.WithoutInstall(func() error {
@@ -90,7 +91,7 @@ exit 1
 	}
 	awaitWorkerResult(t, restarted, "success", "v0.4.0")
 
-	if err := m.startWorker(current, "v0.5.0", []byte("exit 1\n")); err != nil {
+	if err := m.startWorker(current, releaseIdentity{tag: "v0.5.0", variant: "lite"}, []byte("exit 1\n")); err != nil {
 		t.Fatal(err)
 	}
 	awaitWorkerResult(t, restarted, "failed", "v0.5.0")
@@ -99,6 +100,7 @@ exit 1
 func TestMaintenanceReservationExcludesWorkerAndReleasesOnError(t *testing.T) {
 	m := &Manager{dir: t.TempDir(), shell: "/bin/sh"}
 	current := installState{Current: "v0.3.0", Variant: "lite"}
+	target := releaseIdentity{tag: "v0.4.0", variant: "lite"}
 	failed := errors.New("maintenance failed")
 	if err := os.WriteFile(filepath.Join(m.dir, "job"), []byte("running v0.4.0\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -107,14 +109,14 @@ func TestMaintenanceReservationExcludesWorkerAndReleasesOnError(t *testing.T) {
 		if job := m.job(); job == nil || job.State != "failed" {
 			t.Errorf("interrupted update appeared active while maintenance held the lock: %+v", job)
 		}
-		if err := m.startWorker(current, "v0.4.0", []byte("exit 0\n")); !errors.Is(err, ErrBusy) {
+		if err := m.startWorker(current, target, []byte("exit 0\n")); !errors.Is(err, ErrBusy) {
 			t.Errorf("installer should be blocked during maintenance, got %v", err)
 		}
 		return failed
 	}); !errors.Is(err, failed) {
 		t.Fatalf("expected maintenance error, got %v", err)
 	}
-	if err := m.startWorker(current, "v0.4.0", []byte("exit 0\n")); err != nil {
+	if err := m.startWorker(current, target, []byte("exit 0\n")); err != nil {
 		t.Fatalf("maintenance reservation leaked: %v", err)
 	}
 	awaitWorkerResult(t, m, "success", "v0.4.0")
@@ -154,7 +156,7 @@ func TestEntwareWorkerReplacesInheritedNativeEnvironment(t *testing.T) {
 	// Bake the output path so a wrong inherited prefix cannot write to /.
 	seen := filepath.Join(m.dir, "seen-env")
 	script := []byte(fmt.Sprintf("printf '%%s %%s\\n' \"$KEENPROXY_PLATFORM\" \"$KEENPROXY_PREFIX\" > '%s'\n", seen))
-	if err := m.startWorker(installState{Current: "v0.3.0", Variant: "full"}, "v0.4.0", script); err != nil {
+	if err := m.startWorker(installState{Current: "v0.3.0", Variant: "full"}, releaseIdentity{tag: "v0.4.0", variant: "full"}, script); err != nil {
 		t.Fatal(err)
 	}
 	awaitWorkerResult(t, m, "success", "v0.4.0")
@@ -391,7 +393,7 @@ func TestNativeUpdaterLifecyclePersistsJobAndPlatform(t *testing.T) {
 	script := []byte(fmt.Sprintf(`
 printf '%%s %%s\n' "$KEENPROXY_PLATFORM" "$KEENPROXY_PREFIX" > '%s'
 printf '%%s\n' "$*" > '%s'
-[ "$*" = '--version v0.4.0 --expect-current v0.3.0 --lite' ] || exit 1
+[ "$*" = '--version v0.4.0 --expect-current v0.3.0 --expect-variant lite' ] || exit 1
 [ ! -e /proc/self/fd/3 ] || exit 1
 for try in 1 2 3 4 5 6 7 8 9 10; do
     [ ! -f '%s' ] || exit 0
@@ -400,7 +402,8 @@ done
 exit 1
 `, seen, argsPath, gate))
 	current := installState{Current: "v0.3.0", Variant: "lite"}
-	if err := m.startWorker(current, "v0.4.0", script); err != nil {
+	target := releaseIdentity{tag: "v0.4.0", variant: "full"}
+	if err := m.startWorker(current, target, script); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(m.dir, "installer.log")); err != nil {
@@ -426,7 +429,7 @@ exit 1
 	if job := restarted.job(); job == nil || job.State != "running" || job.Target != "v0.4.0" {
 		t.Fatalf("restarted API lost the active native job: %+v", job)
 	}
-	if err := m.startWorker(current, "v0.4.0", script); !errors.Is(err, ErrBusy) {
+	if err := m.startWorker(current, target, script); !errors.Is(err, ErrBusy) {
 		t.Fatalf("second native install should be blocked, got %v", err)
 	}
 	if err := os.WriteFile(gate, nil, 0600); err != nil {
@@ -437,7 +440,7 @@ exit 1
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(args) != "--version v0.4.0 --expect-current v0.3.0 --lite\n" {
+	if string(args) != "--version v0.4.0 --expect-current v0.3.0 --expect-variant lite\n" {
 		t.Fatalf("installer arguments = %q", args)
 	}
 	if _, err := os.Stat(filepath.Join(root, "var/lib/keenproxy/updates/job")); !os.IsNotExist(err) {

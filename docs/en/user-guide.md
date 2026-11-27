@@ -35,7 +35,9 @@ Open **Connections**. Select a profile to inspect its settings and status. Choos
 
 Choose **Connection on the router** to use a network interface already configured on the router, such as a native WireGuard tunnel. Select the interface and give the profile a name. KeenProxy uses the kernel interface name for routing (for example, `nwg0` or `wg0`). On Keenetic it also shows the firmware description when the local IPv4 address uniquely identifies the interface. OpenWrt and systems without matching metadata show the kernel name alone. The interface's enabled state is not a reachability result. KeenProxy does not configure or start the tunnel; test the applied profile in **Diagnostics**.
 
-Interface-bound profiles can route client traffic, but are not offered as DNS tunnels. The DNS list also excludes other unsupported raw sing-box types and tunnels whose fallback chain contains any of them. See [DNS routing](routing.md#dns).
+**Version:** The **Connection on the router** wizard was added after `v0.10.2`.
+
+Profiles created with **Connection on the router** can route client traffic but are not DNS tunnels. DNS eligibility for other profiles depends on their outbound type and fallback chain, not on whether they bind an interface. See [DNS routing](routing.md#dns).
 
 The file picker accepts `.conf`, `.txt`, `.json`, and `.vpn` up to 2 MiB. For a sing-box file with multiple profiles, choose the outbound or endpoint to import. Router DNS and routes stay under KeenProxy control. In **Failover**, choose the immediate backup and review the inherited chain. Connection parameters stay hidden until you reveal them. See [how failover works](routing.md#fallback-chains).
 
@@ -232,7 +234,7 @@ If you clear **Secondary DNS** while additional servers are configured, the firs
 
 If a LAN DNS forwarder's own queries are being redirected back to it, open **Advanced settings → Bypass DNS interception for source IPs**, add the forwarder's own IPv4 address (not its upstream's address), and choose **Apply**. To restore interception, remove the address and Apply again. See [DNS interception exceptions](routing.md#dns) for the YAML key and scope.
 
-Open **Settings → YAML configuration** to import, export, or restore a configuration. Importing or restoring prepares a draft. Review it and Apply. Keep unredacted backups private. The browser demo exports synthetic JSON-compatible data and disables YAML import.
+Open **Settings → YAML configuration** to import, export, or restore a configuration. Importing or restoring prepares a draft. Review it and Apply. Keep full backups private. The browser demo uses JSON-compatible export and disables YAML import. A full demo backup includes any profile data you entered; the redacted support export omits connection settings and is not a backup.
 
 The panel accepts YAML backup files up to 3 MiB for preview and processes only one file conversion at a time. Applying the resulting draft still requires it to fit the 8 MiB configuration request limit. A larger full backup can exceed the panel's restore limit.
 

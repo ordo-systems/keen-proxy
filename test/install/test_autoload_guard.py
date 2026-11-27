@@ -82,7 +82,7 @@ esac
             arguments,
             f'-autoload-update-guard -config {self.config} '
             f'-iptables {self.prefix}/sbin/iptables')
-        self.assertTrue(path.endswith('/keenproxy-linux-arm64'), path)
+        self.assertTrue(path.endswith('/payload/bin/keenproxy'), path)
         self.assertTrue(
             path.startswith(f'{self.prefix}/tmp/keenproxy-release.'), path)
         self.assertNotEqual(path, str(self.binary))

@@ -218,6 +218,26 @@ guard_rule() {
     "$1" -w -t filter "$2" FORWARD -m comment --comment keenproxy-release-guard -j DROP
 }
 
+# Try the checksum-verified candidate first. A downgrade without this flag can
+# use the installed release's snapshot. The actual guard policy still decides
+# whether an update may proceed.
+restore_autoload_guard() {
+    [ "$platform" = entware ] || return 0
+    [ -f "${config}.autoload-guard" ] && [ ! -L "${config}.autoload-guard" ] || return 0
+    module_status=0
+    module_output=$("$work/$asset" -autoload-update-guard -config "$config" -iptables "$guard4" 2>&1) || module_status=$?
+    [ "$module_status" = 0 ] && return 0
+    case "$module_status:$module_output" in
+        '2:flag provided but not defined: -autoload-update-guard'*)
+            if [ -x "$work/previous/$binary_path" ] &&
+                "$work/previous/$binary_path" -autoload-update-guard -config "$config" -iptables "$guard4" >/dev/null 2>&1; then
+                return 0
+            fi ;;
+    esac
+    echo 'KeenProxy: warning: could not restore the saved firmware module autoload guard; continuing with the forwarding guard policy' >&2
+    return 0
+}
+
 find_forwarding_guard() {
     if [ -x "$guard4" ] && guard_rule "$guard4" -C >/dev/null 2>&1; then held4=1; fi
     if [ ! -x "$guard6" ]; then
@@ -649,8 +669,12 @@ if [ "$config_source" != "$config" ]; then
 fi
 if [ -f "$service" ]; then
     # A previous failed transaction may have deliberately left these rules in place.
+    # Same-version healthy reruns stay no-ops and do not touch autoload.
+    guard_needed=0
+    if [ "$changed" = 1 ] || [ "$was_running" = 0 ]; then guard_needed=1; fi
+    if [ "$guard_needed" = 1 ]; then restore_autoload_guard; fi
     find_forwarding_guard
-    if [ "$changed" = 1 ] || [ "$was_running" = 0 ]; then hold_forwarding; fi
+    if [ "$guard_needed" = 1 ]; then hold_forwarding; fi
 fi
 if [ "$changed" = 1 ]; then
     if [ "$was_running" = 1 ]; then

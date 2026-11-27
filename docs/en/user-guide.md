@@ -25,6 +25,8 @@ The URL follows `api.listen`; wildcard listeners use an address from the configu
 
 Open **Overview** to see connection health, recent traffic, and the router's CPU and memory usage. The first resource row covers the whole router. The **KeenProxy** row shows its share of total router CPU time and its resident memory (RSS). This includes embedded sing-box. An external TrustTunnel client is measured by the router totals. When a new release is available, follow its notice to **Settings**. Traffic graphs describe observed activity and cannot establish whether traffic leaks.
 
+On Keenetic, the Overview warns when a module needed for the saved TPROXY mode or managed updates is present in the firmware but not registered. Choose **Open diagnostics** to see the module status and [recovery steps](troubleshooting.md#keenetic-tproxy-apply).
+
 ![Overview with synthetic traffic and connection cards](../assets/screenshots/en-overview.png)
 
 ## 2. Configure a connection

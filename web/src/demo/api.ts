@@ -57,6 +57,9 @@ export const api = {
   loadKernelModule: async (_feature: KernelFeature, _oneShotToken?: string): Promise<KernelModuleDiagnostics> => {
     throw new Error('Firmware module loading is available on the router only')
   },
+  setKernelModuleAutoload: async (_feature: KernelFeature, _enabled: boolean, _oneShotToken?: string): Promise<KernelModuleDiagnostics> => {
+    throw new Error('Firmware module startup settings are available on the router only')
+  },
   tproxyReadiness: async (): Promise<TProxyReadiness> => ({ state: 'ready' }),
   retryTProxy: async (): Promise<void> => { throw new Error('TPROXY startup recovery is available on the router only') },
   catalog: async () => structuredClone(catalog),

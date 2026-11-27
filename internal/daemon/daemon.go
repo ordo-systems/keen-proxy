@@ -73,6 +73,8 @@ type Daemon struct {
 	opt               Options
 	log               *slog.Logger
 	tproxyProbe       func(context.Context) netfilter.TProxyReadiness
+	moduleDiagnostics func(context.Context) netfilter.KernelModules
+	moduleAutoload    func(context.Context, string) (bool, error)
 
 	// startupBlocked is protected by mu and closed on first successful activation.
 	startupBlocked chan struct{}
@@ -153,6 +155,8 @@ func New(opt Options) *Daemon {
 		active: map[string]string{}, health: map[string]*health{}, allDown: map[string]bool{},
 	}
 	d.tproxyProbe = opt.Firewall.TProxyReadiness
+	d.moduleDiagnostics = opt.Firewall.KernelModuleDiagnostics
+	d.moduleAutoload = opt.Firewall.AutoloadKernelModule
 	d.memoryBaseline = baseline
 	d.memoryDefault = memoryDefault
 	d.memoryActive = baseline
@@ -179,7 +183,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	defer d.shutdown()
 	activated, err := func() (<-chan struct{}, error) {
 		defer d.mu.Unlock()
-		activated, err := d.startLocked(ctx)
+		activated, err := d.startLocked(ctx, d.applyLocked)
 		if err != nil {
 			d.closed = true
 		}
@@ -210,7 +214,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	return nil
 }
 
-func (d *Daemon) startLocked(ctx context.Context) (<-chan struct{}, error) {
+func (d *Daemon) startLocked(ctx context.Context, activate func(context.Context, *model.Config) error) (<-chan struct{}, error) {
 	if ctx.Err() != nil {
 		return nil, nil
 	}
@@ -220,7 +224,8 @@ func (d *Daemon) startLocked(ctx context.Context) (<-chan struct{}, error) {
 	}
 	catalog.AutoUpdate(cfg)
 	d.started = time.Now()
-	blocked := d.tproxyPreflight(ctx, cfg)
+	tproxyEnrolled, autoloadErr := d.autoloadKernelModulesLocked(ctx, cfg.Intercept.Mode == model.InterceptTProxy)
+	blocked := d.tproxyPreflight(ctx, cfg, autoloadErr)
 	if ctx.Err() != nil {
 		return nil, nil
 	}
@@ -233,6 +238,17 @@ func (d *Daemon) startLocked(ctx context.Context) (<-chan struct{}, error) {
 	d.adoptLegacyGeo(cfg)
 	d.reloadGeoLocked(cfg)
 	d.neighbors = d.readNeighbors(cfg)
+	if blocked == nil {
+		if err := activate(ctx, cfg); err != nil {
+			// Module registration does not guarantee that the kernel will accept
+			// TPROXY rules. Preserve recovery when installing the plan fails;
+			// unrelated core, DNS, and routing failures still fail startup.
+			if !tproxyEnrolled || !d.planPending {
+				return nil, err
+			}
+			blocked = err
+		}
+	}
 	if blocked != nil {
 		d.stopInterceptionLocked()
 		if err := d.detachStartupJumps(); err != nil {
@@ -250,9 +266,6 @@ func (d *Daemon) startLocked(ctx context.Context) (<-chan struct{}, error) {
 			d.opt.OnStartupBlocked()
 		}
 		return d.startupBlocked, nil
-	}
-	if err := d.applyLocked(ctx, cfg); err != nil {
-		return nil, err
 	}
 	d.log.Info("keenProxy started", "mode", cfg.Intercept.Mode, "sources", len(d.plan.Sources), "dns", d.dns.Addr())
 	d.audit("system", "Start keenProxy", "core", "ok",
@@ -305,7 +318,7 @@ func (d *Daemon) applyConfigLocked(ctx context.Context, cfg *model.Config, save 
 		return err
 	}
 	by, from := applyActor(ctx)
-	if err := d.tproxyPreflight(ctx, cfg); err != nil {
+	if err := d.tproxyPreflight(ctx, cfg, nil); err != nil {
 		d.audit(by, "Configuration rejected", "config", "error", err.Error()+from)
 		return err
 	}

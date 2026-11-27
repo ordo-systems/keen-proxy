@@ -56,6 +56,14 @@ apply() { api -X PUT -H 'Content-Type: application/json' --data-binary "@$1" "$b
 readiness=$(api "$base/diagnostics/tproxy")
 printf 'TPROXY readiness: %s\n' "$readiness"
 printf '%s\n' "$readiness" | grep -Eq '"state"[[:space:]]*:[[:space:]]*"unknown"'
+modules=$(api "$base/diagnostics/kernel-modules")
+case "$modules" in *'"autoload"'*|*'"can_autoload"'*) exit 1 ;; esac
+code=$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' -X PUT \
+    -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+    -d '{"enabled":true}' "$base/diagnostics/kernel-modules/tproxy/autoload")
+test "$code" = 409
+test ! -e /tmp/config.yaml.autoload-tproxy
+echo 'PASS: OpenWrt nftables rejects Keenetic firmware autoload enrollment'
 assert_active tproxy
 assert_tproxy_rule
 sed 's/"mode"[[:space:]]*:[[:space:]]*"tproxy"/"mode":"redirect"/' /tmp/tproxy.json >/tmp/redirect.json

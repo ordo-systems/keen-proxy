@@ -159,6 +159,29 @@ touch "$KEENPROXY_PREFIX/fallback"
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.prefix / 'enabled').exists())
 
+    def test_autoload_marker_does_not_change_native_updates(self):
+        self.release('v1.2.3')
+        self.assertEqual(self.install().returncode, 0)
+        self.config.with_name('config.yaml.autoload-guard').touch()
+        candidate = self.release('v1.2.4')
+        script = candidate.read_text()
+        shebang = '#!/bin/sh\n'
+        self.assertTrue(script.startswith(shebang))
+        handler = (
+            'if [ "$1" = -autoload-update-guard ]; then\n'
+            '    touch "$KEENPROXY_PREFIX/autoload-ran"\n'
+            '    exit 0\n'
+            'fi\n'
+        )
+        candidate.write_text(shebang + handler + script[len(shebang):])
+        self.write_checksums(candidate.parent)
+
+        result = self.install('--version', 'v1.2.4')
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.prefix / 'autoload-ran').exists())
+        self.assert_installed(candidate, 'v1.2.4', 'v1.2.3')
+
     def test_missing_and_corrupt_native_asset_fail_before_replacement(self):
         first = self.release('v1.2.3')
         self.assertEqual(self.install().returncode, 0)

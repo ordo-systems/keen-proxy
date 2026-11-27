@@ -4,6 +4,8 @@
 
 - Retry eligible installer preflight failures once with the checksummed bootstrap from the selected release, without retrying failed service starts or checksum errors.
 - Add Keenetic legacy firewall module checks and token-confirmed temporary firmware module loading to Diagnostics. A token entered here authorizes only that load; it does not create a panel session.
+- Allow explicitly opted-in Keenetic firmware modules to load at startup; try the saved forwarding guard module before managed updates.
+- Warn on the Overview when a needed Keenetic firmware module is present but its kernel capability is not registered.
 - Publish stable releases only after verifying the complete asset set from a single tagged build. Bootstrap defaults to the latest published stable release instead of `main` version metadata.
 - Continue release updates when an IPv4 or IPv6 forwarding guard cannot be installed. Log the unprotected address family, keep any working guard, and still require interception to start or roll back.
 - Add a CLI-only `--require-guard` option to abort managed updates before replacing or restarting the service if a required forwarding guard cannot be installed.

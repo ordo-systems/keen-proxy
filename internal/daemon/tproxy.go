@@ -26,11 +26,6 @@ func (d *Daemon) TProxyReadiness(ctx context.Context) TProxyDiagnostic {
 	return TProxyDiagnostic{TProxyReadiness: readiness, StartupBlocked: d.startupBlocked != nil}
 }
 
-// KernelModuleDiagnostics reports firmware capabilities without changing routing.
-func (d *Daemon) KernelModuleDiagnostics(ctx context.Context) netfilter.KernelModules {
-	return d.opt.Firewall.KernelModuleDiagnostics(ctx)
-}
-
 // FirmwareModuleLoadAction identifies module load attempts in local and exported audits.
 const FirmwareModuleLoadAction = "Firmware module load"
 
@@ -69,12 +64,16 @@ func (d *Daemon) RetrySavedTProxy(ctx context.Context) error {
 	return d.applyConfigLocked(ctx, d.cfg, false)
 }
 
-func (d *Daemon) tproxyPreflight(ctx context.Context, cfg *model.Config) error {
+func (d *Daemon) tproxyPreflight(ctx context.Context, cfg *model.Config, autoloadErr error) error {
 	if cfg.Intercept.Mode != model.InterceptTProxy {
 		return nil
 	}
-	if readiness := d.tproxyProbe(ctx); readiness.State == netfilter.TProxyUnavailable {
+	readiness := d.tproxyProbe(ctx)
+	if readiness.State == netfilter.TProxyUnavailable {
 		return fmt.Errorf("TPROXY interception is unavailable (%s)", readiness.Reason)
+	}
+	if autoloadErr != nil && readiness.State != netfilter.TProxyReady {
+		return fmt.Errorf("TPROXY module autoload failed: %w", autoloadErr)
 	}
 	return nil
 }

@@ -12,8 +12,12 @@ import (
 
 // KernelModuleStatus describes a preliminary capability check, not traffic health.
 type KernelModuleStatus struct {
-	State   string `json:"state"`
-	CanLoad bool   `json:"can_load,omitempty"`
+	State       string `json:"state"`
+	CanLoad     bool   `json:"can_load,omitempty"`
+	Autoload    bool   `json:"autoload,omitempty"`
+	CanAutoload bool   `json:"can_autoload,omitempty"`
+	// FirmwarePresent distinguishes a verified firmware file from a module listed only in memory.
+	FirmwarePresent bool `json:"firmware_present,omitempty"`
 }
 
 // GuardFamilies retains independent registration evidence for each IP family.
@@ -115,18 +119,35 @@ func tproxyRegistration(root fs.FS) string {
 }
 
 func moduleStatus(root fs.FS, release, name, registration string, open func(string, string) (*os.File, error), canLoad func() bool) KernelModuleStatus {
-	status, file := inspectModule(root, release, name, registration, open, canLoad)
+	if registration == moduleRegistered {
+		file, err := open(release, name)
+		if err != nil {
+			return KernelModuleStatus{State: registration}
+		}
+		file.Close()
+		return KernelModuleStatus{State: registration, CanAutoload: true, FirmwarePresent: true}
+	}
+	if registration != moduleUnregistered {
+		return KernelModuleStatus{State: registration}
+	}
+	status, file := inspectUnregisteredModule(root, release, name, open, canLoad)
 	if file != nil {
 		file.Close()
+		status.FirmwarePresent = true
+	}
+	if status.State == moduleLoadedUnregistered {
+		// The module may have been loaded from elsewhere; verify the firmware
+		// descriptor without making it eligible for another load.
+		if firmware, err := open(release, name); err == nil {
+			firmware.Close()
+			status.FirmwarePresent = true
+		}
 	}
 	return status
 }
 
-// inspectModule returns the verified descriptor to its caller when the file is found.
-func inspectModule(root fs.FS, release, name, registration string, open func(string, string) (*os.File, error), canLoad func() bool) (KernelModuleStatus, *os.File) {
-	if registration != moduleUnregistered {
-		return KernelModuleStatus{State: registration}, nil
-	}
+// inspectUnregisteredModule returns the verified descriptor to its caller when the file is found.
+func inspectUnregisteredModule(root fs.FS, release, name string, open func(string, string) (*os.File, error), canLoad func() bool) (KernelModuleStatus, *os.File) {
 	modules, err := fs.ReadFile(root, kernelModules[1:])
 	if err != nil {
 		return KernelModuleStatus{State: ModuleUnknown}, nil
@@ -210,56 +231,95 @@ func ipv6Forwarding(root fs.FS) (enabled, known bool) {
 // LoadKernelModule rechecks eligibility and opens only an allowlisted firmware
 // file for the running kernel. It never applies firewall or routing changes.
 func (f *Firewall) LoadKernelModule(ctx context.Context, feature string) error {
+	_, err := f.loadKernelModule(ctx, feature, false)
+	return err
+}
+
+// AutoloadKernelModule is for a previously enrolled feature, not ad-hoc recovery.
+// At early boot the kernel inventory may not exist yet. In that case load
+// from current firmware without treating module presence as registration.
+// It returns true only if it submitted a descriptor and verified registration.
+func (f *Firewall) AutoloadKernelModule(ctx context.Context, feature string) (bool, error) {
+	return f.loadKernelModule(ctx, feature, true)
+}
+
+func (f *Firewall) loadKernelModule(ctx context.Context, feature string, autoload bool) (bool, error) {
 	name := FirmwareModuleName(feature)
 	if name == "" {
-		return ErrModuleNotLoadable
+		return false, ErrModuleNotLoadable
 	}
 	release, _ := f.legacyKeenetic(ctx, os.ReadFile, iptablesVersion)
 	if release == "" {
-		return ErrModuleNotLoadable
+		return false, ErrModuleNotLoadable
 	}
 	root := os.DirFS("/")
 	registration := tproxyRegistration
-	if feature == "guard" {
+	if autoload && feature == "guard" {
+		registration = guardAutoloadRegistration
+	} else if feature == "guard" {
 		ipv6, known := ipv6Forwarding(root)
 		if !known {
-			return fmt.Errorf("%w: IPv6 forwarding state could not be verified", ErrModuleNotLoadable)
+			return false, fmt.Errorf("%w: IPv6 forwarding state could not be verified", ErrModuleNotLoadable)
 		}
 		registration = func(root fs.FS) string { return guardRegistrations(root, ipv6, true).combined() }
 	}
-	return loadKernelModule(ctx, root, release, name, registration, openFirmwareModule, firmwareCanLoad, loadFirmwareModule)
+	return loadKernelModule(ctx, root, release, name, registration, openFirmwareModule, firmwareCanLoad, loadFirmwareModule, autoload)
 }
 
-func loadKernelModule(ctx context.Context, root fs.FS, release, name string, registration func(fs.FS) string, open func(string, string) (*os.File, error), canLoad func() bool, load func(*os.File) error) error {
-	if err := ctx.Err(); err != nil {
-		return err
+func guardAutoloadRegistration(root fs.FS) string {
+	ipv6, known := ipv6Forwarding(root)
+	families := guardRegistrations(root, ipv6, known)
+	// Even if one family is unknown, do not ignore a confirmed missing match.
+	if families.IPv4 == moduleUnregistered || families.IPv6 == moduleUnregistered {
+		return moduleUnregistered
 	}
-	status, file := inspectModule(root, release, name, registration(root), open, canLoad)
+	return families.combined()
+}
+
+func loadKernelModule(ctx context.Context, root fs.FS, release, name string, registration func(fs.FS) string, open func(string, string) (*os.File, error), canLoad func() bool, load func(*os.File) error, autoload bool) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	before := registration(root)
+	switch {
+	case before == moduleRegistered:
+		return false, nil
+	case before == moduleUnregistered, autoload && before == ModuleUnknown:
+	default:
+		return false, fmt.Errorf("%w: kernel state or firmware file could not be verified", ErrModuleNotLoadable)
+	}
+	status, file := inspectUnregisteredModule(root, release, name, open, canLoad)
 	if file != nil {
 		defer file.Close()
 	}
 	switch status.State {
-	case moduleRegistered:
-		return nil
 	case moduleLoadedUnregistered:
-		return fmt.Errorf("%w: already loaded but not registered", ErrModuleNotLoadable)
+		if autoload && before == ModuleUnknown {
+			return false, nil // The activation path can still verify the usable rules.
+		}
+		return false, fmt.Errorf("%w: already loaded but not registered", ErrModuleNotLoadable)
 	case moduleNotFound:
-		return fmt.Errorf("%w: file not found in running firmware", ErrModuleNotLoadable)
+		return false, fmt.Errorf("%w: file not found in running firmware", ErrModuleNotLoadable)
 	case moduleUnloaded:
 		if !status.CanLoad {
-			return fmt.Errorf("%w: kernel module loading is not permitted", ErrModuleNotLoadable)
+			return false, fmt.Errorf("%w: kernel module loading is not permitted", ErrModuleNotLoadable)
 		}
 	default:
-		return fmt.Errorf("%w: kernel state or firmware file could not be verified", ErrModuleNotLoadable)
+		return false, fmt.Errorf("%w: kernel state or firmware file could not be verified", ErrModuleNotLoadable)
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
 	if err := load(file); err != nil {
-		return fmt.Errorf("load %s: %w", name, err)
+		return false, fmt.Errorf("load %s: %w", name, err)
 	}
-	if registration(root) == moduleRegistered {
-		return nil
+	switch registration(root) {
+	case moduleRegistered:
+		return true, nil
+	case ModuleUnknown:
+		if autoload {
+			return false, nil
+		}
 	}
-	return fmt.Errorf("%s loaded but the kernel did not report the required facility", name)
+	return false, fmt.Errorf("%s loaded but the kernel did not report the required facility", name)
 }

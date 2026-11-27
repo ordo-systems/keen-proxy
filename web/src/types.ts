@@ -328,6 +328,9 @@ export type KernelFeature = 'guard' | 'tproxy'
 export interface KernelModuleStatus {
   state: 'registered' | 'unloaded' | 'not_found' | 'loaded_unregistered' | 'unknown'
   can_load?: boolean
+  autoload?: boolean
+  can_autoload?: boolean
+  firmware_present?: boolean
 }
 type GuardFamilyStatus = 'registered' | 'unregistered' | 'unknown' | 'not_required'
 export interface KernelModuleDiagnostics {

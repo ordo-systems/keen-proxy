@@ -2,7 +2,7 @@
 
 # KeenProxy
 
-Selective traffic routing for Keenetic and Netcraze routers running Entware, with an embedded [sing-box-lx](https://github.com/Leadaxe/sing-box-lx) engine and a Vue web interface. This experimental branch pins lx.35 on the sing-box 1.14.4 base.
+Selective traffic routing for Keenetic and Netcraze routers running Entware, with an embedded [sing-box-lx](https://github.com/Leadaxe/sing-box-lx) engine and a Vue web interface. This experimental branch pins lx.37 on the sing-box 1.14.4 base.
 
 KeenProxy lets you choose which devices, domains, IP ranges, and countries use a tunnel, connect directly, or are blocked. The web panel shows router load and lets you install, schedule, or roll back releases on managed Entware and native OpenWrt installations. Router compatibility and protocol support depend on the firmware, kernel modules, and build tags. The project is experimental.
 
@@ -54,7 +54,7 @@ Download the pinned Go modules; no Git submodules are required:
 go mod download
 ```
 
-The root `go.mod` preserves upstream import paths and pins sing-box-lx `v1.14.4-lx.35` plus its matching WireGuard/AWG, sing-tun, gVisor and uTLS forks through five versioned `replace` directives. Update these pins as a reviewed release snapshot, not with `@latest`.
+The root `go.mod` preserves upstream import paths and pins sing-box-lx `v1.14.4-lx.37` plus its matching WireGuard/AWG, sing-tun, gVisor and uTLS forks through five versioned `replace` directives. Update these pins as a reviewed release snapshot, not with `@latest`.
 
 ```sh
 make ui-demo

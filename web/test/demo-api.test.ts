@@ -4,6 +4,8 @@ import { test } from 'node:test'
 import { api, setUnauthorizedHandler } from '../src/demo/api.ts'
 import release from '../src/demo/release.json' with { type: 'json' }
 import { demoRevision, demoVersion } from '../src/demo/updates.ts'
+import { manualConnection } from '../src/connectionDraft.ts'
+import { routerInterfaceName } from '../src/routerInterface.ts'
 import { snapshotBundledPreset, stageBundledPreset } from '../src/presetDraft.ts'
 test('demo API drives the UI without HTTP or EventSource operations', async () => {
   const original = globalThis.fetch
@@ -85,6 +87,93 @@ test('demo API drives the UI without HTTP or EventSource operations', async () =
       URL.revokeObjectURL(url)
     }
   } finally { globalThis.fetch = original }
+})
+
+test('demo validates then applies an interface profile without altering raw profiles', async (t) => {
+  const original = await api.config()
+  t.after(async () => { await api.saveConfig(original) })
+  const devices = await api.interfaces()
+  assert.ok(devices.some(device => device.name === original.lan.interface && device.up))
+  assert.ok(devices.some(device => device.name === original.lan.wan && device.label === 'Internet' && device.up))
+  const labeled = devices.find(device => device.name === 'nwg0')!
+  assert.equal(routerInterfaceName(labeled), 'Home WireGuard')
+  const unlabeled = devices.find(device => device.name === 'wg0')!
+  assert.deepEqual(unlabeled, { name: 'wg0', up: false })
+  assert.equal(routerInterfaceName(unlabeled), 'wg0')
+
+  const draft = structuredClone(original)
+  const connection = manualConnection({
+    protocol: 'router-interface', id: 'home-wg', name: routerInterfaceName(labeled), routerDevice: labeled.name,
+  })
+  const raw = {
+    id: 'raw-options', name: 'Raw direct', type: 'singbox' as const,
+    outbound: { type: 'direct', bind_interface: original.lan.wan, routing_mark: 7 },
+  }
+  draft.connections = [...(draft.connections ?? []), raw, connection]
+  assert.equal((await api.validateConfig(draft)).ok, true)
+  assert.deepEqual(await api.config(), original)
+  await api.saveConfig(draft)
+  assert.deepEqual((await api.config()).connections, draft.connections)
+})
+
+test('demo rejects Apply when an existing DNS tunnel gains an interface fallback', async (t) => {
+  const original = await api.config()
+  t.after(async () => { await api.saveConfig(original) })
+  const config = await api.config()
+  config.dns.route = 'connection'
+  config.dns.connection = 'fi'
+  const saved = await api.saveConfig(config)
+  const draft = await api.config()
+  const connections = draft.connections!
+  connections.find(connection => connection.id === 'fi')!.fallback = 'nl'
+  connections.find(connection => connection.id === 'nl')!.fallback = 'home-wg'
+  connections.push(manualConnection({
+    protocol: 'router-interface', id: 'home-wg', name: 'Home WireGuard', routerDevice: 'nwg0',
+  }))
+  const error = /dns\.connection: raw type "direct" does not guarantee a tunnel/
+  await assert.rejects(api.validateConfig(draft), error)
+  await assert.rejects(api.saveConfig(draft), error)
+  assert.deepEqual(await api.config(), saved)
+})
+
+test('demo rejects raw selectors in DNS chains and allows built-in Direct only with direct failure policy', async (t) => {
+  const original = await api.config()
+  t.after(async () => { await api.saveConfig(original) })
+  const draft = await api.config()
+  draft.dns.route = 'connection'
+  draft.dns.connection = 'fi'
+  const tunnel = draft.connections!.find(connection => connection.id === 'fi')!
+  draft.connections!.push({
+    id: 'selector', name: 'Selector', type: 'singbox',
+    outbound: { type: 'selector', outbounds: ['direct'] },
+  })
+  tunnel.fallback = 'selector'
+  draft.dns.failure = 'direct'
+  const rawError = /dns\.connection: raw type "selector" does not guarantee a tunnel/
+  await assert.rejects(api.checkDNS(draft), rawError)
+  await assert.rejects(api.validateConfig(draft), rawError)
+  await assert.rejects(api.saveConfig(draft), rawError)
+
+  tunnel.fallback = 'direct'
+  for (const failure of [undefined, 'strict'] as const) {
+    draft.dns.failure = failure
+    const strictError = /dns: strict forbids direct in the connection chain/
+    await assert.rejects(api.checkDNS(draft), strictError)
+    await assert.rejects(api.validateConfig(draft), strictError)
+    await assert.rejects(api.saveConfig(draft), strictError)
+  }
+  draft.dns.connection = undefined
+  const missingError = /dns\.connection: unknown connection ""/
+  await assert.rejects(api.checkDNS(draft), missingError)
+  await assert.rejects(api.saveConfig(draft), missingError)
+  draft.dns.connection = 'fi'
+  assert.deepEqual(await api.config(), original)
+
+  draft.dns.failure = 'direct'
+  assert.equal((await api.checkDNS(draft)).rcode, 0)
+  assert.equal((await api.validateConfig(draft)).ok, true)
+  await api.saveConfig(draft)
+  assert.equal((await api.config()).dns.failure, 'direct')
 })
 
 test('demo Apply validates explicit DNS source bypasses without changing the saved config on failure', async (t) => {

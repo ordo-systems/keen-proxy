@@ -110,6 +110,7 @@ const protocolBuilders: Record<string, (fields: ManualFields) => Profile> = {
   trojan: passwordTLSProfile,
   hysteria2: passwordTLSProfile,
   socks: socksProfile,
+  'router-interface': (f) => ({ type: 'direct', bind_interface: required(f, 'routerDevice') }),
 }
 // Build one draft profile from manual inputs; engine validation is separate.
 export function manualConnection(f: ManualFields): Connection {
@@ -422,6 +423,7 @@ const connectionErrors: Record<string, string> = {
   'File exceeds 2 MiB': 'ui.largeFile',
   'Empty file': 'ui.fileError',
   file: 'ui.fileError',
+  routerDevice: 'ui.routerPickDevice',
   'Unsupported WireGuard section': 'ui.unsupportedWG',
   'Incomplete WireGuard profile': 'ui.invalid',
   'Invalid WireGuard line': 'ui.invalid',

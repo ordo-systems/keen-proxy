@@ -1,6 +1,6 @@
 import type { Connection, DiagnosticReport, Catalog, FeatureStatus, DNSCheck, Config, GeoLookup, GeoStatus, Device, DomainStatus, Session, HostStat, JournalKind, JournalPage, LinkPreview, StatsSnapshot, Status } from './types'
 import type { TProxyReadiness, UpdatePreferences, UpdateSelection, UpdateStatus } from './types'
-import type { KernelFeature, KernelModuleDiagnostics } from './types'
+import type { KernelFeature, KernelModuleDiagnostics, RouterInterface } from './types'
 import type { ResourceExport, ResourceFormat, ResourceList, ResourcePreview } from './resourceExchange'
 import { ApiError } from './apiError.ts'
 
@@ -98,6 +98,7 @@ export const api = {
   saveConfig: (cfg: Config) => request<Config>('PUT', '/api/config', cfg),
   validateConfig: (cfg: Config) => request<{ ok: boolean }>('POST', '/api/config/validate', cfg),
   devices: () => request<Device[]>('GET', '/api/devices'),
+  interfaces: () => request<RouterInterface[]>('GET', '/api/interfaces'),
   parseLink: (link: string) => request<LinkPreview>('POST', '/api/links/parse', { link }),
   importAmnezia: (uri: string) => request<{ profiles: Connection[] }>('POST', '/api/amnezia/import', { uri }),
   stats: (series = false) => request<StatsSnapshot>('GET', `/api/stats${series ? '?series=1' : ''}`),

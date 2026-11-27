@@ -178,6 +178,13 @@ export interface Device {
   hostname_source?: 'dhcp' | 'dns'
 }
 
+// Kernel device with an optional firmware description. Up is administrative state, not reachability.
+export interface RouterInterface {
+  name: string
+  label?: string
+  up: boolean
+}
+
 // Display metadata returned by the server-side connection-link parser.
 export interface LinkPreview {
   type: ConnType

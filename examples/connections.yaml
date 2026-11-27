@@ -29,6 +29,7 @@ connections:
   # 3. Raw sing-box outbound/endpoint objects for protocols enabled in the build.
   #    Omit tag: the compiler derives it from id. Check the upstream schema
   #    and the selected full/lite registry before adding a raw protocol.
+  #    The ShadowTLS example below is not a supported DNS tunnel.
   - id: shadowtls
     type: singbox
     outbound:
@@ -71,3 +72,12 @@ connections:
       Endpoint = vpn.example.com:51820
       AllowedIPs = 0.0.0.0/0, ::/0
       PersistentKeepalive = 25
+
+  # 6. Bind client traffic to an existing router interface by its kernel name.
+  #    Replace wg0 with the router's device name. Do not use this profile for DNS.
+  - id: router-wg
+    name: Router WireGuard
+    type: singbox
+    outbound:
+      type: direct
+      bind_interface: wg0

@@ -7,6 +7,8 @@ import { store } from '../store'
 import type { Config, Connection, LinkPreview } from '../types'
 import { slugify, wireGuardToConf } from '../wgconf'
 import { connectionErrorKey, DRAFT_CHANGED, editedConnection, importConnections, manualConnection } from '../connectionDraft'
+import { boundRouterInterface, editRouterInterface } from '../routerInterface'
+import RouterInterfaceSelect from './RouterInterfaceSelect.vue'
 
 // Edit a local form copy so cancellation leaves the shared draft unchanged.
 const props = defineProps<{ show: boolean; edit?: Connection | null }>()
@@ -29,6 +31,8 @@ const error = ref('')
 const revealed = ref(false)
 const fallback = ref<string | null>(null)
 const isEdit = computed(() => !!props.edit)
+const configuredDevice = computed(() => props.edit && boundRouterInterface(props.edit))
+const routerDevice = ref<string | null>(null)
 
 let saveGeneration = 0
 let committed = false
@@ -44,6 +48,7 @@ watch(() => props.show, (open) => {
   preview.value = null
   previewError.value = ''
   const c = props.edit
+  routerDevice.value = configuredDevice.value || null
   name.value = c?.name ?? ''
   id.value = c?.id ?? ''
   idTouched.value = !!c
@@ -80,6 +85,7 @@ async function checkLink() {
 }
 
 function build(): Connection {
+  if (props.edit && configuredDevice.value) return editRouterInterface(props.edit, name.value, routerDevice.value)
   const base: Pick<Connection, 'id' | 'name' | 'fallback'> = { id: id.value.trim(), name: name.value.trim() || id.value.trim() }
   if (fallback.value) base.fallback = fallback.value
   if (tab.value === 'link') {
@@ -112,13 +118,14 @@ async function save() {
   const idSnap = id.value
   const nameSnap = name.value
   const tabSnap = tab.value
+  const deviceSnap = routerDevice.value
   try {
     const conn = editedConnection(edit, build())
     if (tab.value === 'amneziawg' && awgText.value.trim().startsWith('vpn://')) {
       error.value = t('ui.awgWizardOnly')
       return
     }
-    if (!/^[a-z0-9][a-z0-9_-]*$/.test(conn.id)) {
+    if (!(configuredDevice.value && conn.id === edit?.id) && !/^[a-z0-9][a-z0-9_-]*$/.test(conn.id)) {
       error.value = t('dialog.errId')
       return
     }
@@ -132,7 +139,7 @@ async function save() {
       error.value = t('dialog.errDup', { id: conn.id })
       return
     }
-    if (conn.type === 'amneziawg') {
+    if (conn.type === 'amneziawg' || configuredDevice.value) {
       const cfg = JSON.parse(JSON.stringify(config)) as Config
       const index = edit ? list.indexOf(edit) : -1
       cfg.connections ??= []
@@ -144,7 +151,8 @@ async function save() {
       if (
         generation !== saveGeneration || !props.show || props.edit !== edit ||
         store.state.config !== config || awgText.value !== text || wgText.value !== wgSnap ||
-        id.value !== idSnap || name.value !== nameSnap || tab.value !== tabSnap
+        id.value !== idSnap || name.value !== nameSnap || tab.value !== tabSnap ||
+        routerDevice.value !== deviceSnap
       ) throw new Error(DRAFT_CHANGED)
     }
     if (store.state.config !== config || !props.show || props.edit !== edit) throw new Error(DRAFT_CHANGED)
@@ -159,7 +167,7 @@ async function save() {
     message.info(t('dialog.added'))
     emit('update:show', false)
   } catch (e) {
-    if (props.show) error.value = t(connectionErrorKey(e))
+    if (props.show && generation === saveGeneration) error.value = t(connectionErrorKey(e))
   } finally {
     busy.value = false
   }
@@ -181,17 +189,23 @@ function renameTarget(from: string, to: string, cfg = store.state.config!) {
       <NForm label-placement="top">
         <NSpace :wrap="false" style="width: 100%">
           <NFormItem :label="t('dialog.name')" style="flex: 1">
-            <NInput v-model:value="name" :placeholder="t('dialog.namePlaceholder')" />
+            <NInput v-model:value="name" :disabled="!!configuredDevice && busy" :placeholder="t('dialog.namePlaceholder')" />
           </NFormItem>
-          <NFormItem :label="t('dialog.id')" style="width: 220px">
+          <NFormItem v-if="!configuredDevice" :label="t('dialog.id')" style="width: 220px">
             <NInput v-model:value="id" placeholder="fi" @input="idTouched = true" />
           </NFormItem>
         </NSpace>
       </NForm>
 
-      <NButton v-if="isEdit" block @click="revealed=!revealed">{{revealed?t('ui.hide'):t('ui.reveal')}}</NButton>
-      <p v-if="isEdit&&!revealed" class="hint">{{t('ui.secret')}}</p>
-      <NTabs v-if="!isEdit||revealed" v-model:value="tab" type="segment" animated>
+      <RouterInterfaceSelect
+        v-if="configuredDevice && show"
+        v-model:value="routerDevice"
+        :retained="configuredDevice"
+        :disabled="busy"
+      />
+      <NButton v-if="isEdit && !configuredDevice" block @click="revealed=!revealed">{{revealed?t('ui.hide'):t('ui.reveal')}}</NButton>
+      <p v-if="isEdit && !configuredDevice && !revealed" class="hint">{{t('ui.secret')}}</p>
+      <NTabs v-if="!configuredDevice && (!isEdit || revealed)" v-model:value="tab" type="segment" animated>
         <NTabPane name="link" :tab="t('conn.link')">
           <NInput
             v-model:value="link"

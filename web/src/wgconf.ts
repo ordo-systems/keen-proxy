@@ -1,4 +1,4 @@
-import { translit } from './locales/transliteration.ru'
+import { translit } from './locales/transliteration.ru.ts'
 import type { WireGuard } from './types'
 
 // Export one peer, defaulting AllowedIPs to both address families.

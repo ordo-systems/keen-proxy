@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add router-interface connections to the wizard, using Keenetic interface descriptions when they match and kernel interface names on OpenWrt.
+- Upgrade embedded sing-box-lx to v1.14.4-lx.37 and use its WireGuard/AWG fork with a smaller receive batch to reduce memory growth during repeated Apply.
 - Retry eligible installer preflight failures once with the checksummed bootstrap from the selected release, without retrying failed service starts or checksum errors.
 - Add Keenetic legacy firewall module checks and token-confirmed temporary firmware module loading to Diagnostics. A token entered here authorizes only that load; it does not create a panel session.
 - Allow explicitly opted-in Keenetic firmware modules to load at startup; try the saved forwarding guard module before managed updates.
@@ -25,7 +27,7 @@
 - Add full and lite Linux release binaries for x86-64 (AMD64 v1) and 32-bit x86 with SSE2, preserving the pinned compiler and embedded protocol features.
 - Support native OpenWrt installation and managed updates through procd on all six release architectures; retain Entware installation and expand its architecture selection. Preserve configuration, checksums, staged validation, and failed-start rollback. Native updates require the new checksummed `keenproxy.openwrt` release asset.
 - Raise the documented minimum to 256 MiB of total router RAM for OpenWrt and Keenetic/Netcraze, including lite builds; retain memory headroom warnings and distinguish this requirement from the soft Go memory recommendation.
-- Experimental AmneziaWG 2/3 single-peer `.conf` import and editing through the shared draft/Apply workflow, using pinned sing-box-lx 1.14.4-lx.35 and matching dependency forks.
+- Experimental AmneziaWG 2/3 single-peer `.conf` import and editing through the shared draft/Apply workflow, using pinned sing-box-lx 1.14.4-lx.37 and matching dependency forks.
 - Use packet-sized buffers in the WireGuard/AmneziaWG receive queue on routers to reduce memory use under load. Large UDP/GRO read slots remain separate; TX is unchanged.
 - Support legacy `iptables-restore` with glibc or musl by retrying a known unsupported `-w` diagnostic without the flag while preserving unrelated firewall rules.
 - Keep existing DNS ownership and participant UDP/443 rejection; no Amnezia subscription integration.
@@ -36,7 +38,7 @@
 - Leave legacy `bin/trusttunnel_client` and `share/keenproxy/trusttunnel/` files under the installation prefix after upgrade/uninstall; remove them manually only after confirming no other service or rollback needs them. Native TrustTunnel selects one endpoint from multi-address links without automatic address fallback.
 - API compatibility: remove the `trusttunnel` external-process field from status responses; external consumers must no longer require it.
 - Keep lite builds without QUIC/HTTP/3; both registries support XHTTP and native TrustTunnel over TCP/TLS.
-- Keep sing-box-lx v1.14.4-lx.35 and its four dependency forks pinned as versioned Go modules; use Go 1.27.3 consistently in local builds and CI.
+- Keep sing-box-lx v1.14.4-lx.37 and its four dependency forks pinned as versioned Go modules; use Go 1.27.3 consistently in local builds and CI.
 - Add a System settings tab with an optional process-wide Go memory recommendation through the shared draft/Apply workflow, including CPU/throughput warnings and restart-free application. Default to 768 MiB when no startup Go limit is set; preserve explicit configuration and GOMEMLIMIT precedence.
 - Import standalone Amnezia `vpn://` AWG exports locally, with bounded decompression, explicit multi-profile selection and translated errors for service/admin/unsupported exports. No service API calls or device registrations.
 - Keep AWG profiles out of redacted support exports and reject excessive junk-packet bursts before starting the engine.

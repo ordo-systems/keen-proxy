@@ -36,9 +36,11 @@ Configure the `preset-updates` environment to allow only `main`, without require
 
 ## Embedded engine modules
 
-Run `go mod download` after cloning; no Git submodules are required. Root `go.mod` keeps upstream import paths and pins sing-box-lx `v1.14.4-lx.35` plus the corresponding WireGuard/AWG, sing-tun, gVisor and uTLS forks through five versioned `replace` directives. Go does not inherit replacement directives from dependencies; keep all five pins in the root module and review them together when updating the engine.
+Run `go mod download` after cloning; no Git submodules are required. Root `go.mod` keeps upstream import paths and pins sing-box-lx `v1.14.4-lx.37` plus the corresponding WireGuard/AWG, sing-tun, gVisor and uTLS forks through five versioned `replace` directives. Go does not inherit replacement directives from dependencies; keep all five pins in the root module and review them together when updating the engine.
 
-The WireGuard/AWG replacement pins a commit of [the Ordo Systems fork](https://github.com/ordo-systems/wireguard-go-awg2-lx), not a moving branch. On router builds, its receive queue uses packet-sized buffers while UDP/GRO read slots keep their original capacity. This adds a receive copy without changing transmission. Platforms with a bounded receive pool retain their original receive path.
+The WireGuard/AWG replacement pins the exact [Leadaxe fork](https://github.com/Leadaxe/wireguard-go-awg2-lx) revision used by the sing-box-lx release. The receive queue uses packet-sized buffers.
+
+KeenProxy limits WireGuard/AWG socket reads on Linux to 32 datagrams per batch instead of 128. Each receive loop reserves 2 MiB instead of 8 MiB for those slots. The smaller batch disables receive GRO but keeps batched reads and transmit GSO.
 
 Makefile and CI select Go **1.27.3** from the root `go.mod` `go` directive, preserving main's language floor. For direct commands, use `GOTOOLCHAIN=go1.27.3 go …` when your PATH selects a different compiler. Do not copy the entire upstream `LX_TAGS`: KeenProxy owns a smaller full/lite feature set and does not enable the tags requiring `-checklinkname=0`.
 

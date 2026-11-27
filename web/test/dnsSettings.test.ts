@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { dnsUpstreamsIncomplete, selectDNSResolver } from '../src/dnsSettings.ts'
-import type { DNSConfig } from '../src/types'
+import { dnsTunnelChoices, dnsUpstreamsIncomplete, selectDNSResolver } from '../src/dnsSettings.ts'
+import type { Connection, DNSConfig } from '../src/types'
 
 const primary = 'https://one.example/dns-query'
 const secondary = 'tls://two.example:853'
@@ -42,4 +42,32 @@ test('selecting the secondary first leaves an explicit empty primary slot', () =
   selectDNSResolver(dns, 0, primary)
   assert.deepEqual(dns.upstreams, [primary, extra])
   assert.equal(dns.bootstrap, undefined)
+})
+
+test('DNS tunnel choices omit direct interfaces and tunnels that fall back to one', () => {
+  const bound: Connection = { id: 'lan', name: 'LAN', type: 'singbox', outbound: { type: 'direct', bind_interface: 'eth0' } }
+  const tunnel: Connection = { id: 'wg', name: 'WG', type: 'singbox', endpoint: { type: 'wireguard' } }
+  const choices = [{ value: 'lan', label: 'LAN' }, { value: 'wg', label: 'WG' }]
+  assert.deepEqual(dnsTunnelChoices(choices, [bound, tunnel]), [choices[1]])
+  assert.deepEqual(dnsTunnelChoices(choices.slice(0, 1), [bound]), [])
+  assert.deepEqual(dnsTunnelChoices(choices, [bound, { ...tunnel, fallback: bound.id }]), [])
+})
+
+test('DNS tunnel choices reject unsupported raw types but leave the Direct failure policy selectable', () => {
+  const selector: Connection = { id: 'selector', name: 'Selector', type: 'singbox', outbound: { type: 'selector', outbounds: ['direct'] } }
+  const unsupportedEndpoint: Connection = { id: 'endpoint', name: 'Endpoint', type: 'singbox', outbound: { type: 'socks' }, endpoint: { type: 'tailscale' } }
+  const tunnel: Connection = { id: 'wg', name: 'WG', type: 'singbox', endpoint: { type: 'wireguard' }, fallback: 'direct' }
+  const connections = [selector, unsupportedEndpoint, tunnel]
+  const choices = connections.map(connection => ({ value: connection.id }))
+  assert.deepEqual(dnsTunnelChoices(choices, connections), [{ value: 'wg' }])
+  assert.deepEqual(dnsTunnelChoices(choices, [selector, unsupportedEndpoint, { ...tunnel, fallback: selector.id }]), [])
+})
+
+test('strict DNS defaults skip Direct fallbacks without removing them from the manual picker', () => {
+  const viaDirect: Connection = { id: 'reserve', name: 'Reserve', type: 'wireguard', fallback: 'direct' }
+  const strict: Connection = { id: 'strict', name: 'Strict', type: 'wireguard' }
+  const choices = [viaDirect, strict].map(connection => ({ value: connection.id }))
+  assert.deepEqual(dnsTunnelChoices(choices, [viaDirect, strict], 'strict'), [{ value: 'strict' }])
+  assert.deepEqual(dnsTunnelChoices(choices.slice(0, 1), [viaDirect], 'strict'), [])
+  assert.deepEqual(dnsTunnelChoices(choices, [viaDirect, strict]), choices)
 })

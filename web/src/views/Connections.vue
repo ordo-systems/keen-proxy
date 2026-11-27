@@ -22,12 +22,14 @@ import {
   Users,
   LifeBuoy,
   HeartPulse,
+  Router,
 } from '@lucide/vue'
 import { store } from '../store'
 import { api } from '../api'
 import { useStats } from '../useStats'
 import { ago, bits, bytes, duration, mbit } from '../format'
 import { mask, protocolOf, serverOf } from '../conn'
+import { boundRouterInterface } from '../routerInterface'
 import { countryName, flag } from '../countries'
 import type { Connection } from '../types'
 import { useHostTraffic } from '../useHostTraffic'
@@ -61,6 +63,8 @@ watch(
 const conn = computed<Connection | undefined>(() =>
   list.value.find((c) => c.id === tab.value),
 )
+const routerDevice = computed(() => conn.value && boundRouterInterface(conn.value))
+const connectionType = (c: Connection) => boundRouterInterface(c) ? t('ui.routerConnection') : protocolOf(c)
 const st = computed(() => byTag(tab.value))
 
 const times = computed(() => (st.value?.series ?? []).map((p) => p.t))
@@ -151,12 +155,16 @@ const rows = computed<Row[]>(() => {
   const base: Row[] = []
   if (c) {
     const sv = serverOf(c)
-    base.push({
-      icon: Server,
-      label: t('conn.server'),
-      value: sv.host || '—',
-      mono: true,
-    })
+    if (routerDevice.value) {
+      base.push({ icon: Router, label: t('ui.routerDevice'), value: routerDevice.value, mono: true })
+    } else {
+      base.push({
+        icon: Server,
+        label: t('conn.server'),
+        value: sv.host || '—',
+        mono: true,
+      })
+    }
     const cc = store.state.status?.conn_countries?.[c.id]
     if (cc)
       base.push({
@@ -241,7 +249,7 @@ const rows = computed<Row[]>(() => {
 
 const specific = computed<Row[]>(() => {
   const c = conn.value
-  if (!c) return []
+  if (!c || routerDevice.value) return []
   if (c.type === 'amneziawg')
     return [{
       icon: KeyRound,
@@ -405,7 +413,7 @@ function remove() {
         >
           <Plug :size="22" /><span
             ><b>{{ c.name || c.id }}</b
-            ><small>{{ protocolOf(c) }} <span v-if="appliedOff(c.id)" class="pill dim">{{ t('conn.disabled') }}</span><span v-if="pendingActivation(c)" class="pill warn">{{ t('conn.pending') }}</span></small></span
+            ><small>{{ connectionType(c) }} <span v-if="appliedOff(c.id)" class="pill dim">{{ t('conn.disabled') }}</span><span v-if="pendingActivation(c)" class="pill warn">{{ t('conn.pending') }}</span></small></span
           ><ConnectionHealth v-if="!appliedOff(c.id)" :id="c.id" compact />
         </button>
         <button
@@ -447,7 +455,7 @@ function remove() {
               <p class="muted">
                 {{
                   conn
-                    ? protocolOf(conn)
+                    ? connectionType(conn)
                     : tab === 'direct'
                       ? t('conn.directSub')
                       : t('conn.blockSub')

@@ -54,6 +54,28 @@ func TestAmneziaWGCompilerPreservesConsumerValues(t *testing.T) {
 	}
 }
 
+func TestTunnelRuntimeLimitsWireGuardReceiveBatch(t *testing.T) {
+	for _, c := range []model.Connection{
+		{ID: "awg", Type: model.ConnAmneziaWG, AmneziaWG: compileAWGProfile},
+		{ID: "wg", Type: model.ConnSingBox, Endpoint: map[string]any{"type": "wireguard"}},
+	} {
+		cfg := &model.Config{Connections: []model.Connection{c}}
+		cfg.Defaults()
+		out, err := Compile(Input{Config: cfg, RuleSetDir: t.TempDir()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		options, err := sjson.UnmarshalExtendedContext[option.Options](engine.Context(context.Background()), out.SingBox)
+		if err != nil {
+			t.Fatalf("%s: engine rejected configuration: %v", c.ID, err)
+		}
+		if options.LX == nil || options.LX.WG == nil || options.LX.WG.Buffers == nil ||
+			options.LX.WG.Buffers.ReadDatagramCount == nil || *options.LX.WG.Buffers.ReadDatagramCount != 32 {
+			t.Fatalf("%s: engine did not receive the 32-datagram limit", c.ID)
+		}
+	}
+}
+
 func TestAmneziaWGCompilerRejectsInvalidProfile(t *testing.T) {
 	for _, profile := range []string{"", strings.Replace(compileAWGProfile, "Jc = 3", "Jc = -1", 1), compileAWGProfile + "[Peer]\n", strings.Replace(compileAWGProfile, "MTU = 1280", "PostUp = PRIVATE-hook", 1)} {
 		_, err := connections(&model.Config{Connections: []model.Connection{{ID: "bad-awg", Type: model.ConnAmneziaWG, AmneziaWG: profile}}})
